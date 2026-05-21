@@ -10,6 +10,7 @@ AI support is central to the product. Optimize for a real product architecture, 
 
 ## Technical Direction
 
+- Use pnpm + Turborepo for JavaScript/TypeScript workspace orchestration.
 - Use Electron for the desktop shell unless the project explicitly pivots.
 - Use React for menus, sidebars, inspectors, command palette, dialogs, settings, and collaboration UI.
 - Do not render large editor documents as one React component per object.
@@ -17,6 +18,40 @@ AI support is central to the product. Optimize for a real product architecture, 
 - Keep EDA logic portable. Document model, netlist generation, ERC/DRC, geometry, import/export, and routing should be isolated from Electron-specific code.
 - Prefer Rust or C++ for a future core that can run as WASM or native code.
 - Treat AI as a first-class architecture concern. Core project state should be structured, queryable, explainable, and safely editable by AI tools.
+
+## Development Commands
+
+```bash
+nvm use
+pnpm install
+pnpm dev
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm lint:fix
+pnpm test
+```
+
+Per-package examples:
+
+```bash
+pnpm --filter @nocad/web dev
+pnpm --filter @nocad/web build
+pnpm --filter @nocad/web typecheck
+```
+
+shadcn/ui is configured in `apps/web/components.json`. Add components from the repo root with:
+
+```bash
+pnpm dlx shadcn@latest add button -c apps/web
+```
+
+## Current Repository Structure
+
+- `apps/web` - Vite/React web workspace.
+- `packages/eslint-config` - shared ESLint flat config.
+- `packages/typescript-config` - shared TypeScript configs.
+- `packages/vitest-config` - shared Vitest config.
 
 ## AI Product Requirements
 
@@ -76,4 +111,4 @@ Avoid spending early effort on:
 
 ## Repo State
 
-The repository is newly initialized. There may not be package scripts, tests, or build tooling yet. Before assuming a command exists, inspect the repo.
+The repository has initial web app tooling. Before assuming deeper app architecture exists, inspect the repo.

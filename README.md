@@ -67,6 +67,40 @@ AI layer
   project context retrieval, tool calls, constrained edits, explanations, reviews
 ```
 
+## Repository
+
+This repository is a pnpm + Turborepo monorepo.
+
+```txt
+apps/
+  web/                  React/Vite web workspace
+
+packages/
+  eslint-config/        shared ESLint flat config
+  typescript-config/    shared TypeScript configs
+  vitest-config/        shared Vitest config
+```
+
+## Development
+
+```bash
+nvm use
+pnpm install
+pnpm dev
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+The current web app runs on `http://127.0.0.1:3000`.
+
+shadcn/ui is configured for the Vite app. Add components from the repo root with:
+
+```bash
+pnpm dlx shadcn@latest add button -c apps/web
+```
+
 ## Status
 
-This repository is just being initialized.
+This repository has an initial Vite/React web workspace and shared monorepo tooling.

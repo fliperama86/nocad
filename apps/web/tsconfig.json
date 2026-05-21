@@ -1,0 +1,10 @@
+{
+  "extends": "@nocad/typescript-config/react-app.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "eslint.config.mjs"]
+}
