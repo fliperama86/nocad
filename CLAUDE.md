@@ -1,114 +1,92 @@
 # CLAUDE.md
 
-Guidance for AI agents working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Intent
+## Repo Layout
 
-nocad is a desktop-first, collaborative electronics design tool. Think "Notion of KiCad": a modern workspace for schematics, PCB design, documentation, comments, and project history.
+This checkout uses a bare-repo + worktree pattern: the bare repo lives in `.bare/` and the active worktree is `main/`. Run all commands from `main/` (the workspace root with `package.json`, `pnpm-workspace.yaml`, and `turbo.json`).
 
-AI support is central to the product. Optimize for a real product architecture, not a quick demo. React is appropriate for app UI, but the schematic/PCB editor surface should be treated as a custom rendering and interaction engine.
+Monorepo structure:
 
-## Technical Direction
+- `apps/web` — Vite + React 19 + Tailwind v4 web workspace (`@nocad/web`). Runs on `http://127.0.0.1:3000`.
+- `packages/eslint-config` — shared ESLint flat config (`base.js`, `react.js`).
+- `packages/typescript-config` — shared `tsconfig` presets (`base`, `node`, `react-app`).
+- `packages/vitest-config` — shared Vitest config (jsdom + globals + tsconfig-paths).
+- `docs/research/` — product vision and research notes.
 
-- Use pnpm + Turborepo for JavaScript/TypeScript workspace orchestration.
-- Use Electron for the desktop shell unless the project explicitly pivots.
-- Use React for menus, sidebars, inspectors, command palette, dialogs, settings, and collaboration UI.
-- Do not render large editor documents as one React component per object.
-- Use a custom canvas/WebGL/WebGPU layer for editor rendering, hit testing, zoom, pan, hover, selection, and overlays.
-- Keep EDA logic portable. Document model, netlist generation, ERC/DRC, geometry, import/export, and routing should be isolated from Electron-specific code.
-- Prefer Rust or C++ for a future core that can run as WASM or native code.
-- Treat AI as a first-class architecture concern. Core project state should be structured, queryable, explainable, and safely editable by AI tools.
+Node 22.14 (see `.nvmrc`), pnpm 10, Turborepo 2. Only `esbuild` is in `onlyBuiltDependencies`.
 
 ## Development Commands
+
+Run from `main/`:
 
 ```bash
 nvm use
 pnpm install
-pnpm dev
-pnpm build
+pnpm dev          # turbo run dev (web app on 127.0.0.1:3000)
+pnpm build        # tsc --noEmit + vite build per workspace
 pnpm typecheck
 pnpm lint
 pnpm lint:fix
-pnpm test
+pnpm test         # turbo run test
 ```
 
-Per-package examples:
+Per-package:
 
 ```bash
 pnpm --filter @nocad/web dev
-pnpm --filter @nocad/web build
 pnpm --filter @nocad/web typecheck
 ```
 
-shadcn/ui is configured in `apps/web/components.json`. Add components from the repo root with:
+Run a single Vitest test file (Turbo isn't needed for ad-hoc runs):
+
+```bash
+pnpm --filter @nocad/web exec vitest run src/path/to/file.test.tsx
+pnpm --filter @nocad/web exec vitest run -t "test name pattern"
+```
+
+shadcn/ui is configured in `apps/web/components.json` (style: new-york, base: neutral, icons: lucide). Add components from `main/`:
 
 ```bash
 pnpm dlx shadcn@latest add button -c apps/web
 ```
 
-## Current Repository Structure
+The `@/*` alias maps to `apps/web/src/*` (set in `apps/web/tsconfig.json` and resolved at build time by `vite-tsconfig-paths`).
 
-- `apps/web` - Vite/React web workspace.
-- `packages/eslint-config` - shared ESLint flat config.
-- `packages/typescript-config` - shared TypeScript configs.
-- `packages/vitest-config` - shared Vitest config.
+## Architecture & Direction
 
-## AI Product Requirements
+nocad is a desktop-first, collaborative electronics design tool — a "Notion of KiCad" for schematics, PCB, docs, comments, and history. AI is a first-class product surface, not a chat bolt-on.
 
-AI support is not just chat. It should become a design partner that can understand and modify the project through explicit tools and reviewable changes.
+Layering the codebase should grow into:
 
-Prioritize AI capabilities that can use structured data:
+```
+Electron shell        windowing, FS, native menus
+React UI              app chrome: nav, inspectors, command palette, dialogs
+Editor engine         canvas/WebGL/WebGPU rendering, hit testing, selection, overlays
+EDA core              document model, netlist, ERC/DRC, geometry, import/export  (portable; future Rust/C++ -> WASM)
+Sync layer            undo/redo, local-first storage, multiplayer
+AI layer              context retrieval, tool-callable edits, explanations, reviews
+```
 
-- explain a schematic, module, component, net, or design decision
-- review ERC/DRC issues and propose fixes
-- search for parts and compare tradeoffs
-- read datasheets and reference designs
-- calculate component values and operating limits
-- generate project documentation and design notes
-- propose schematic edits as inspectable patches
-- propose layout edits using design rules and geometry constraints
-- answer questions from project history, comments, and linked docs
+Hard rules for that growth:
 
-AI-generated edits should be controlled:
-
-- prefer proposed patches over silent mutation
-- keep changes undoable
-- preserve provenance where useful
-- validate edits against the document model and ERC/DRC checks
-- expose enough reasoning for users to trust or reject changes
+- **Do not render editor documents as one React component per object.** The schematic/PCB surface is a custom canvas/WebGL/WebGPU engine; React is only for chrome.
+- **Keep EDA core portable.** Document model, netlist, ERC/DRC, geometry, import/export, and routing must not import Electron or React. Plan for a future Rust/C++ core compiled to WASM.
+- **AI operates on structured data.** Project state must be queryable and safely editable by tools. Prefer proposed, inspectable, undoable patches over silent mutation. Don't build AI features around screenshots when the document model can expose symbols, nets, constraints, geometry, and history.
 
 ## Product Priorities
 
-Start with schematics before PCB layout.
+Start with schematics before PCB layout. Bias early work toward: clean document model, reliable undo/redo, ergonomic selection/editing primitives, local save/load, KiCad file format research, AI-readable project context, and tool-callable editing operations.
 
-Early work should bias toward:
-
-- clear document model
-- reliable undo/redo
-- ergonomic selection and editing primitives
-- local save/load
-- KiCad file format research
-- room for collaboration later
-- AI-readable project context and tool-callable editing operations
-
-Avoid spending early effort on:
-
-- marketing pages
-- decorative UI
-- premature autorouting
-- full KiCad feature parity
-- Electron-specific coupling inside core EDA logic
-- screenshot-only AI workflows when structured data is available
+Avoid early effort on: marketing pages, decorative UI, premature autorouting, full KiCad feature parity, Electron coupling inside core EDA logic, and screenshot-based AI workflows where structured data exists.
 
 ## UI Principles
 
-- Build the actual tool as the first screen.
-- Keep operational UI quiet, dense, and predictable.
-- Use React component libraries for app chrome, not for high-volume canvas rendering.
-- Prefer keyboard-accessible commands and inspector-driven editing.
-- Keep the editor viewport fast and visually stable during pan, zoom, and pointer movement.
-- Make AI suggestions visible, reviewable, and reversible.
+- Build the actual tool as the first screen — no landing page.
+- Keep operational UI quiet, dense, keyboard-driven, inspector-driven.
+- Keep the editor viewport fast and visually stable during pan/zoom/pointer movement.
+- AI suggestions must be visible, reviewable, and reversible.
 
 ## Repo State
 
-The repository has initial web app tooling. Before assuming deeper app architecture exists, inspect the repo.
+The repo currently contains scaffolding only: an empty `<main>` shell in `apps/web/src/App.tsx`, a theme provider, and shared configs. Before assuming deeper architecture exists, inspect the tree.
