@@ -45,13 +45,15 @@ pnpm --filter @nocad/web exec vitest run src/path/to/file.test.tsx
 pnpm --filter @nocad/web exec vitest run -t "test name pattern"
 ```
 
+There are no tests yet; `@nocad/web`'s `test` script runs `vitest run --passWithNoTests`, so `pnpm test` is green on the empty repo. The shared Vitest config (`packages/vitest-config`) sets `jsdom` + `globals` and wires `vite-tsconfig-paths`, so the `@/*` alias works in tests too.
+
 shadcn/ui is configured in `apps/web/components.json` (style: new-york, base: neutral, icons: lucide). Add components from `main/`:
 
 ```bash
 pnpm dlx shadcn@latest add button -c apps/web
 ```
 
-The `@/*` alias maps to `apps/web/src/*` (set in `apps/web/tsconfig.json` and resolved at build time by `vite-tsconfig-paths`).
+Generated components land at `@/components/ui` and share the `cn()` helper in `@/lib/utils` (clsx + tailwind-merge) — not the stray empty `src/ui/` directory. The `@/*` alias maps to `apps/web/src/*` (set in `apps/web/tsconfig.json` and resolved at build time by `vite-tsconfig-paths`).
 
 ## Architecture & Direction
 
@@ -89,4 +91,4 @@ Avoid early effort on: marketing pages, decorative UI, premature autorouting, fu
 
 ## Repo State
 
-The repo currently contains scaffolding only: an empty `<main>` shell in `apps/web/src/App.tsx`, a theme provider, and shared configs. Before assuming deeper architecture exists, inspect the tree.
+The repo currently contains scaffolding only. `apps/web/src/App.tsx` is an empty `<main>`; `main.tsx` mounts it under a `ThemeProvider` (`defaultTheme="system"`, `storageKey="nocad-theme"`) whose implementation lives in `src/components/` (`theme-provider.tsx`, `theme-context.ts`, `use-theme.ts`). Everything else is shared config. Before assuming deeper architecture exists, inspect the tree.
