@@ -12,7 +12,7 @@ export function ResolutionPanel({
   const componentCount = source.nodes.filter((node) => node.kind === "component").length;
   const intentEdgeCount = source.edges.filter((edge) => edge.kind === "intent.connection").length;
   const dependencyCount = Object.keys(resolved.dependencies).length;
-  const labels = nodeLabels(source);
+  const labels = objectLabels(source, resolved);
 
   return (
     <Panel>
@@ -65,17 +65,20 @@ function GeneratedRow({ item, labels }: { item: GeneratedObject; labels: Map<str
 }
 
 function itemLabel(item: GeneratedObject) {
-  if (item.id === "pullup_sda") {
+  if (item.sourceMap.feature === "pullups" && item.sourceMap.signal === "sda") {
     return "SDA pullup";
   }
 
-  if (item.id === "pullup_scl") {
+  if (item.sourceMap.feature === "pullups" && item.sourceMap.signal === "scl") {
     return "SCL pullup";
   }
 
   return item.component.split(":").pop() ?? item.component;
 }
 
-function nodeLabels(source: ProjectSource) {
-  return new Map(source.nodes.map((node) => [node.id, node.label ?? node.role ?? "Node"]));
+function objectLabels(source: ProjectSource, resolved: ResolvedProject) {
+  return new Map([
+    ...source.nodes.map((node) => [node.id, node.label ?? node.role ?? "Node"] as const),
+    ...resolved.nets.map((net) => [net.id, net.name] as const)
+  ]);
 }

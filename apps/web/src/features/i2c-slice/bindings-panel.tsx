@@ -40,7 +40,7 @@ export function BindingsPanel({
           {nets.map((net) => (
             <div
               className="flex items-center justify-between gap-4 rounded-md border border-border bg-background px-3 py-2"
-              key={net.id}
+              key={`${net.sourceMap.edge}:${net.sourceMap.signal}:${net.id}`}
             >
               <span className="text-sm font-medium">{net.name}</span>
               <span className="text-xs text-muted-foreground">{net.sourceMap.signal}</span>

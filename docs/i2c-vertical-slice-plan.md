@@ -191,7 +191,7 @@ Editor node positions are UI state for this slice. They should not be written in
   ],
   "nets": [
     {
-      "id": "net_i2c_sda",
+      "id": "net_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_sda",
       "name": "I2C_SDA",
       "endpoints": {
         "from": { "node": "node_2a4dbf1f-1f50-42b1-8f67-b92a7c5d0f12", "pin": "gpio4" },
@@ -205,7 +205,7 @@ Editor node positions are UI state for this slice. They should not be written in
       }
     },
     {
-      "id": "net_i2c_scl",
+      "id": "net_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_scl",
       "name": "I2C_SCL",
       "endpoints": {
         "from": { "node": "node_2a4dbf1f-1f50-42b1-8f67-b92a7c5d0f12", "pin": "gpio5" },
@@ -221,27 +221,29 @@ Editor node positions are UI state for this slice. They should not be written in
   ],
   "generated": [
     {
-      "id": "pullup_sda",
+      "id": "pullup_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_sda",
       "kind": "component",
       "component": "@nocad/passives:RESISTOR",
       "value": "4.7k",
-      "connects": ["I2C_SDA", "node_77e9d1da-e4da-45d5-b60f-3bb8d41f63f1"],
+      "connects": ["net_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_sda", "node_77e9d1da-e4da-45d5-b60f-3bb8d41f63f1"],
       "sourceEdge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65",
       "sourceMap": {
         "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65",
-        "feature": "pullups"
+        "feature": "pullups",
+        "signal": "sda"
       }
     },
     {
-      "id": "pullup_scl",
+      "id": "pullup_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_scl",
       "kind": "component",
       "component": "@nocad/passives:RESISTOR",
       "value": "4.7k",
-      "connects": ["I2C_SCL", "node_77e9d1da-e4da-45d5-b60f-3bb8d41f63f1"],
+      "connects": ["net_edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65_scl", "node_77e9d1da-e4da-45d5-b60f-3bb8d41f63f1"],
       "sourceEdge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65",
       "sourceMap": {
         "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65",
-        "feature": "pullups"
+        "feature": "pullups",
+        "signal": "scl"
       }
     }
   ],

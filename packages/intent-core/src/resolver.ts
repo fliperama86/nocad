@@ -108,30 +108,8 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
         });
       } else {
         generated.push(
-          {
-            id: "pullup_sda",
-            kind: "component",
-            component: "@nocad/passives:RESISTOR",
-            value: "4.7k",
-            connects: ["I2C_SDA", pullupRail.id],
-            sourceEdge: edge.id,
-            sourceMap: {
-              edge: edge.id,
-              feature: "pullups"
-            }
-          },
-          {
-            id: "pullup_scl",
-            kind: "component",
-            component: "@nocad/passives:RESISTOR",
-            value: "4.7k",
-            connects: ["I2C_SCL", pullupRail.id],
-            sourceEdge: edge.id,
-            sourceMap: {
-              edge: edge.id,
-              feature: "pullups"
-            }
-          }
+          createPullup("sda", edge.id, pullupRail.id),
+          createPullup("scl", edge.id, pullupRail.id)
         );
       }
     }
@@ -158,6 +136,22 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     nets,
     generated,
     diagnostics
+  };
+}
+
+function createPullup(signal: "sda" | "scl", edgeId: string, railId: string): ResolvedProject["generated"][number] {
+  return {
+    id: `pullup_${edgeId}_${signal}`,
+    kind: "component",
+    component: "@nocad/passives:RESISTOR",
+    value: "4.7k",
+    connects: [createNetId(edgeId, signal), railId],
+    sourceEdge: edgeId,
+    sourceMap: {
+      edge: edgeId,
+      feature: "pullups",
+      signal
+    }
   };
 }
 
@@ -395,7 +389,7 @@ function createNet(signal: "sda" | "scl", name: string, bindings: SignalBindings
   }
 
   return {
-    id: `net_i2c_${signal}`,
+    id: createNetId(edgeId, signal),
     name,
     endpoints: {
       from,
@@ -408,6 +402,10 @@ function createNet(signal: "sda" | "scl", name: string, bindings: SignalBindings
       signal
     }
   };
+}
+
+function createNetId(edgeId: string, signal: "sda" | "scl") {
+  return `net_${edgeId}_${signal}`;
 }
 
 function indexNodes(nodes: ProjectNode[], diagnostics: Diagnostic[]): Map<string, ProjectNode> {

@@ -211,5 +211,6 @@ export type GeneratedObject = {
   sourceMap: {
     edge: string;
     feature: string;
+    signal?: string;
   };
 };
