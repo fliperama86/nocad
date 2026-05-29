@@ -133,3 +133,27 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .intent-flow .react-flow__edge.selected .react-flow__edge-path {
+    filter: drop-shadow(0 0 6px color-mix(in oklab, var(--chart-1) 58%, transparent));
+    stroke: var(--chart-1) !important;
+    stroke-width: 4;
+  }
+
+  .intent-flow .react-flow__edge.selected .react-flow__edge-textbg {
+    fill: color-mix(in oklab, var(--chart-1) 88%, var(--background));
+    stroke: var(--background);
+    stroke-width: 2;
+  }
+
+  .intent-flow .react-flow__edge.selected .react-flow__edge-text {
+    fill: var(--background);
+    font-weight: 700;
+  }
+
+  .intent-flow .react-flow__selection {
+    background-color: color-mix(in oklab, var(--chart-1) 14%, transparent);
+    border: 1px solid var(--chart-1);
+  }
+}

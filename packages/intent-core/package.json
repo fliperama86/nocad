@@ -1,0 +1,25 @@
+{
+  "name": "@nocad/intent-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@nocad/eslint-config": "workspace:*",
+    "@nocad/typescript-config": "workspace:*",
+    "@nocad/vitest-config": "workspace:*",
+    "@types/node": "^24.10.2",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

@@ -13,6 +13,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@nocad/intent-core": "workspace:*",
+    "@xyflow/react": "^12.10.2",
     "clsx": "^2.1.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

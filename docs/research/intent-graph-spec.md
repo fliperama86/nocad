@@ -45,7 +45,7 @@ Optional future import/export formats may include YAML or TypeScript, but they s
 
 `project.nocad.json` is user-authored, usually by the UI. It contains intent, component instances, port and contract references, constraints, manual choices, physical layout intent, and graph layout metadata.
 
-`project.nocad.lock.json` is generated. It contains concrete resolver decisions such as selected pins, selected part variants, generated nets, inferred components, footprints, BOM mappings, generated design rules, and provenance.
+`project.nocad.lock.json` is generated. It contains concrete resolver decisions such as selected pins, selected part variants, generated nets, inferred components, footprints, BOM mappings, generated design rules, reference designator assignments, user-visible label mappings, and provenance.
 
 Users should normally change the source file. If they want to force a resolved choice, the UI should write an explicit override into `project.nocad.json`, then regenerate the lockfile.
 
@@ -148,16 +148,18 @@ Capabilities let the resolver answer questions like "which RP2350 pins can satis
 
 ### Stable References
 
-Source and AI patches must address graph objects by stable IDs, not by array index, display label, or package pad number.
+Source and AI patches must address graph objects by stable IDs, not by array index, display label, semantic role, reference designator, or package pad number. UI-authored graph object IDs should be generated machine IDs, preferably prefixed UUID/ULID/CUID-style strings such as `node_...` and `edge_...`.
+
+Normal UI surfaces should not expose these internal IDs by default. Graph nodes, inspectors, connection labels, generated objects, and user-facing diagnostics should display `label`, `role`, port names, pin names, and reference designators. Internal IDs are appropriate in raw JSON, debug/provenance inspectors, lockfile review, source maps, and machine patches.
 
 Stable references:
 
 ```json
-{ "node": "mcu", "pin": "gpio12" }
+{ "node": "node_2a4dbf1f-1f50-42b1-8f67-b92a7c5d0f12", "pin": "gpio12" }
 ```
 
 ```json
-{ "edge": "video_out", "signal": "tmds2.p" }
+{ "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65", "signal": "tmds2.p" }
 ```
 
 Non-stable references:
@@ -167,12 +169,50 @@ Non-stable references:
 ```
 
 ```json
+"U1.GPIO12"
+```
+
+```json
+"Main MCU.GPIO12"
+```
+
+```json
 "/edges/1/pins"
 ```
 
-Physical package pads, user-visible pin names, net labels, and reference designators are properties of stable objects. They can change across packages, imports, renames, or annotation passes, so they should not be used as source-level identity.
+Physical package pads, semantic roles, user-visible pin names, net labels, and reference designators are properties of stable objects. They can change across packages, imports, renames, or annotation passes, so they should not be used as source-level identity.
 
-Patch operations should prefer semantic targets such as `{ "op": "setEdgeBindings", "edge": "sensor_bus" }` over raw JSON Pointer paths into ordered arrays. Raw JSON Patch can still be an interchange format, but it should be generated after resolving stable IDs to current document paths.
+Patch operations should prefer semantic targets such as `{ "op": "setEdgeBindings", "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65" }` over raw JSON Pointer paths into ordered arrays. Raw JSON Patch can still be an interchange format, but it should be generated after resolving stable IDs to current document paths.
+
+### Reference Designators And Labels
+
+Reference designators such as `R12`, `U3`, and `C7` are labels, not identity. Net names and user-facing names follow the same rule. They may be regenerated, renumbered, imported, or exported without changing the underlying graph object.
+
+Stable IDs identify authored and generated objects. Labels and roles are metadata:
+
+```json
+{
+  "id": "gen_aa812a2d-ec03-459b-9e55-7dd0d7ac9bc7",
+  "kind": "component",
+  "label": "SCL pullup",
+  "role": "i2c_pullup",
+  "component": "@nocad/passives:RESISTOR",
+  "labels": {
+    "refdes": "R7"
+  },
+  "sourceMap": {
+    "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65",
+    "feature": "pullups",
+    "signal": "scl"
+  }
+}
+```
+
+Short examples in this document may use readable IDs when the surrounding point is unrelated to identity. Persisted UI-authored source must use generated stable IDs while exposing editable names, roles, and reference designators as metadata.
+
+KiCad import should preserve imported reference designators as metadata on stable objects, not as primary keys. KiCad export should use the lockfile's label or reference assignment table to emit KiCad-compatible reference designators.
+
+Users may pin a reference designator when it matters for documentation or assembly, but that pin is still an override on the stable object. AI edits, diagnostics, suggestions, and source maps must target stable IDs and semantic source references, not `R12`-style labels.
 
 ### Signal Bindings
 
@@ -1195,6 +1235,9 @@ Example fragment:
       "sourceNode": "mcu",
       "component": "@nocad/rp2350:RP2350A",
       "package": "QFN80",
+      "labels": {
+        "refdes": "U1"
+      },
       "symbol": "MCU_RaspberryPi:RP2350A",
       "footprint": "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP6.8x6.8mm"
     }
@@ -1308,6 +1351,9 @@ Example fragment:
       "id": "hdmi_esd",
       "kind": "component",
       "component": "@nocad/protection:HDMI_ESD_ARRAY",
+      "labels": {
+        "refdes": "D1"
+      },
       "sourceEdge": "video_out",
       "sourceMap": {
         "edge": "video_out",

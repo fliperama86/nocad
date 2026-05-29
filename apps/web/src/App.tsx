@@ -1,3 +1,5 @@
+import { I2cSliceApp } from "@/features/i2c-slice/i2c-slice-app";
+
 export function App() {
-  return <main className="min-h-svh bg-background text-foreground" />;
+  return <I2cSliceApp />;
 }
