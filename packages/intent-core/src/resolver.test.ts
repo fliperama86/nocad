@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { getI2cPinPairOptions } from "./assignment";
-import { createI2cSliceProject, i2cSliceIds } from "./samples";
+import { getComponentPinOptions, getI2cPinPairOptions } from "./assignment";
+import { createHdmiSliceProject, createI2cSliceProject, hdmiSliceIds, i2cSliceIds } from "./samples";
 import { resolveProject } from "./resolver";
 import type { ProjectSource } from "./types";
 
@@ -47,6 +47,16 @@ describe("resolveProject", () => {
     expect(getI2cPinPairOptions(createI2cSliceProject(), i2cSliceIds.sensorBus)).toEqual([
       { sda: "gpio4", scl: "gpio5" },
       { sda: "gpio8", scl: "gpio9" }
+    ]);
+  });
+
+  it("exposes GPIO-capable component pins for custom provider binding", () => {
+    const gpioPins = getComponentPinOptions(createHdmiSliceProject(), hdmiSliceIds.mcu, "gpio");
+
+    expect(gpioPins).toHaveLength(30);
+    expect(gpioPins.slice(0, 2)).toEqual([
+      { id: "gpio0", name: "GPIO0", capabilities: ["gpio"] },
+      { id: "gpio1", name: "GPIO1", capabilities: ["gpio"] }
     ]);
   });
 
@@ -120,6 +130,20 @@ describe("resolveProject", () => {
         `net_${secondEdgeId}_scl`
       ])
     );
+  });
+
+  it("accepts HDMI function-node source objects that are not elaborated yet", () => {
+    const source = createHdmiSliceProject();
+
+    const resolved = resolveProject(source);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.resolvedChoices).toEqual([]);
+    expect(resolved.nets).toEqual([]);
+    expect(source.edges.map((edge) => edge.id)).toEqual([
+      hdmiSliceIds.videoProvider,
+      hdmiSliceIds.hdmiConnector
+    ]);
   });
 
   it("reports missing node references", () => {

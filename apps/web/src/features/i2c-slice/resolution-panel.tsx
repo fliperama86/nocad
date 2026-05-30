@@ -10,7 +10,7 @@ export function ResolutionPanel({
   source: ProjectSource;
 }) {
   const componentCount = source.nodes.filter((node) => node.kind === "component").length;
-  const intentEdgeCount = source.edges.filter((edge) => edge.kind === "intent.connection").length;
+  const intentEdgeCount = source.edges.filter((edge) => edge.kind.startsWith("intent.")).length;
   const dependencyCount = Object.keys(resolved.dependencies).length;
   const labels = objectLabels(source, resolved);
 

@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { Dispatch, SetStateAction } from "react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Panel, PanelHeader } from "./panel";
@@ -35,7 +35,7 @@ type IntentNodeData = Record<string, unknown> & {
   generatedPowerTarget: boolean;
   subtitle: string;
   title: string;
-  tone: "default" | "rail" | "warning";
+  tone: "default" | "function" | "rail" | "warning";
 };
 
 type IntentFlowNode = Node<IntentNodeData, "intent">;
@@ -77,9 +77,27 @@ export function IntentGraphView({
 }) {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  const [flowReady, setFlowReady] = useState(false);
+  const flowContainerRef = useRef<HTMLDivElement>(null);
   const flowModel = useMemo(() => buildFlowModel(source, resolved, positions), [positions, source, resolved]);
   const graphKey = useMemo(() => createGraphKey(source, graphRevision), [graphRevision, source]);
   const hasSelection = selectedNodeIds.length > 0 || selectedEdgeIds.length > 0;
+
+  useEffect(() => {
+    const container = flowContainerRef.current;
+
+    if (!container) {
+      return undefined;
+    }
+
+    const updateReady = () => setFlowReady(container.clientWidth > 0 && container.clientHeight > 0);
+    const resizeObserver = new ResizeObserver(updateReady);
+
+    updateReady();
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const updateSelection = useCallback<OnSelectionChangeFunc<IntentFlowNode, Edge>>(({ edges, nodes }) => {
     const nextNodeIds = nodes.map((node) => node.id);
@@ -87,7 +105,17 @@ export function IntentGraphView({
 
     setSelectedNodeIds((currentNodeIds) => (sameStringList(currentNodeIds, nextNodeIds) ? currentNodeIds : nextNodeIds));
     setSelectedEdgeIds((currentEdgeIds) => (sameStringList(currentEdgeIds, nextEdgeIds) ? currentEdgeIds : nextEdgeIds));
-    onSelectedEdgeChange(nextEdgeIds[0]);
+    if (nextEdgeIds.length > 0) {
+      onSelectedEdgeChange(nextEdgeIds[0]);
+    } else if (nextNodeIds.length > 0) {
+      onSelectedEdgeChange(undefined);
+    }
+  }, [onSelectedEdgeChange]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedEdgeIds([]);
+    setSelectedNodeIds([]);
+    onSelectedEdgeChange(undefined);
   }, [onSelectedEdgeChange]);
 
   const commitNodePosition = useCallback((node: IntentFlowNode) => {
@@ -131,7 +159,7 @@ export function IntentGraphView({
   }, [onRemoveNodes, onSelectedEdgeChange]);
 
   return (
-    <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
+    <Panel className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
       <PanelHeader eyebrow="Source graph" title="Intent topology" />
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
         {componentTemplates.map((template) => (
@@ -153,33 +181,40 @@ export function IntentGraphView({
           Delete selection
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-b-md bg-muted/30">
-        <ReactFlow<IntentFlowNode, Edge>
-          className="intent-flow"
-          colorMode="system"
-          connectionDragThreshold={pointerIntentThreshold}
-          defaultEdges={flowModel.edges}
-          defaultNodes={flowModel.nodes}
-          defaultViewport={defaultViewport}
-          deleteKeyCode={["Backspace", "Delete"]}
-          edgesFocusable
-          elementsSelectable
-          key={graphKey}
-          nodesFocusable
-          nodeTypes={nodeTypes}
-          nodeClickDistance={pointerIntentThreshold}
-          nodeDragThreshold={pointerIntentThreshold}
-          onConnect={onConnectNodes}
-          onEdgesDelete={removeDeletedEdges}
-          onNodeDragStop={(_, node) => commitNodePosition(node)}
-          onNodesDelete={removeDeletedNodes}
-          onSelectionChange={updateSelection}
-          paneClickDistance={pointerIntentThreshold}
-          panOnScroll
-        >
-          <Background color="var(--border)" gap={18} />
-          <Controls position="bottom-right" showInteractive={false} />
-        </ReactFlow>
+      <div
+        className="h-full min-h-0 flex-1 overflow-hidden rounded-b-md bg-muted/30"
+        ref={flowContainerRef}
+        style={{ height: "100%", width: "100%" }}
+      >
+        {flowReady ? (
+          <ReactFlow<IntentFlowNode, Edge>
+            className="intent-flow"
+            colorMode="system"
+            connectionDragThreshold={pointerIntentThreshold}
+            defaultEdges={flowModel.edges}
+            defaultNodes={flowModel.nodes}
+            defaultViewport={defaultViewport}
+            deleteKeyCode={["Backspace", "Delete"]}
+            edgesFocusable
+            elementsSelectable
+            key={graphKey}
+            nodesFocusable
+            nodeTypes={nodeTypes}
+            nodeClickDistance={pointerIntentThreshold}
+            nodeDragThreshold={pointerIntentThreshold}
+            onConnect={onConnectNodes}
+            onEdgesDelete={removeDeletedEdges}
+            onNodeDragStop={(_, node) => commitNodePosition(node)}
+            onNodesDelete={removeDeletedNodes}
+            onPaneClick={clearSelection}
+            onSelectionChange={updateSelection}
+            paneClickDistance={pointerIntentThreshold}
+            panOnScroll
+          >
+            <Background color="var(--border)" gap={18} />
+            <Controls position="bottom-right" showInteractive={false} />
+          </ReactFlow>
+        ) : null}
       </div>
     </Panel>
   );
@@ -197,9 +232,17 @@ function createGraphKey(source: ProjectSource, revision: number) {
       edge.label,
       edge.role,
       edge.kind === "intent.connection" ? edge.strategy?.pinAssignment : undefined,
-      edge.kind === "intent.connection" ? edge.bindings : undefined
+      edge.kind === "intent.provides" ? edge.strategy?.providerMode : undefined,
+      edge.kind === "intent.connection" || edge.kind === "intent.provides" ? edge.bindings : undefined
     ]),
-    nodes: source.nodes.map((node) => [node.id, node.kind, node.label, node.role]),
+    nodes: source.nodes.map((node) => [
+      node.id,
+      node.kind,
+      node.label,
+      node.role,
+      node.kind === "intent.function" ? node.function : undefined,
+      node.kind === "intent.function" ? node.include : undefined
+    ]),
     revision
   });
 }
@@ -211,6 +254,7 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
         "relative w-64 rounded-md border bg-card p-3 text-card-foreground transition-[border-color,box-shadow]",
         data.tone === "warning" &&
           "border-chart-4 shadow-[0_8px_24px_color-mix(in_oklab,var(--chart-4)_18%,transparent)]",
+        data.tone === "function" && "border-chart-1",
         data.tone === "rail" && "border-chart-2",
         data.tone === "default" && "border-border",
         selected &&
@@ -268,9 +312,11 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
           className={
             data.tone === "warning"
               ? "mt-1 size-2 shrink-0 rounded-full bg-chart-4"
-              : data.tone === "rail"
-                ? "mt-1 size-2 shrink-0 rounded-full bg-chart-2"
-                : "mt-1 size-2 shrink-0 rounded-full bg-foreground"
+              : data.tone === "function"
+                ? "mt-1 size-2 shrink-0 rounded-full bg-chart-1"
+                : data.tone === "rail"
+                  ? "mt-1 size-2 shrink-0 rounded-full bg-chart-2"
+                  : "mt-1 size-2 shrink-0 rounded-full bg-foreground"
           }
         />
       </div>
@@ -312,13 +358,20 @@ function buildFlowModel(
   );
 
   const nodes: IntentFlowNode[] = source.nodes.map((node, index) => {
-    const tone = node.role === "mcu" && reservations.has(node.id) ? "warning" : node.kind === "powerDomain" ? "rail" : "default";
+    const tone =
+      node.role === "mcu" && reservations.has(node.id)
+        ? "warning"
+        : node.kind === "powerDomain"
+          ? "rail"
+          : node.kind === "intent.function"
+            ? "function"
+            : "default";
 
     return {
       id: node.id,
       data: {
-        connectable: node.kind === "component",
-        details: nodeDetails(node, resolvedChoices, reservations.get(node.id) ?? []),
+        connectable: node.kind === "component" || node.kind === "intent.function",
+        details: nodeDetails(node, source.edges, resolvedChoices, reservations.get(node.id) ?? []),
         generatedPowerTarget: hasPullups && pullupTargetIds.has(node.id),
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
@@ -331,25 +384,35 @@ function buildFlowModel(
   });
 
   const intentEdges: Edge[] = source.edges.flatMap((edge) => {
-    if (edge.kind !== "intent.connection") {
+    if (edge.kind !== "intent.connection" && edge.kind !== "intent.provides" && edge.kind !== "intent.exposes") {
       return [];
     }
 
-    const choice = resolved.resolvedChoices.find((resolvedChoice) => resolvedChoice.sourceEdge === edge.id);
+    const choice =
+      edge.kind === "intent.connection"
+        ? resolved.resolvedChoices.find((resolvedChoice) => resolvedChoice.sourceEdge === edge.id)
+        : undefined;
     const edgeLabel = edge.label ?? edge.role ?? "Connection";
+    const modeLabel =
+      edge.kind === "intent.connection"
+        ? choice?.strategy
+        : edge.kind === "intent.provides"
+          ? edge.strategy?.providerMode
+          : undefined;
+    const stroke = edge.kind === "intent.provides" ? "var(--chart-1)" : "var(--foreground)";
 
     return [
       {
         id: edge.id,
         deletable: true,
         focusable: true,
-        label: choice ? `${edgeLabel} / ${choice.strategy}` : edgeLabel,
+        label: modeLabel ? `${edgeLabel} / ${modeLabel}` : edgeLabel,
         markerEnd: {
           type: MarkerType.ArrowClosed
         },
         source: edge.from.node,
         style: {
-          stroke: "var(--foreground)",
+          stroke,
           strokeWidth: 2
         },
         target: edge.to.node,
@@ -391,16 +454,29 @@ function nodeSubtitle(node: ProjectNode) {
     return "power domain";
   }
 
+  if (node.kind === "intent.function") {
+    return node.function.split(":").pop() ?? node.function;
+  }
+
   return node.component.split(":").pop() ?? node.component;
 }
 
 function nodeDetails(
   node: ProjectNode,
+  sourceEdges: ProjectSource["edges"],
   resolvedChoices: ResolvedProject["resolvedChoices"],
   reservations: string[]
 ) {
   if (node.kind === "powerDomain") {
     return [`voltage ${node.voltage}`];
+  }
+
+  if (node.kind === "intent.function") {
+    const enabledFeatures = Object.entries(node.include ?? {})
+      .filter(([, value]) => Boolean(value))
+      .map(([feature]) => `feature ${feature}`);
+
+    return enabledFeatures.length > 0 ? enabledFeatures.slice(0, 4) : ["waiting for provider"];
   }
 
   const bindingLines = resolvedChoices.flatMap((choice) =>
@@ -412,12 +488,50 @@ function nodeDetails(
       })
     )
   );
+  const sourceIntentLines = bindingLines.length === 0 ? sourceIntentDetails(node, sourceEdges) : [];
 
   return [
     ...reservations,
     ...bindingLines,
-    ...(bindingLines.length === 0 && reservations.length === 0 ? ["waiting for binding"] : [])
+    ...sourceIntentLines,
+    ...(bindingLines.length === 0 && reservations.length === 0 && sourceIntentLines.length === 0 ? ["no connections"] : [])
   ];
+}
+
+function sourceIntentDetails(node: ProjectNode, sourceEdges: ProjectSource["edges"]) {
+  return sourceEdges.flatMap((edge) => {
+    if (edge.kind === "intent.provides") {
+      if (edge.from.node === node.id) {
+        return [`provides ${edge.from.port ?? "source"} / ${edge.strategy?.providerMode ?? "auto"}`];
+      }
+
+      if (edge.to.node === node.id) {
+        return [`provider ${edge.to.port ?? "source"} / ${edge.strategy?.providerMode ?? "auto"}`];
+      }
+    }
+
+    if (edge.kind === "intent.exposes") {
+      if (edge.from.node === node.id) {
+        return [`connector ${edge.from.port ?? "connector"}`];
+      }
+
+      if (edge.to.node === node.id) {
+        return [`exposes ${edge.to.port ?? "connector"}`];
+      }
+    }
+
+    if (edge.kind === "intent.connection") {
+      if (edge.from.node === node.id) {
+        return [`connects ${edge.from.port ?? "from"}`];
+      }
+
+      if (edge.to.node === node.id) {
+        return [`connects ${edge.to.port ?? "to"}`];
+      }
+    }
+
+    return [];
+  });
 }
 
 function collectReservations(source: ProjectSource) {
@@ -445,5 +559,13 @@ function collectReservations(source: ProjectSource) {
 }
 
 function humanKind(node: ProjectNode) {
-  return node.kind === "powerDomain" ? "Power domain" : "Component";
+  if (node.kind === "powerDomain") {
+    return "Power domain";
+  }
+
+  if (node.kind === "intent.function") {
+    return "Function";
+  }
+
+  return "Component";
 }

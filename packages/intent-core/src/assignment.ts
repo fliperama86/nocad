@@ -6,6 +6,12 @@ export type I2cPinPairOption = {
   scl: string;
 };
 
+export type ComponentPinOption = {
+  capabilities: string[];
+  id: string;
+  name: string;
+};
+
 export function getI2cPinPairOptions(source: ProjectSource, edgeId: string): I2cPinPairOption[] {
   const edge = source.edges.find((candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection");
 
@@ -26,4 +32,30 @@ export function getI2cPinPairOptions(source: ProjectSource, edgeId: string): I2c
       definition.pins[pair.sda]?.capabilities.includes("i2c.sda") === true &&
       definition.pins[pair.scl]?.capabilities.includes("i2c.scl") === true
   );
+}
+
+export function getComponentPinOptions(
+  source: ProjectSource,
+  nodeId: string,
+  capability?: string
+): ComponentPinOption[] {
+  const node = source.nodes.find((candidate) => candidate.id === nodeId);
+
+  if (!node || node.kind !== "component") {
+    return [];
+  }
+
+  const definition = components[node.component];
+
+  if (!definition) {
+    return [];
+  }
+
+  return Object.entries(definition.pins)
+    .filter(([, pin]) => !capability || pin.capabilities.includes(capability))
+    .map(([id, pin]) => ({
+      capabilities: pin.capabilities,
+      id,
+      name: pin.name
+    }));
 }

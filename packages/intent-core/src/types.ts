@@ -30,7 +30,7 @@ export type ProjectSource = {
   edges: ProjectEdge[];
 };
 
-export type ProjectNode = ComponentNode | PowerDomainNode;
+export type ProjectNode = ComponentNode | FunctionNode | PowerDomainNode;
 
 export type GraphObjectMetadata = {
   label?: string;
@@ -45,13 +45,26 @@ export type ComponentNode = GraphObjectMetadata & {
   package?: string;
 };
 
+export type FunctionNode = GraphObjectMetadata & {
+  id: string;
+  kind: "intent.function";
+  function: string;
+  requirements?: Record<string, unknown>;
+  include?: Record<string, unknown>;
+};
+
 export type PowerDomainNode = GraphObjectMetadata & {
   id: string;
   kind: "powerDomain";
   voltage: string;
 };
 
-export type ProjectEdge = IntentConnectionEdge | NetBindingEdge;
+export type ProjectEdge = IntentConnectionEdge | IntentProvidesEdge | IntentExposesEdge | NetBindingEdge;
+
+export type IntentStrategy = {
+  pinAssignment?: "auto" | "manual";
+  providerMode?: string;
+};
 
 export type IntentConnectionEdge = GraphObjectMetadata & {
   id: string;
@@ -59,13 +72,29 @@ export type IntentConnectionEdge = GraphObjectMetadata & {
   from: EndpointRef;
   to: EndpointRef;
   contract: string;
-  strategy?: {
-    pinAssignment?: "auto" | "manual";
-  };
+  strategy?: IntentStrategy;
   include?: {
     pullups?: boolean;
   };
   bindings?: SignalBindings;
+};
+
+export type IntentProvidesEdge = GraphObjectMetadata & {
+  id: string;
+  kind: "intent.provides";
+  from: EndpointRef;
+  to: EndpointRef;
+  contract: string;
+  strategy?: IntentStrategy;
+  bindings?: SignalBindings;
+};
+
+export type IntentExposesEdge = GraphObjectMetadata & {
+  id: string;
+  kind: "intent.exposes";
+  from: EndpointRef;
+  to: EndpointRef;
+  contract: string;
 };
 
 export type NetBindingEdge = GraphObjectMetadata & {

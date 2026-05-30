@@ -1,4 +1,4 @@
-import type { ComponentDefinition, ConnectionContract } from "./types";
+import type { ComponentDefinition, ConnectionContract, PinDefinition } from "./types";
 
 export const contracts: Record<string, ConnectionContract> = {
   "builtin:i2c.v1": {
@@ -13,24 +13,7 @@ export const contracts: Record<string, ConnectionContract> = {
 export const components: Record<string, ComponentDefinition> = {
   "@nocad/rp2350:RP2350A": {
     id: "@nocad/rp2350:RP2350A",
-    pins: {
-      gpio4: {
-        name: "GPIO4",
-        capabilities: ["gpio", "i2c.sda"]
-      },
-      gpio5: {
-        name: "GPIO5",
-        capabilities: ["gpio", "i2c.scl"]
-      },
-      gpio8: {
-        name: "GPIO8",
-        capabilities: ["gpio", "i2c.sda"]
-      },
-      gpio9: {
-        name: "GPIO9",
-        capabilities: ["gpio", "i2c.scl"]
-      }
-    },
+    pins: createRp2350Pins(),
     ports: {
       i2c: {
         kind: "derived_port",
@@ -77,6 +60,72 @@ export const components: Record<string, ComponentDefinition> = {
       }
     }
   },
+  "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE": {
+    id: "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE",
+    pins: {
+      tmds2_p: {
+        name: "TMDS Data2+",
+        capabilities: ["hdmi.tmds.data2.p"]
+      },
+      tmds2_n: {
+        name: "TMDS Data2-",
+        capabilities: ["hdmi.tmds.data2.n"]
+      },
+      tmds1_p: {
+        name: "TMDS Data1+",
+        capabilities: ["hdmi.tmds.data1.p"]
+      },
+      tmds1_n: {
+        name: "TMDS Data1-",
+        capabilities: ["hdmi.tmds.data1.n"]
+      },
+      tmds0_p: {
+        name: "TMDS Data0+",
+        capabilities: ["hdmi.tmds.data0.p"]
+      },
+      tmds0_n: {
+        name: "TMDS Data0-",
+        capabilities: ["hdmi.tmds.data0.n"]
+      },
+      clock_p: {
+        name: "TMDS Clock+",
+        capabilities: ["hdmi.tmds.clock.p"]
+      },
+      clock_n: {
+        name: "TMDS Clock-",
+        capabilities: ["hdmi.tmds.clock.n"]
+      },
+      cec: {
+        name: "CEC",
+        capabilities: ["hdmi.cec"]
+      },
+      ddc_scl: {
+        name: "DDC SCL",
+        capabilities: ["i2c.scl", "hdmi.ddc.scl"]
+      },
+      ddc_sda: {
+        name: "DDC SDA",
+        capabilities: ["i2c.sda", "hdmi.ddc.sda"]
+      },
+      hpd: {
+        name: "Hot Plug Detect",
+        capabilities: ["hdmi.hpd"]
+      },
+      source_5v: {
+        name: "+5V Power",
+        capabilities: ["power.5v"]
+      },
+      shield: {
+        name: "Shield",
+        capabilities: ["chassis"]
+      }
+    },
+    ports: {
+      hdmi: {
+        kind: "fixed_port"
+      }
+    }
+  },
   "@nocad/passives:RESISTOR": {
     id: "@nocad/passives:RESISTOR",
     pins: {
@@ -94,7 +143,33 @@ export const components: Record<string, ComponentDefinition> = {
 };
 
 export const packageVersions: Record<string, string> = {
+  "@nocad/connectors": "0.1.0",
+  "@nocad/video": "0.1.0",
   "@nocad/rp2350": "0.1.0",
   "@nocad/sensors": "0.1.0",
   "@nocad/passives": "0.1.0"
 };
+
+function createRp2350Pins(): Record<string, PinDefinition> {
+  return Object.fromEntries(
+    Array.from({ length: 30 }, (_, index) => {
+      const capabilities = ["gpio"];
+
+      if (index === 4 || index === 8) {
+        capabilities.push("i2c.sda");
+      }
+
+      if (index === 5 || index === 9) {
+        capabilities.push("i2c.scl");
+      }
+
+      return [
+        `gpio${index}`,
+        {
+          name: `GPIO${index}`,
+          capabilities
+        }
+      ];
+    })
+  );
+}

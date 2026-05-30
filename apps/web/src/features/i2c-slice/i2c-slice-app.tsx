@@ -1,7 +1,9 @@
-import { createI2cSliceProject, i2cSliceIds, resolveProject } from "@nocad/intent-core";
+import { createHdmiSliceProject, hdmiSliceIds, resolveProject } from "@nocad/intent-core";
 import type {
   GraphObjectMetadata,
   IntentConnectionEdge,
+  IntentExposesEdge,
+  IntentProvidesEdge,
   ProjectEdge,
   ProjectNode,
   ProjectSource,
@@ -17,12 +19,12 @@ import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
 import { ResolutionPanel } from "./resolution-panel";
 
-function createSource(conflict: boolean) {
-  return createI2cSliceProject({ conflict });
+function createSource() {
+  return createHdmiSliceProject();
 }
 
 function createBlankSource() {
-  const source = createSource(false);
+  const source = createSource();
 
   return {
     ...source,
@@ -32,7 +34,7 @@ function createBlankSource() {
   } satisfies ProjectSource;
 }
 
-type ComponentTemplate = "mcu" | "sensor" | "rail";
+type ComponentTemplate = "hdmiFunction" | "hdmiPort" | "mcu" | "sensor" | "rail";
 type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
@@ -42,15 +44,21 @@ type SourceDependency = {
 };
 type ProjectNodeTemplate = GraphObjectMetadata &
   (
-  | {
-      kind: "component";
-      component: string;
-      package?: string;
-    }
-  | {
-      kind: "powerDomain";
-      voltage: string;
-    }
+    | {
+        kind: "component";
+        component: string;
+        package?: string;
+      }
+    | {
+        kind: "powerDomain";
+        voltage: string;
+      }
+    | {
+        kind: "intent.function";
+        function: string;
+        requirements?: Record<string, unknown>;
+        include?: Record<string, unknown>;
+      }
   );
 type ComponentTemplateDefinition = {
   dependency?: SourceDependency;
@@ -60,14 +68,16 @@ type ComponentTemplateDefinition = {
 };
 
 const dependencyVersions: Record<string, string> = {
+  "@nocad/connectors": "0.1.0",
+  "@nocad/video": "0.1.0",
   "@nocad/rp2350": "0.1.0",
   "@nocad/sensors": "0.1.0"
 };
 
 const defaultPositions: NodePositions = {
-  [i2cSliceIds.rail3v3]: { x: 460, y: 40 },
-  [i2cSliceIds.mcu]: { x: 110, y: 270 },
-  [i2cSliceIds.sensor]: { x: 820, y: 270 }
+  [hdmiSliceIds.mcu]: { x: 110, y: 270 },
+  [hdmiSliceIds.hdmiFunction]: { x: 460, y: 215 },
+  [hdmiSliceIds.hdmiPort]: { x: 820, y: 270 }
 };
 
 const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition> = {
@@ -111,6 +121,51 @@ const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition>
       component: "@nocad/sensors:I2C_TEMP_SENSOR",
       refdesHint: "U?"
     }
+  },
+  hdmiFunction: {
+    dependency: {
+      name: "@nocad/video",
+      version: dependencyVersions["@nocad/video"]
+    },
+    idPrefix: "node",
+    label: "HDMI output",
+    node: {
+      kind: "intent.function",
+      label: "HDMI video output",
+      role: "video_output",
+      function: "@nocad/video:hdmi_output.v1",
+      requirements: {
+        resolution: "640x480@60",
+        colorDepth: "rgb332"
+      },
+      include: {
+        tmds: true,
+        ddc: true,
+        hpd: true,
+        cec: false,
+        source5v: true,
+        seriesTermination: {
+          mode: "auto",
+          value: "270ohm"
+        },
+        esdProtection: "recommended"
+      }
+    }
+  },
+  hdmiPort: {
+    dependency: {
+      name: "@nocad/connectors",
+      version: dependencyVersions["@nocad/connectors"]
+    },
+    idPrefix: "node",
+    label: "HDMI port",
+    node: {
+      kind: "component",
+      label: "HDMI port",
+      role: "hdmi_port",
+      component: "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE",
+      refdesHint: "J?"
+    }
   }
 };
 
@@ -125,6 +180,16 @@ const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "diagnostics", label: "Diagnostics" },
   { id: "json", label: "JSON" }
 ];
+const providerDataSignalIds = new Set([
+  "clock_n",
+  "clock_p",
+  "tmds0_n",
+  "tmds0_p",
+  "tmds1_n",
+  "tmds1_p",
+  "tmds2_n",
+  "tmds2_p"
+]);
 
 export function I2cSliceApp() {
   const [jsonView, setJsonView] = useState<JsonView>("source");
@@ -138,7 +203,6 @@ export function I2cSliceApp() {
   const selectedChoice = selectedEdgeId
     ? (resolved.resolvedChoices.find((choice) => choice.sourceEdge === selectedEdgeId) ?? resolved.resolvedChoices[0])
     : resolved.resolvedChoices[0];
-  const gpio4Reserved = source.edges.some((edge) => edge.role === "debug_gpio");
   const sourceJson = useMemo(() => JSON.stringify(source, null, 2), [source]);
   const resolvedJson = useMemo(() => JSON.stringify(resolved, null, 2), [resolved]);
 
@@ -146,40 +210,8 @@ export function I2cSliceApp() {
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId === edgeId ? currentEdgeId : edgeId));
   }, []);
 
-  function setConflictScenario(nextConflict: boolean) {
-    setSource((current) => {
-      const edgesWithoutReservation = current.edges.filter((edge) => edge.role !== "debug_gpio");
-      const mcuNode = current.nodes.find((node) => node.kind === "component" && node.role === "mcu");
-
-      if (!nextConflict || !mcuNode) {
-        return {
-          ...current,
-          edges: edgesWithoutReservation
-        };
-      }
-
-      return {
-        ...current,
-        edges: [
-          {
-            id: createGraphId("edge"),
-            kind: "net.binding",
-            label: "Debug GPIO reservation",
-            role: "debug_gpio",
-            bindings: {
-              debug: {
-                from: { node: mcuNode.id, pin: "gpio4" }
-              }
-            }
-          },
-          ...edgesWithoutReservation
-        ]
-      };
-    });
-  }
-
   function resetSample() {
-    setSource(createSource(false));
+    setSource(createSource());
     setPositions(defaultPositions);
     setSelectedEdgeId(undefined);
     setGraphRevision((revision) => revision + 1);
@@ -228,28 +260,19 @@ export function I2cSliceApp() {
     }
 
     setSource((current) => {
+      const sourceNode = current.nodes.find((node) => node.id === connection.source);
+      const targetNode = current.nodes.find((node) => node.id === connection.target);
+
+      if (!sourceNode || !targetNode) {
+        return current;
+      }
+
       const edgeIds = new Set(current.edges.map((edge) => edge.id));
-      const edge: IntentConnectionEdge = {
-        id: uniqueId(createGraphId("edge"), edgeIds),
-        kind: "intent.connection",
-        label: "Sensor I2C bus",
-        role: "sensor_bus",
-        from: {
-          node: connection.source ?? "",
-          port: "i2c"
-        },
-        to: {
-          node: connection.target ?? "",
-          port: "i2c"
-        },
-        contract: "builtin:i2c.v1",
-        strategy: {
-          pinAssignment: "auto"
-        },
-        include: {
-          pullups: true
-        }
-      };
+      const edge = createIntentEdge(sourceNode, targetNode, edgeIds);
+
+      if (!edge) {
+        return current;
+      }
 
       return {
         ...current,
@@ -330,6 +353,92 @@ export function I2cSliceApp() {
     }));
   }
 
+  function setProviderMode(edgeId: string, providerMode: string) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
+        edge.id === edgeId && edge.kind === "intent.provides"
+          ? {
+              ...edge,
+              bindings:
+                providerMode === "custom_gpio"
+                  ? edge.bindings
+                  : removeProviderDataBindings(edge.bindings),
+              strategy: {
+                ...edge.strategy,
+                providerMode
+              }
+            }
+          : edge
+      )
+    }));
+  }
+
+  function setProviderPin(edgeId: string, signal: string, pin: string | undefined) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) => {
+        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
+          return edge;
+        }
+
+        const bindings = { ...(edge.bindings ?? {}) };
+
+        if (pin) {
+          bindings[signal] = {
+            ...bindings[signal],
+            from: {
+              node: edge.from.node,
+              pin
+            }
+          };
+        } else {
+          delete bindings[signal];
+        }
+
+        return {
+          ...edge,
+          bindings: Object.keys(bindings).length > 0 ? bindings : undefined,
+          strategy: {
+            ...edge.strategy
+          }
+        };
+      })
+    }));
+  }
+
+  function applyProviderPinPreset(edgeId: string, pinsBySignal: Record<string, string>) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) => {
+        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
+          return edge;
+        }
+
+        const bindings: SignalBindings = Object.fromEntries(
+          Object.entries(pinsBySignal).map(([signal, pin]) => [
+            signal,
+            {
+              from: {
+                node: edge.from.node,
+                pin
+              }
+            }
+          ])
+        );
+
+        return {
+          ...edge,
+          bindings,
+          strategy: {
+            ...edge.strategy,
+            providerMode: "custom_gpio"
+          }
+        };
+      })
+    }));
+  }
+
   return (
     <main className="h-svh overflow-hidden bg-background text-foreground">
       <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 overflow-hidden px-4 py-4 sm:px-6">
@@ -338,18 +447,9 @@ export function I2cSliceApp() {
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Intent resolver slice
             </p>
-            <h1 className="text-2xl font-semibold tracking-normal">RP2350 I2C bus</h1>
+            <h1 className="text-2xl font-semibold tracking-normal">RP2350 intent graph</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm">
-              <input
-                checked={gpio4Reserved}
-                className="size-4 accent-foreground"
-                onChange={(event) => setConflictScenario(event.target.checked)}
-                type="checkbox"
-              />
-              GPIO4 reserved
-            </label>
             <button
               className="h-9 rounded-md border border-border px-4 text-sm font-medium"
               onClick={clearCanvas}
@@ -362,7 +462,7 @@ export function I2cSliceApp() {
               onClick={resetSample}
               type="button"
             >
-              Reset sample
+              Load HDMI sample
             </button>
           </div>
         </header>
@@ -412,6 +512,9 @@ export function I2cSliceApp() {
                   onLockCurrent={lockCurrentAssignment}
                   onSetAuto={setEdgeAuto}
                   onSetManualPair={setManualPinPair}
+                  onSetProviderMode={setProviderMode}
+                  onSetProviderPin={setProviderPin}
+                  onSetProviderPinPreset={applyProviderPinPreset}
                   resolved={resolved}
                   selectedEdgeId={selectedEdgeId}
                   source={source}
@@ -469,6 +572,110 @@ function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {
   };
 }
 
+function createIntentEdge(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  edgeIds: Set<string>
+): IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge | undefined {
+  if (sourceNode.kind === "component" && targetNode.kind === "component") {
+    if (isConnectorNode(sourceNode) || isConnectorNode(targetNode)) {
+      return undefined;
+    }
+
+    return createI2cIntentEdge(sourceNode, targetNode, edgeIds);
+  }
+
+  if (sourceNode.kind === "intent.function" && targetNode.kind === "component") {
+    return isConnectorNode(targetNode)
+      ? createExposesEdge(sourceNode, targetNode, edgeIds)
+      : createProvidesEdge(targetNode, sourceNode, edgeIds);
+  }
+
+  if (sourceNode.kind === "component" && targetNode.kind === "intent.function") {
+    return isConnectorNode(sourceNode)
+      ? createExposesEdge(targetNode, sourceNode, edgeIds)
+      : createProvidesEdge(sourceNode, targetNode, edgeIds);
+  }
+
+  return undefined;
+}
+
+function createI2cIntentEdge(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  edgeIds: Set<string>
+): IntentConnectionEdge {
+  return {
+    id: uniqueId(createGraphId("edge"), edgeIds),
+    kind: "intent.connection",
+    label: "Sensor I2C bus",
+    role: "sensor_bus",
+    from: {
+      node: sourceNode.id,
+      port: "i2c"
+    },
+    to: {
+      node: targetNode.id,
+      port: "i2c"
+    },
+    contract: "builtin:i2c.v1",
+    strategy: {
+      pinAssignment: "auto"
+    },
+    include: {
+      pullups: true
+    }
+  };
+}
+
+function createProvidesEdge(
+  componentNode: ProjectNode,
+  functionNode: ProjectNode,
+  edgeIds: Set<string>
+): IntentProvidesEdge {
+  return {
+    id: uniqueId(createGraphId("edge"), edgeIds),
+    kind: "intent.provides",
+    label: "Video provider",
+    role: "video_provider",
+    from: {
+      node: componentNode.id,
+      port: componentProviderPort(componentNode)
+    },
+    to: {
+      node: functionNode.id,
+      port: "source"
+    },
+    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown",
+    strategy: {
+      pinAssignment: "auto",
+      providerMode: "auto"
+    }
+  };
+}
+
+function createExposesEdge(
+  functionNode: ProjectNode,
+  connectorNode: ProjectNode,
+  edgeIds: Set<string>
+): IntentExposesEdge {
+  return {
+    id: uniqueId(createGraphId("edge"), edgeIds),
+    kind: "intent.exposes",
+    label: "HDMI connector",
+    role: "video_connector",
+    from: {
+      node: functionNode.id,
+      port: "connector"
+    },
+    to: {
+      node: connectorNode.id,
+      port: connectorPort(connectorNode)
+    },
+    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown"
+  };
+}
+
 function manualBindings(edge: IntentConnectionEdge, pair: { sda: string; scl: string }): SignalBindings {
   return {
     sda: {
@@ -484,6 +691,18 @@ function manualBindings(edge: IntentConnectionEdge, pair: { sda: string; scl: st
       }
     }
   };
+}
+
+function removeProviderDataBindings(bindings: SignalBindings | undefined) {
+  if (!bindings) {
+    return undefined;
+  }
+
+  const sidebandBindings = Object.fromEntries(
+    Object.entries(bindings).filter(([signal]) => !providerDataSignalIds.has(signal))
+  );
+
+  return Object.keys(sidebandBindings).length > 0 ? sidebandBindings : undefined;
 }
 
 function uniqueId(base: string, usedIds: Set<string>) {
@@ -516,7 +735,7 @@ function isComponentTemplate(value: string): value is ComponentTemplate {
 }
 
 function edgeReferencesAnyNode(edge: ProjectEdge, nodeIds: Set<string>) {
-  if (edge.kind === "intent.connection") {
+  if (edge.kind === "intent.connection" || edge.kind === "intent.exposes" || edge.kind === "intent.provides") {
     return nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node);
   }
 
@@ -529,11 +748,12 @@ function dependenciesForNodes(nodes: ProjectNode[], currentDependencies: Record<
   const dependencies: Record<string, string> = {};
 
   for (const node of nodes) {
-    if (node.kind !== "component") {
+    const dependencyName = dependencyNameForNode(node);
+
+    if (!dependencyName) {
       continue;
     }
 
-    const dependencyName = node.component.split(":")[0];
     const version = dependencyVersions[dependencyName] ?? currentDependencies[dependencyName];
 
     if (version) {
@@ -542,4 +762,28 @@ function dependenciesForNodes(nodes: ProjectNode[], currentDependencies: Record<
   }
 
   return dependencies;
+}
+
+function dependencyNameForNode(node: ProjectNode) {
+  if (node.kind === "component") {
+    return node.component.split(":")[0];
+  }
+
+  if (node.kind === "intent.function") {
+    return node.function.split(":")[0];
+  }
+
+  return undefined;
+}
+
+function isConnectorNode(node: ProjectNode) {
+  return node.kind === "component" && (node.role?.includes("port") === true || node.component.includes("CONNECTOR"));
+}
+
+function componentProviderPort(node: ProjectNode) {
+  return node.kind === "component" && node.role === "mcu" ? "video_out" : "provider";
+}
+
+function connectorPort(node: ProjectNode) {
+  return node.kind === "component" && node.role === "hdmi_port" ? "hdmi" : "connector";
 }
