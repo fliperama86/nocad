@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { getI2cPinPairOptions } from "./assignment";
 import { createI2cSliceProject, i2cSliceIds } from "./samples";
 import { resolveProject } from "./resolver";
 import type { ProjectSource } from "./types";
@@ -40,6 +41,13 @@ describe("resolveProject", () => {
         feature: "pullups"
       }
     });
+  });
+
+  it("exposes compatible I2C pin-pair options for an intent edge", () => {
+    expect(getI2cPinPairOptions(createI2cSliceProject(), i2cSliceIds.sensorBus)).toEqual([
+      { sda: "gpio4", scl: "gpio5" },
+      { sda: "gpio8", scl: "gpio9" }
+    ]);
   });
 
   it("skips a reserved pin and falls back to the next valid I2C pair", () => {

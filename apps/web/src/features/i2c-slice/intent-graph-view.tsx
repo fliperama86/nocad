@@ -56,6 +56,7 @@ export function IntentGraphView({
   onPositionsChange,
   onRemoveEdges,
   onRemoveNodes,
+  onSelectedEdgeChange,
   positions,
   resolved,
   source
@@ -67,6 +68,7 @@ export function IntentGraphView({
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
   onRemoveEdges: (edgeIds: string[]) => void;
   onRemoveNodes: (nodeIds: string[]) => void;
+  onSelectedEdgeChange: (edgeId: string | undefined) => void;
   positions: NodePositions;
   resolved: ResolvedProject;
   source: ProjectSource;
@@ -83,7 +85,8 @@ export function IntentGraphView({
 
     setSelectedNodeIds((currentNodeIds) => (sameStringList(currentNodeIds, nextNodeIds) ? currentNodeIds : nextNodeIds));
     setSelectedEdgeIds((currentEdgeIds) => (sameStringList(currentEdgeIds, nextEdgeIds) ? currentEdgeIds : nextEdgeIds));
-  }, []);
+    onSelectedEdgeChange(nextEdgeIds[0]);
+  }, [onSelectedEdgeChange]);
 
   const commitNodePosition = useCallback((node: IntentFlowNode) => {
     onPositionsChange((currentPositions) => ({
@@ -103,9 +106,10 @@ export function IntentGraphView({
     if (selectedNodeIds.length > 0) {
       onRemoveNodes(selectedNodeIds);
     }
+    onSelectedEdgeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [hasSelection, onRemoveEdges, onRemoveNodes, selectedEdgeIds, selectedNodeIds]);
+  }, [hasSelection, onRemoveEdges, onRemoveNodes, onSelectedEdgeChange, selectedEdgeIds, selectedNodeIds]);
 
   const removeDeletedEdges = useCallback((deletedEdges: Edge[]) => {
     const deletableEdgeIds = deletedEdges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
@@ -113,14 +117,16 @@ export function IntentGraphView({
     if (deletableEdgeIds.length > 0) {
       onRemoveEdges(deletableEdgeIds);
     }
+    onSelectedEdgeChange(undefined);
     setSelectedEdgeIds([]);
-  }, [onRemoveEdges]);
+  }, [onRemoveEdges, onSelectedEdgeChange]);
 
   const removeDeletedNodes = useCallback((deletedNodes: IntentFlowNode[]) => {
     onRemoveNodes(deletedNodes.map((node) => node.id));
+    onSelectedEdgeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [onRemoveNodes]);
+  }, [onRemoveNodes, onSelectedEdgeChange]);
 
   return (
     <Panel>
@@ -183,7 +189,14 @@ function sameStringList(left: string[], right: string[]) {
 
 function createGraphKey(source: ProjectSource, revision: number) {
   return JSON.stringify({
-    edges: source.edges.map((edge) => [edge.id, edge.kind, edge.label, edge.role]),
+    edges: source.edges.map((edge) => [
+      edge.id,
+      edge.kind,
+      edge.label,
+      edge.role,
+      edge.kind === "intent.connection" ? edge.strategy?.pinAssignment : undefined,
+      edge.kind === "intent.connection" ? edge.bindings : undefined
+    ]),
     nodes: source.nodes.map((node) => [node.id, node.kind, node.label, node.role]),
     revision
   });
@@ -283,7 +296,7 @@ function buildFlowModel(
   resolved: ResolvedProject,
   positions: NodePositions
 ): { edges: Edge[]; nodes: IntentFlowNode[] } {
-  const selectedBindings = resolved.resolvedChoices[0]?.selected.bindings;
+  const resolvedChoices = resolved.resolvedChoices;
   const reservations = collectReservations(source);
   const hasPullups = resolved.generated.some((item) => item.sourceMap.feature === "pullups");
   const pullupRail = source.nodes.find((node) => node.kind === "powerDomain" && node.role === "power_3v3");
@@ -303,7 +316,7 @@ function buildFlowModel(
       id: node.id,
       data: {
         connectable: node.kind === "component",
-        details: nodeDetails(node, selectedBindings, reservations.get(node.id) ?? []),
+        details: nodeDetails(node, resolvedChoices, reservations.get(node.id) ?? []),
         generatedPowerTarget: hasPullups && pullupTargetIds.has(node.id),
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
@@ -381,19 +394,21 @@ function nodeSubtitle(node: ProjectNode) {
 
 function nodeDetails(
   node: ProjectNode,
-  selectedBindings: ResolvedProject["resolvedChoices"][number]["selected"]["bindings"] | undefined,
+  resolvedChoices: ResolvedProject["resolvedChoices"],
   reservations: string[]
 ) {
   if (node.kind === "powerDomain") {
     return [`voltage ${node.voltage}`];
   }
 
-  const bindingLines = Object.entries(selectedBindings ?? {}).flatMap(([signal, binding]) =>
-    (["from", "to"] as const).flatMap((role) => {
-      const endpoint = binding[role];
+  const bindingLines = resolvedChoices.flatMap((choice) =>
+    Object.entries(choice.selected.bindings).flatMap(([signal, binding]) =>
+      (["from", "to"] as const).flatMap((role) => {
+        const endpoint = binding[role];
 
-      return endpoint?.node === node.id && endpoint.pin ? [`${signal.toUpperCase()} ${endpoint.pin}`] : [];
-    })
+        return endpoint?.node === node.id && endpoint.pin ? [`${signal.toUpperCase()} ${endpoint.pin}`] : [];
+      })
+    )
   );
 
   return [

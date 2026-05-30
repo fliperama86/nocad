@@ -4,13 +4,15 @@ import type {
   IntentConnectionEdge,
   ProjectEdge,
   ProjectNode,
-  ProjectSource
+  ProjectSource,
+  SignalBindings
 } from "@nocad/intent-core";
 import type { Connection, XYPosition } from "@xyflow/react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { BindingsPanel } from "./bindings-panel";
 import { DiagnosticsPanel } from "./diagnostics-panel";
+import { EdgeAssignmentPanel } from "./edge-assignment-panel";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
 import { ResolutionPanel } from "./resolution-panel";
@@ -121,11 +123,19 @@ export function I2cSliceApp() {
   const [source, setSource] = useState<ProjectSource>(createBlankSource);
   const [positions, setPositions] = useState<NodePositions>({});
   const [graphRevision, setGraphRevision] = useState(0);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
 
   const resolved = useMemo(() => resolveProject(source), [source]);
+  const selectedChoice = selectedEdgeId
+    ? (resolved.resolvedChoices.find((choice) => choice.sourceEdge === selectedEdgeId) ?? resolved.resolvedChoices[0])
+    : resolved.resolvedChoices[0];
   const gpio4Reserved = source.edges.some((edge) => edge.role === "debug_gpio");
   const sourceJson = useMemo(() => JSON.stringify(source, null, 2), [source]);
   const resolvedJson = useMemo(() => JSON.stringify(resolved, null, 2), [resolved]);
+
+  const setSelectedGraphEdge = useCallback((edgeId: string | undefined) => {
+    setSelectedEdgeId((currentEdgeId) => (currentEdgeId === edgeId ? currentEdgeId : edgeId));
+  }, []);
 
   function setConflictScenario(nextConflict: boolean) {
     setSource((current) => {
@@ -162,12 +172,14 @@ export function I2cSliceApp() {
   function resetSample() {
     setSource(createSource(false));
     setPositions(defaultPositions);
+    setSelectedEdgeId(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
   function clearCanvas() {
     setSource(createBlankSource());
     setPositions({});
+    setSelectedEdgeId(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -249,6 +261,7 @@ export function I2cSliceApp() {
     setPositions((currentPositions) =>
       Object.fromEntries(Object.entries(currentPositions).filter(([nodeId]) => !nodeIdSet.has(nodeId)))
     );
+    setSelectedEdgeId(undefined);
   }
 
   function removeEdges(edgeIds: string[]) {
@@ -257,6 +270,54 @@ export function I2cSliceApp() {
     setSource((current) => ({
       ...current,
       edges: current.edges.filter((edge) => !edgeIdSet.has(edge.id))
+    }));
+    setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
+  }
+
+  function setEdgeAuto(edgeId: string) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) => (edge.id === edgeId && edge.kind === "intent.connection" ? autoEdge(edge) : edge))
+    }));
+  }
+
+  function lockCurrentAssignment(edgeId: string) {
+    const choice = resolved.resolvedChoices.find((resolvedChoice) => resolvedChoice.sourceEdge === edgeId);
+
+    if (!choice) {
+      return;
+    }
+
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
+        edge.id === edgeId && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              strategy: {
+                pinAssignment: "manual"
+              },
+              bindings: choice.selected.bindings
+            }
+          : edge
+      )
+    }));
+  }
+
+  function setManualPinPair(edgeId: string, pair: { sda: string; scl: string }) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
+        edge.id === edgeId && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              strategy: {
+                pinAssignment: "manual"
+              },
+              bindings: manualBindings(edge, pair)
+            }
+          : edge
+      )
     }));
   }
 
@@ -306,14 +367,23 @@ export function I2cSliceApp() {
             onRemoveEdges={removeEdges}
             onRemoveNodes={removeNodes}
             onPositionsChange={setPositions}
+            onSelectedEdgeChange={setSelectedGraphEdge}
             positions={positions}
             resolved={resolved}
             source={source}
           />
 
-          <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(0,0.85fr)_minmax(0,0.95fr)_minmax(360px,0.75fr)]">
+          <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(0,0.85fr)_minmax(0,0.95fr)_minmax(360px,0.75fr)]">
+            <EdgeAssignmentPanel
+              onLockCurrent={lockCurrentAssignment}
+              onSetAuto={setEdgeAuto}
+              onSetManualPair={setManualPinPair}
+              resolved={resolved}
+              selectedEdgeId={selectedEdgeId}
+              source={source}
+            />
             <ResolutionPanel resolved={resolved} source={source} />
-            <BindingsPanel nets={resolved.nets} selectedChoice={resolved.resolvedChoices[0]} source={source} />
+            <BindingsPanel nets={resolved.nets} selectedChoice={selectedChoice} source={source} />
             <DiagnosticsPanel diagnostics={resolved.diagnostics} source={source} />
             <JsonPanel
               resolvedJson={resolvedJson}
@@ -326,6 +396,34 @@ export function I2cSliceApp() {
       </div>
     </main>
   );
+}
+
+function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {
+  const { bindings: _bindings, ...edgeWithoutBindings } = edge;
+
+  return {
+    ...edgeWithoutBindings,
+    strategy: {
+      pinAssignment: "auto"
+    }
+  };
+}
+
+function manualBindings(edge: IntentConnectionEdge, pair: { sda: string; scl: string }): SignalBindings {
+  return {
+    sda: {
+      from: {
+        node: edge.from.node,
+        pin: pair.sda
+      }
+    },
+    scl: {
+      from: {
+        node: edge.from.node,
+        pin: pair.scl
+      }
+    }
+  };
 }
 
 function uniqueId(base: string, usedIds: Set<string>) {

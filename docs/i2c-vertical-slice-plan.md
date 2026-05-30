@@ -44,6 +44,8 @@ Expected UI behavior:
 - keep the graph editor separate from diagnostics and raw JSON
 - show labels, roles, ports, and pins in normal UI instead of internal IDs
 - show resolved bindings
+- inspect a selected I2C edge and control its pin assignment
+- lock the current auto-selected pins into source as manual bindings
 - show generated pullups
 - show diagnostics
 - allow clearing the canvas, loading the sample graph, and toggling a simple conflict scenario
@@ -458,6 +460,8 @@ Controls:
 - add I2C sensor
 - draw an edge from RP2350 to the sensor
 - delete selected nodes and edges
+- select an I2C edge and choose auto/manual pin assignment
+- lock the current resolved assignment into source bindings
 - clear canvas
 - reset sample
 - toggle GPIO4 reservation
