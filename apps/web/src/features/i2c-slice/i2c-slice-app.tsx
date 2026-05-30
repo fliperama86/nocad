@@ -33,6 +33,7 @@ function createBlankSource() {
 }
 
 type ComponentTemplate = "mcu" | "sensor" | "rail";
+type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
 type SourceDependency = {
@@ -118,12 +119,20 @@ const componentPalette = Object.entries(componentTemplates).map(([id, template])
   label: template.label
 }));
 
+const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
+  { id: "graph", label: "Graph" },
+  { id: "resolution", label: "Resolution" },
+  { id: "diagnostics", label: "Diagnostics" },
+  { id: "json", label: "JSON" }
+];
+
 export function I2cSliceApp() {
   const [jsonView, setJsonView] = useState<JsonView>("source");
   const [source, setSource] = useState<ProjectSource>(createBlankSource);
   const [positions, setPositions] = useState<NodePositions>({});
   const [graphRevision, setGraphRevision] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
 
   const resolved = useMemo(() => resolveProject(source), [source]);
   const selectedChoice = selectedEdgeId
@@ -322,9 +331,9 @@ export function I2cSliceApp() {
   }
 
   return (
-    <main className="min-h-svh bg-background text-foreground">
-      <div className="mx-auto flex min-h-svh w-full max-w-none flex-col gap-4 px-4 py-4 sm:px-6">
-        <header className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <main className="h-svh overflow-hidden bg-background text-foreground">
+      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 overflow-hidden px-4 py-4 sm:px-6">
+        <header className="flex shrink-0 flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-1">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Intent resolver slice
@@ -358,44 +367,95 @@ export function I2cSliceApp() {
           </div>
         </header>
 
-        <section className="grid gap-4">
-          <IntentGraphView
-            componentTemplates={componentPalette}
-            graphRevision={graphRevision}
-            onAddComponent={addComponent}
-            onConnectNodes={connectNodes}
-            onRemoveEdges={removeEdges}
-            onRemoveNodes={removeNodes}
-            onPositionsChange={setPositions}
-            onSelectedEdgeChange={setSelectedGraphEdge}
-            positions={positions}
-            resolved={resolved}
-            source={source}
-          />
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div aria-label="Workspace views" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border pb-3" role="tablist">
+            {workspaceTabs.map((tab) => (
+              <button
+                aria-controls={`${tab.id}-panel`}
+                aria-selected={activeTab === tab.id}
+                className={workspaceTabClassName(activeTab === tab.id)}
+                id={`${tab.id}-tab`}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-          <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(360px,0.7fr)_minmax(0,0.85fr)_minmax(0,0.95fr)_minmax(360px,0.75fr)]">
-            <EdgeAssignmentPanel
-              onLockCurrent={lockCurrentAssignment}
-              onSetAuto={setEdgeAuto}
-              onSetManualPair={setManualPinPair}
-              resolved={resolved}
-              selectedEdgeId={selectedEdgeId}
-              source={source}
-            />
-            <ResolutionPanel resolved={resolved} source={source} />
-            <BindingsPanel nets={resolved.nets} selectedChoice={selectedChoice} source={source} />
-            <DiagnosticsPanel diagnostics={resolved.diagnostics} source={source} />
-            <JsonPanel
-              resolvedJson={resolvedJson}
-              selectedView={jsonView}
-              setSelectedView={setJsonView}
-              sourceJson={sourceJson}
-            />
-          </section>
+          <div className="min-h-0 flex-1 overflow-hidden pt-4">
+            {activeTab === "graph" ? (
+              <div
+                aria-labelledby="graph-tab"
+                className="grid h-full min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
+                id="graph-panel"
+                role="tabpanel"
+              >
+                <IntentGraphView
+                  className="min-h-0"
+                  componentTemplates={componentPalette}
+                  graphRevision={graphRevision}
+                  onAddComponent={addComponent}
+                  onConnectNodes={connectNodes}
+                  onRemoveEdges={removeEdges}
+                  onRemoveNodes={removeNodes}
+                  onPositionsChange={setPositions}
+                  onSelectedEdgeChange={setSelectedGraphEdge}
+                  positions={positions}
+                  resolved={resolved}
+                  source={source}
+                />
+                <EdgeAssignmentPanel
+                  className="min-h-0 lg:w-[360px]"
+                  onLockCurrent={lockCurrentAssignment}
+                  onSetAuto={setEdgeAuto}
+                  onSetManualPair={setManualPinPair}
+                  resolved={resolved}
+                  selectedEdgeId={selectedEdgeId}
+                  source={source}
+                />
+              </div>
+            ) : null}
+
+            {activeTab === "resolution" ? (
+              <div aria-labelledby="resolution-tab" className="h-full overflow-auto" id="resolution-panel" role="tabpanel">
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <ResolutionPanel resolved={resolved} source={source} />
+                  <BindingsPanel nets={resolved.nets} selectedChoice={selectedChoice} source={source} />
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "diagnostics" ? (
+              <div aria-labelledby="diagnostics-tab" className="h-full overflow-auto" id="diagnostics-panel" role="tabpanel">
+                <DiagnosticsPanel diagnostics={resolved.diagnostics} source={source} />
+              </div>
+            ) : null}
+
+            {activeTab === "json" ? (
+              <div aria-labelledby="json-tab" className="h-full" id="json-panel" role="tabpanel">
+                <JsonPanel
+                  className="h-full"
+                  resolvedJson={resolvedJson}
+                  selectedView={jsonView}
+                  setSelectedView={setJsonView}
+                  sourceJson={sourceJson}
+                />
+              </div>
+            ) : null}
+          </div>
         </section>
       </div>
     </main>
   );
+}
+
+function workspaceTabClassName(active: boolean) {
+  return active
+    ? "h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+    : "h-9 rounded-md border border-border px-4 text-sm font-medium text-muted-foreground";
 }
 
 function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {

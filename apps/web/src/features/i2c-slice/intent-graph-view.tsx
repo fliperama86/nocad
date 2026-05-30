@@ -50,6 +50,7 @@ const pointerIntentThreshold = 8;
 
 export function IntentGraphView({
   componentTemplates,
+  className,
   graphRevision,
   onAddComponent,
   onConnectNodes,
@@ -61,6 +62,7 @@ export function IntentGraphView({
   resolved,
   source
 }: {
+  className?: string;
   componentTemplates: ComponentTemplate[];
   graphRevision: number;
   onAddComponent: (template: string) => void;
@@ -129,9 +131,9 @@ export function IntentGraphView({
   }, [onRemoveNodes, onSelectedEdgeChange]);
 
   return (
-    <Panel>
+    <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
       <PanelHeader eyebrow="Source graph" title="Intent topology" />
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
         {componentTemplates.map((template) => (
           <button
             className="h-8 rounded-md border border-border px-3 text-sm font-medium"
@@ -151,7 +153,7 @@ export function IntentGraphView({
           Delete selection
         </button>
       </div>
-      <div className="h-[620px] min-h-[460px] overflow-hidden rounded-b-md bg-muted/30">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-b-md bg-muted/30">
         <ReactFlow<IntentFlowNode, Edge>
           className="intent-flow"
           colorMode="system"

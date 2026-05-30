@@ -1,21 +1,24 @@
+import { cn } from "../../lib/utils";
 import { Panel } from "./panel";
 
 export type JsonView = "source" | "resolved";
 
 export function JsonPanel({
+  className,
   resolvedJson,
   selectedView,
   setSelectedView,
   sourceJson
 }: {
+  className?: string;
   resolvedJson: string;
   selectedView: JsonView;
   setSelectedView: (view: JsonView) => void;
   sourceJson: string;
 }) {
   return (
-    <Panel>
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">JSON</p>
           <h2 className="text-base font-semibold">Source and resolved</h2>
@@ -37,7 +40,7 @@ export function JsonPanel({
           </button>
         </div>
       </div>
-      <pre className="max-h-[420px] overflow-auto p-4 text-xs leading-relaxed text-muted-foreground">
+      <pre className="min-h-0 flex-1 overflow-auto p-4 text-xs leading-relaxed text-muted-foreground">
         {selectedView === "source" ? sourceJson : resolvedJson}
       </pre>
     </Panel>

@@ -11,7 +11,7 @@ export function Panel({ children, className }: { children: ReactNode; className?
 
 export function PanelHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
-    <div className="border-b border-border px-4 py-3">
+    <div className="shrink-0 border-b border-border px-4 py-3">
       <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{eyebrow}</p>
       <h2 className="text-base font-semibold">{title}</h2>
     </div>

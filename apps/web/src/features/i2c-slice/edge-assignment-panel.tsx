@@ -10,6 +10,7 @@ type PinPair = {
 };
 
 export function EdgeAssignmentPanel({
+  className,
   onLockCurrent,
   onSetAuto,
   onSetManualPair,
@@ -17,6 +18,7 @@ export function EdgeAssignmentPanel({
   selectedEdgeId,
   source
 }: {
+  className?: string;
   onLockCurrent: (edgeId: string) => void;
   onSetAuto: (edgeId: string) => void;
   onSetManualPair: (edgeId: string, pair: PinPair) => void;
@@ -34,9 +36,9 @@ export function EdgeAssignmentPanel({
   const mode = edge?.strategy?.pinAssignment === "manual" ? "manual" : "auto";
 
   return (
-    <Panel>
-      <PanelHeader eyebrow="Assignment" title="Selected edge" />
-      <div className="grid gap-4 p-4">
+    <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
+      <PanelHeader eyebrow="Properties" title="Selection" />
+      <div className="grid gap-4 overflow-auto p-4">
         {!selectedEdgeId ? (
           <EmptyState text="Select an I2C edge to inspect or override its pin assignment." />
         ) : !edge ? (
