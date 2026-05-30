@@ -75,6 +75,7 @@ Examples:
 
 - component instance
 - module instance
+- function intent, such as `HDMI video output`
 - connector
 - power domain
 - generated subsystem
@@ -89,10 +90,30 @@ An edge relates nodes or ports.
 Common edge kinds:
 
 - `intent.connection`: user intent to connect two ports
+- `intent.provides`: a concrete component provides or implements a function node
+- `intent.exposes`: a function node is exposed through a connector, header, module boundary, or external interface
 - `net.binding`: explicit low-level net binding
 - `constraint.appliesTo`: attaches a constraint to a node, port, contract signal, signal bundle, or generated net
 - `generation.expandsTo`: links generated objects to their source intent
 - `dependency.requires`: declares resolver ordering or design dependency
+
+### Function Node
+
+A function node represents a user-facing design function rather than a concrete part.
+
+Examples:
+
+- `HDMI video output`
+- `USB device port`
+- `sensor I2C bus`
+- `battery charger`
+- `debug UART`
+
+Function nodes keep high-level intent separate from component-specific implementation details. For example, an HDMI video output function can request TMDS, DDC, HPD, CEC, 5V source power, ESD protection, and series termination without knowing whether the provider is RP2350 HSTX, RP2350 PIO/GPIO, an external HDMI transmitter IC, or a future module.
+
+Function nodes are edited through inspectors like any other node. Typical editable fields are protocol features, user-facing labels, electrical options, generated protection/filtering options, and high-level requirements such as resolution or voltage domain.
+
+Provider-specific choices belong on the edge from the concrete component to the function node, not on the function node itself.
 
 ### Component Definition
 
@@ -104,12 +125,48 @@ A port is a named endpoint exposed by a node. It is the surface a connection att
 
 Examples:
 
-- `mcu.video.pio_dvi`
+- `mcu.video_out`
 - `mcu.gpio_bank`
-- `hdmi.video.tmds`
+- `hdmi.hdmi_sink`
 - `sensor.i2c`
 
 Ports may be backed by fixed pins, a pool of pins, a derived interface, a generated module, or an internal capability selector.
+
+### Provider Mode
+
+A provider mode is a component-defined way to satisfy a function or contract. Rich component packages should expose these modes so users do not need to keep datasheets open.
+
+Examples for an RP2350 package:
+
+- `i2c0_gpio4_gpio5`
+- `spi0_default`
+- `hstx`
+- `pio_gpio_8bit`
+- `custom_gpio`
+
+Provider modes live in component definitions. A source edge selects a provider mode through its `strategy`.
+
+```json
+{
+  "id": "edge_mcu_provides_hdmi",
+  "kind": "intent.provides",
+  "from": {
+    "node": "mcu",
+    "port": "video_out"
+  },
+  "to": {
+    "node": "hdmi_output",
+    "port": "source"
+  },
+  "contract": "@nocad/video:hdmi_output.v1",
+  "strategy": {
+    "providerMode": "hstx",
+    "pinAssignment": "auto"
+  }
+}
+```
+
+The target function node does not know what `hstx` means. The RP2350 package defines that mode, its required resources, its pin constraints, and any implementation-specific signal mapping options.
 
 ### Connection Contract
 
@@ -120,7 +177,7 @@ Examples:
 - `builtin:i2c.v1`
 - `builtin:spi.v1`
 - `builtin:usb2.device.v1`
-- `builtin:dvi_over_hdmi.v1`
+- `@nocad/video:hdmi_output.v1`
 - `local:rgb_parallel_8bit.v1`
 - inline custom contract objects
 
@@ -142,7 +199,7 @@ Examples:
 - `uart.tx`
 - `pwm.channel`
 - `adc.input`
-- `video.pio_dvi_candidate`
+- `video.hdmi_provider_candidate`
 
 Capabilities let the resolver answer questions like "which RP2350 pins can satisfy this I2C bus?" or "does this package expose enough adjacent GPIOs for this DVI bundle?" In `nocad.project.v0`, capabilities are not edge endpoints. Components expose ports, and ports may use capability selectors internally.
 
@@ -249,22 +306,26 @@ Partial bindings are only valid when the selected port declares a contract map f
 
 Full bindings still validate against the selected ports. For example, a `gpio_bank` port can accept any pin selected by its internal GPIO selector, while a connector `pins` port can accept any stable header pin exposed by that connector.
 
-For each endpoint role, `contractMaps[contract].signalMap` is the authoritative mapping from contract signals to fixed pins or pin selectors. A port-level `baseSignals` field is only an inventory of native/base signals and must not be used to infer contract mappings.
+For each endpoint role, `contractMaps[contract].signalMap` is the authoritative mapping from contract signals to fixed pins or pin selectors. Provider ports use `provides[function].modes[mode].signalMap` for the same purpose. A port-level `baseSignals` field is only an inventory of native/base signals and must not be used to infer contract mappings.
 
 Example fixed connector port:
 
 ```json
 {
   "ports": {
-    "video.tmds": {
+    "hdmi_sink": {
       "kind": "fixed_port",
       "contractMaps": {
-        "builtin:dvi_over_hdmi.v1": {
+        "@nocad/video:hdmi_output.v1": {
           "role": "to",
           "signalMap": {
             "tmds2.p": { "pin": "tmds_d2_p" },
             "tmds2.n": { "pin": "tmds_d2_n" },
-            "hpd": { "pin": "hpd" }
+            "ddc.sda": { "pin": "ddc_sda" },
+            "ddc.scl": { "pin": "ddc_scl" },
+            "hpd": { "pin": "hpd" },
+            "cec": { "pin": "cec" },
+            "5v": { "pin": "5v" }
           }
         }
       }
@@ -273,20 +334,24 @@ Example fixed connector port:
 }
 ```
 
-Example selectable MCU port:
+Example selectable MCU provider port:
 
 ```json
 {
   "ports": {
-    "video.pio_dvi": {
+    "video_out": {
       "kind": "derived_port",
-      "contractMaps": {
-        "builtin:dvi_over_hdmi.v1": {
-          "role": "from",
-          "signalMap": {
-            "tmds2.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds2.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "hpd": { "pinSelector": { "capabilities": ["gpio"] } }
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "pio_gpio_8bit": {
+              "signalMap": {
+                "tmds2.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
+                "tmds2.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
+                "hpd": { "pinSelector": { "capabilities": ["gpio"] } }
+              }
+            }
           }
         }
       }
@@ -399,7 +464,7 @@ Top-level fields:
 - `edges`: relationships between nodes, ports, connection contracts, or constraints.
 - `ui`: non-electrical editor state such as graph node positions, collapsed groups, comments, and viewport hints.
 
-## Example: RP2350 To HDMI
+## Example: RP2350 To HDMI Function
 
 Authored source:
 
@@ -426,12 +491,37 @@ Authored source:
       "id": "mcu",
       "kind": "component",
       "component": "@nocad/rp2350:RP2350A",
-      "package": "QFN80"
+      "package": "QFN80",
+      "label": "Main MCU"
+    },
+    {
+      "id": "hdmi_output",
+      "kind": "intent.function",
+      "function": "@nocad/video:hdmi_output.v1",
+      "label": "HDMI video output",
+      "requirements": {
+        "resolution": "640x480@60",
+        "colorDepth": "rgb332"
+      },
+      "include": {
+        "tmds": true,
+        "ddc": true,
+        "hpd": true,
+        "cec": false,
+        "source5v": true,
+        "seriesTermination": {
+          "mode": "auto",
+          "value": "270ohm"
+        },
+        "esdProtection": "recommended",
+        "shield": true
+      }
     },
     {
       "id": "hdmi",
       "kind": "component",
       "component": "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE",
+      "label": "HDMI port",
       "role": "video_output"
     }
   ],
@@ -445,12 +535,15 @@ Authored source:
       "hdmi": {
         "edge": "east",
         "orientation": "outward"
+      },
+      "hdmi_output": {
+        "near": "hdmi"
       }
     },
     "routingIntent": [
       {
         "id": "video_escape",
-        "appliesTo": "video_out",
+        "appliesTo": "hdmi_output",
         "preferences": [
           {
             "id": "video_escape_avoid_crossings",
@@ -474,24 +567,34 @@ Authored source:
   },
   "edges": [
     {
-      "id": "video_out",
-      "kind": "intent.connection",
+      "id": "mcu_provides_hdmi",
+      "kind": "intent.provides",
       "from": {
         "node": "mcu",
-        "port": "video.pio_dvi"
+        "port": "video_out"
+      },
+      "to": {
+        "node": "hdmi_output",
+        "port": "source"
+      },
+      "contract": "@nocad/video:hdmi_output.v1",
+      "strategy": {
+        "providerMode": "hstx",
+        "pinAssignment": "auto"
+      }
+    },
+    {
+      "id": "hdmi_output_to_connector",
+      "kind": "intent.exposes",
+      "from": {
+        "node": "hdmi_output",
+        "port": "connector"
       },
       "to": {
         "node": "hdmi",
-        "port": "video.tmds"
+        "port": "hdmi_sink"
       },
-      "contract": "builtin:dvi_over_hdmi.v1",
-      "strategy": {
-        "pinAssignment": "auto"
-      },
-      "requirements": {
-        "resolution": "640x480@60",
-        "colorDepth": "rgb332"
-      },
+      "contract": "@nocad/video:hdmi_output.v1",
       "constraints": [
         {
           "id": "video_impedance",
@@ -509,7 +612,14 @@ Authored source:
           "value": "0.5mm",
           "source": "user"
         }
-      ],
+      ]
+    },
+    {
+      "id": "video_route_priority",
+      "kind": "constraint.appliesTo",
+      "target": {
+        "node": "hdmi_output"
+      },
       "preferences": [
         {
           "id": "video_route_priority",
@@ -519,14 +629,7 @@ Authored source:
           "value": "high",
           "source": "user"
         }
-      ],
-      "include": {
-        "esdProtection": true,
-        "hotPlugDetect": true,
-        "ddc": false,
-        "cec": false,
-        "shield": true
-      }
+      ]
     }
   ],
   "ui": {
@@ -534,7 +637,7 @@ Authored source:
       "nodes": {
         "mcu": { "x": 120, "y": 160 },
         "hdmi": { "x": 520, "y": 160 },
-        "video_out": { "x": 320, "y": 160 }
+        "hdmi_output": { "x": 320, "y": 160 }
       }
     }
   }
@@ -545,22 +648,20 @@ With manual pin choices:
 
 ```json
 {
-  "id": "video_out",
-  "kind": "intent.connection",
+  "id": "mcu_provides_hdmi",
+  "kind": "intent.provides",
   "from": {
     "node": "mcu",
-    "port": "video.pio_dvi"
+    "port": "video_out"
   },
   "to": {
-    "node": "hdmi",
-    "port": "video.tmds"
+    "node": "hdmi_output",
+    "port": "source"
   },
-  "contract": "builtin:dvi_over_hdmi.v1",
+  "contract": "@nocad/video:hdmi_output.v1",
   "strategy": {
+    "providerMode": "custom_gpio",
     "pinAssignment": "manual"
-  },
-  "include": {
-    "hotPlugDetect": true
   },
   "bindings": {
     "tmds2.p": { "from": { "node": "mcu", "pin": "gpio12" } },
@@ -576,17 +677,39 @@ With manual pin choices:
 }
 ```
 
+In this model the graph represents the user's intent as:
+
+```txt
+RP2350 -> HDMI video output -> HDMI port
+```
+
+The HDMI function node owns protocol features such as TMDS, DDC, HPD, CEC, 5V source power, ESD protection, and series termination. The provider edge from RP2350 to the function owns RP2350-specific choices such as HSTX, PIO/GPIO, custom GPIO ranges, and manual pin assignments. The connector edge owns exposure of the function through a physical HDMI receptacle.
+
 ## Feature Elaboration
 
-`include` flags are inputs to contract elaboration. They are not arbitrary booleans that only affect generated helper parts. A contract must define what each supported feature adds.
+`include` flags are inputs to function or contract elaboration. They are not arbitrary booleans that only affect generated helper parts. A function or contract definition must define what each supported feature adds.
 
-For `builtin:dvi_over_hdmi.v1`, the base contract may add TMDS data and clock signals. Optional features can add signals, generated components, constraints, and required pin bindings:
+For `@nocad/video:hdmi_output.v1`, the base function may add TMDS data and clock signals. Optional features can add signals, generated components, constraints, topology rules, and required pin bindings:
 
 ```json
 {
-  "contract": "builtin:dvi_over_hdmi.v1",
+  "function": "@nocad/video:hdmi_output.v1",
   "features": {
-    "hotPlugDetect": {
+    "tmds": {
+      "default": true,
+      "signals": {
+        "tmds2.p": { "direction": "from_to_to", "electrical": "tmds" },
+        "tmds2.n": { "direction": "from_to_to", "electrical": "tmds" },
+        "tmds1.p": { "direction": "from_to_to", "electrical": "tmds" },
+        "tmds1.n": { "direction": "from_to_to", "electrical": "tmds" },
+        "tmds0.p": { "direction": "from_to_to", "electrical": "tmds" },
+        "tmds0.n": { "direction": "from_to_to", "electrical": "tmds" },
+        "clock.p": { "direction": "from_to_to", "electrical": "tmds" },
+        "clock.n": { "direction": "from_to_to", "electrical": "tmds" }
+      }
+    },
+    "hpd": {
+      "default": true,
       "signals": {
         "hpd": {
           "direction": "to_to_from",
@@ -604,6 +727,19 @@ For `builtin:dvi_over_hdmi.v1`, the base contract may add TMDS data and clock si
         }
       }
     },
+    "ddc": {
+      "default": false,
+      "signals": {
+        "ddc.sda": { "direction": "bidirectional", "electrical": "open_drain" },
+        "ddc.scl": { "direction": "from_to_to", "electrical": "open_drain" }
+      }
+    },
+    "cec": {
+      "default": false,
+      "signals": {
+        "cec": { "direction": "bidirectional", "electrical": "single_wire" }
+      }
+    },
     "esdProtection": {
       "generated": [
         {
@@ -611,12 +747,88 @@ For `builtin:dvi_over_hdmi.v1`, the base contract may add TMDS data and clock si
           "component": "@nocad/protection:HDMI_ESD_ARRAY"
         }
       ]
+    },
+    "seriesTermination": {
+      "topologyRules": [
+        {
+          "kind": "interposer",
+          "type": "series",
+          "component": "@nocad/passives:RESISTOR",
+          "value": {
+            "default": "270ohm",
+            "range": ["200ohm", "300ohm"]
+          },
+          "signals": ["tmds*"],
+          "perSignalConductor": true,
+          "placement": "near_provider"
+        }
+      ]
     }
   }
 }
 ```
 
-If an edge sets `"hotPlugDetect": true`, the resolver must include the `hpd` signal in candidate generation, manual binding validation, generated nets, diagnostics, and the lockfile. If the feature is false, a manual `hpd` binding should be rejected as unknown or inactive.
+If a function node sets `"hpd": true`, the resolver must include the `hpd` signal in candidate generation, manual binding validation, generated nets, diagnostics, and the lockfile. If the feature is false, a manual `hpd` binding should be rejected as unknown or inactive.
+
+## Generic Topology Rules
+
+Generated passive components, protection devices, level shifters, pullups, filters, and termination parts should be described as generic topology rules. The resolver should not contain hardcoded knowledge that "HDMI needs resistors" or "this connector needs ESD."
+
+Packages may attach rules to functions, contracts, features, provider modes, or component ports. The resolver only needs generic operations:
+
+- match a rule by function, contract, feature, signal selector, endpoint role, or provider mode
+- generate an inline or shunt component
+- split a net through an interposer when required
+- connect generated components to rails or signals
+- preserve source maps and reasons
+- validate hard rules and score soft recommendations
+
+Example rule:
+
+```json
+{
+  "id": "hdmi_tmds_series_resistors",
+  "kind": "topologyRule",
+  "type": "interposer",
+  "appliesTo": {
+    "function": "@nocad/video:hdmi_output.v1",
+    "feature": "seriesTermination",
+    "signals": ["tmds*"]
+  },
+  "interpose": {
+    "kind": "series",
+    "component": "@nocad/passives:RESISTOR",
+    "value": {
+      "default": "270ohm",
+      "range": ["200ohm", "300ohm"]
+    },
+    "perSignalConductor": true,
+    "placement": "near_provider"
+  },
+  "severity": "recommended"
+}
+```
+
+The lockfile should show the generated topology explicitly:
+
+```json
+{
+  "id": "gen_mcu_provides_hdmi_tmds2_p_series",
+  "kind": "component",
+  "component": "@nocad/passives:RESISTOR",
+  "value": "270ohm",
+  "connects": [
+    "net_mcu_provides_hdmi_tmds2_p_provider",
+    "net_mcu_provides_hdmi_tmds2_p_connector"
+  ],
+  "sourceMap": {
+    "node": "hdmi_output",
+    "edge": "mcu_provides_hdmi",
+    "feature": "seriesTermination",
+    "signal": "tmds2.p"
+  }
+}
+```
 
 ## Example: Local Custom Protocol
 
@@ -805,7 +1017,7 @@ Example fragment:
         { "kind": "spi", "instances": ["SPI1"], "roles": ["sck", "tx", "rx", "cs"] },
         { "kind": "uart", "instances": ["UART0"], "roles": ["tx", "rx"] },
         { "kind": "pwm", "slice": 6, "channel": "A" },
-        { "kind": "video.pio_dvi_candidate" }
+        { "kind": "video.hdmi_provider_candidate" }
       ]
     }
   },
@@ -828,36 +1040,57 @@ Example fragment:
         "capability": "gpio"
       }
     },
-    "video.pio_dvi": {
+    "video_out": {
       "kind": "derived_port",
-      "requires": {
-        "basePinCount": 8,
-        "capabilities": ["gpio", "pio"],
-        "pairing": "adjacent_gpio_pairs"
-      },
-      "baseSignals": {
-        "tmds2.p": {},
-        "tmds2.n": {},
-        "tmds1.p": {},
-        "tmds1.n": {},
-        "tmds0.p": {},
-        "tmds0.n": {},
-        "clock.p": {},
-        "clock.n": {}
-      },
-      "contractMaps": {
-        "builtin:dvi_over_hdmi.v1": {
-          "role": "from",
-          "signalMap": {
-            "tmds2.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds2.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds1.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds1.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds0.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "tmds0.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "clock.p": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "clock.n": { "pinSelector": { "capabilities": ["gpio", "pio"] } },
-            "hpd": { "pinSelector": { "capabilities": ["gpio"] } }
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "hstx": {
+              "label": "HSTX",
+              "requires": {
+                "peripherals": ["hstx"],
+                "pinGroup": "rp2350_hstx_default"
+              },
+              "signalMap": {
+                "tmds2.p": { "pin": "gpio12" },
+                "tmds2.n": { "pin": "gpio13" },
+                "tmds1.p": { "pin": "gpio14" },
+                "tmds1.n": { "pin": "gpio15" },
+                "tmds0.p": { "pin": "gpio16" },
+                "tmds0.n": { "pin": "gpio17" },
+                "clock.p": { "pin": "gpio18" },
+                "clock.n": { "pin": "gpio19" },
+                "hpd": { "pinSelector": { "capabilities": ["gpio"] } },
+                "ddc.sda": { "pinSelector": { "capabilities": ["i2c.sda", "gpio"] } },
+                "ddc.scl": { "pinSelector": { "capabilities": ["i2c.scl", "gpio"] } }
+              }
+            },
+            "pio_gpio_8bit": {
+              "label": "PIO/GPIO",
+              "requires": {
+                "peripherals": ["pio"],
+                "pinSelector": {
+                  "count": 8,
+                  "capabilities": ["gpio", "pio"],
+                  "contiguous": true
+                }
+              }
+            },
+            "custom_gpio": {
+              "label": "Custom GPIO",
+              "signalMap": {
+                "tmds2.p": { "pinSelector": { "capabilities": ["gpio"] } },
+                "tmds2.n": { "pinSelector": { "capabilities": ["gpio"] } },
+                "tmds1.p": { "pinSelector": { "capabilities": ["gpio"] } },
+                "tmds1.n": { "pinSelector": { "capabilities": ["gpio"] } },
+                "tmds0.p": { "pinSelector": { "capabilities": ["gpio"] } },
+                "tmds0.n": { "pinSelector": { "capabilities": ["gpio"] } },
+                "clock.p": { "pinSelector": { "capabilities": ["gpio"] } },
+                "clock.n": { "pinSelector": { "capabilities": ["gpio"] } },
+                "hpd": { "pinSelector": { "capabilities": ["gpio"] } }
+              }
+            }
           }
         }
       }
@@ -896,7 +1129,9 @@ Example fragment:
 }
 ```
 
-`basePinCount` only describes the port's base signals. The resolver must compute the effective pin count after contract feature elaboration by counting active `contractMaps[contract].signalMap` entries and feature requirements. For example, `builtin:dvi_over_hdmi.v1` needs eight MCU pins for TMDS-only output and nine MCU pins when `hotPlugDetect` is enabled.
+Provider modes can be as rich as the component package can justify. RP2350 can expose I2C, SPI, UART, PIO, HSTX, PWM, ADC, and custom GPIO modes. That richness is useful, but it belongs to the component package. Function nodes and connector packages should remain generic.
+
+For provider modes with variable signal sets, the resolver must compute the effective pin and resource requirements after function feature elaboration. For example, `@nocad/video:hdmi_output.v1` needs eight provider pins for TMDS-only output, one more provider GPIO when `hpd` is enabled, and DDC-capable pins when `ddc` is enabled.
 
 This makes MCU pin multiplexing queryable by the UI and resolver. For example, the UI can show valid I2C SDA/SCL choices, hide invalid pins, and explain conflicts with other reservations.
 
@@ -932,7 +1167,7 @@ Early source may keep physical layout intent inside `project.nocad.json`:
     "routingIntent": [
       {
         "id": "video_escape",
-        "appliesTo": "video_out",
+        "appliesTo": "hdmi_output",
         "preferences": [
           {
             "id": "video_escape_prefer_top",
@@ -981,7 +1216,7 @@ Example scoring problem:
 
 ```txt
 Source intent:
-  connect mcu.video.pio_dvi -> hdmi.video.tmds
+  provide mcu.video_out -> hdmi_output, expose hdmi_output -> hdmi.hdmi_sink
 
 Candidate A:
   GPIO12..GPIO19
@@ -1005,8 +1240,8 @@ The lockfile should record the selected assignment and enough rationale to make 
 {
   "resolvedChoices": [
     {
-      "id": "video_out.pinAssignment",
-      "sourceEdge": "video_out",
+      "id": "mcu_provides_hdmi.pinAssignment",
+      "sourceEdge": "mcu_provides_hdmi",
       "strategy": "auto",
       "selected": {
         "bindings": {
@@ -1129,7 +1364,7 @@ Example suggestion:
 ```json
 {
   "kind": "suggestion.pinAssignment",
-  "sourceEdge": "video_out",
+  "sourceEdge": "mcu_provides_hdmi",
   "reason": "Reduces estimated crossings near the HDMI connector from 6 to 1.",
   "patch": {
     "strategy": {
@@ -1163,7 +1398,7 @@ Example:
   },
   "direction": "from_to_to",
   "sourceMap": {
-    "edge": "video_out",
+    "edge": "mcu_provides_hdmi",
     "signal": "tmds2.p",
     "layoutIntent": "video_escape"
   }
@@ -1224,7 +1459,7 @@ Example fragment:
       "version": "0.1.0",
       "hash": "sha256:...",
       "introducedBy": {
-        "edge": "video_out",
+        "edge": "mcu_provides_hdmi",
         "feature": "esdProtection"
       }
     }
@@ -1251,9 +1486,9 @@ Example fragment:
         "to": { "node": "hdmi", "pin": "tmds_d2_p" }
       },
       "direction": "from_to_to",
-      "sourceEdge": "video_out",
+      "sourceEdge": "mcu_provides_hdmi",
       "sourceMap": {
-        "edge": "video_out",
+        "edge": "mcu_provides_hdmi",
         "signal": "tmds2.p",
         "layoutIntent": "video_escape"
       },
@@ -1264,7 +1499,7 @@ Example fragment:
           "type": "differential_pair",
           "severity": "hard",
           "pair": "HDMI_D2",
-          "sourceEdge": "video_out"
+          "sourceEdge": "mcu_provides_hdmi"
         },
         {
           "id": "net_hdmi_d2_p_impedance",
@@ -1272,7 +1507,7 @@ Example fragment:
           "type": "differential_impedance",
           "severity": "hard",
           "value": "100ohm",
-          "sourceEdge": "video_out",
+          "sourceEdge": "mcu_provides_hdmi",
           "sourceConstraint": "video_impedance"
         },
         {
@@ -1281,7 +1516,7 @@ Example fragment:
           "type": "length_match",
           "severity": "hard",
           "value": "0.5mm",
-          "sourceEdge": "video_out",
+          "sourceEdge": "mcu_provides_hdmi",
           "sourceConstraint": "video_length_match"
         }
       ]
@@ -1294,9 +1529,9 @@ Example fragment:
         "to": { "node": "hdmi", "pin": "tmds_d2_n" }
       },
       "direction": "from_to_to",
-      "sourceEdge": "video_out",
+      "sourceEdge": "mcu_provides_hdmi",
       "sourceMap": {
-        "edge": "video_out",
+        "edge": "mcu_provides_hdmi",
         "signal": "tmds2.n",
         "layoutIntent": "video_escape"
       },
@@ -1307,7 +1542,7 @@ Example fragment:
           "type": "differential_pair",
           "severity": "hard",
           "pair": "HDMI_D2",
-          "sourceEdge": "video_out"
+          "sourceEdge": "mcu_provides_hdmi"
         },
         {
           "id": "net_hdmi_d2_n_impedance",
@@ -1315,7 +1550,7 @@ Example fragment:
           "type": "differential_impedance",
           "severity": "hard",
           "value": "100ohm",
-          "sourceEdge": "video_out",
+          "sourceEdge": "mcu_provides_hdmi",
           "sourceConstraint": "video_impedance"
         },
         {
@@ -1324,7 +1559,7 @@ Example fragment:
           "type": "length_match",
           "severity": "hard",
           "value": "0.5mm",
-          "sourceEdge": "video_out",
+          "sourceEdge": "mcu_provides_hdmi",
           "sourceConstraint": "video_length_match"
         }
       ]
@@ -1337,11 +1572,11 @@ Example fragment:
         "to": { "node": "hdmi", "pin": "hpd" }
       },
       "direction": "to_to_from",
-      "sourceEdge": "video_out",
+      "sourceEdge": "mcu_provides_hdmi",
       "sourceMap": {
-        "edge": "video_out",
+        "edge": "mcu_provides_hdmi",
         "signal": "hpd",
-        "feature": "hotPlugDetect",
+        "feature": "hpd",
         "layoutIntent": "video_escape"
       }
     }
@@ -1354,9 +1589,9 @@ Example fragment:
       "labels": {
         "refdes": "D1"
       },
-      "sourceEdge": "video_out",
+      "sourceEdge": "mcu_provides_hdmi",
       "sourceMap": {
-        "edge": "video_out",
+        "edge": "mcu_provides_hdmi",
         "feature": "esdProtection"
       },
       "reason": "External HDMI connector requested ESD protection"
@@ -1378,9 +1613,9 @@ Example:
 {
   "severity": "error",
   "code": "PIN_CONFLICT",
-  "message": "mcu.gpio12 is already reserved by video_out.tmds2.p.",
+  "message": "mcu.gpio12 is already reserved by mcu_provides_hdmi.tmds2.p.",
   "targets": [
-    { "kind": "edge", "id": "video_out" },
+    { "kind": "edge", "id": "mcu_provides_hdmi" },
     { "kind": "edge", "id": "sensor_bus" },
     { "kind": "pin", "node": "mcu", "pin": "gpio12" }
   ],
@@ -1415,6 +1650,8 @@ The UI should treat the source graph as the document model.
 Required graph behaviors:
 
 - component nodes expose typed ports, contract compatibility, pin pools, and capabilities
+- function nodes expose protocol-level requirements and feature toggles
+- provider edges expose component-specific modes and pin assignment controls
 - connections validate compatibility as the user drags wires
 - invalid connections can still be explored when useful, but must show reasons
 - inspectors edit structured node and edge properties
@@ -1428,12 +1665,21 @@ Required graph behaviors:
 Suggested views:
 
 - intent graph
+- selected-object properties inspector
 - schematic projection
 - PCB projection
 - component capability browser
 - resolved diff
 - diagnostics
 - generated artifacts
+
+The properties inspector should be driven by the selected graph object:
+
+- component node: labels, package, placement hints, exposed ports, and component-specific capabilities
+- function node: function requirements and features such as DDC, HPD, CEC, source 5V, ESD, and termination
+- provider edge: provider mode, resource selection, pin assignment, and manual bindings
+- connector/exposure edge: connector mapping, shell/shield handling, and external-interface constraints
+- generated object: provenance, generated reason, and source-map links, but not direct source editing unless the UI creates an explicit override
 
 ## Resolver Pipeline
 
@@ -1465,6 +1711,7 @@ Automatic choices should be expressible as strategies:
 ```json
 {
   "strategy": {
+    "providerMode": "auto",
     "pinAssignment": "auto",
     "partSelection": "prefer_jlcpcb_basic",
     "placement": "auto"
@@ -1477,6 +1724,7 @@ Pinned user choices should live in source:
 ```json
 {
   "strategy": {
+    "providerMode": "i2c0_gpio4_gpio5",
     "pinAssignment": "manual"
   },
   "bindings": {
