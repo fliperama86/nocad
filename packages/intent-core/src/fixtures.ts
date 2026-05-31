@@ -1,4 +1,4 @@
-import type { ComponentDefinition, ConnectionContract, PinDefinition } from "./types";
+import type { ComponentDefinition, ConnectionContract, FunctionDefinition, PinDefinition } from "./types";
 
 export const contracts: Record<string, ConnectionContract> = {
   "builtin:i2c.v1": {
@@ -24,6 +24,109 @@ export const contracts: Record<string, ConnectionContract> = {
       hpd: { direction: "to_to_from" },
       cec: { direction: "bidirectional" }
     }
+  }
+};
+
+export const functions: Record<string, FunctionDefinition> = {
+  "@nocad/video:hdmi_output.v1": {
+    id: "@nocad/video:hdmi_output.v1",
+    include: {
+      tmds: {
+        kind: "boolean",
+        label: "TMDS",
+        default: true,
+        readonly: true
+      },
+      ddc: {
+        kind: "boolean",
+        label: "DDC",
+        default: true
+      },
+      hpd: {
+        kind: "boolean",
+        label: "HPD",
+        default: true
+      },
+      cec: {
+        kind: "boolean",
+        label: "CEC",
+        default: false
+      },
+      source5v: {
+        kind: "boolean",
+        label: "5V source",
+        default: true
+      },
+      seriesTermination: {
+        kind: "object",
+        label: "Series termination",
+        fields: {
+          mode: {
+            kind: "enum",
+            label: "Mode",
+            default: "auto",
+            options: [
+              { label: "Off", value: "off" },
+              { label: "Auto", value: "auto" },
+              { label: "Required", value: "required" }
+            ]
+          },
+          value: {
+            kind: "resistance",
+            label: "Value",
+            default: "270ohm"
+          }
+        }
+      },
+      esdProtection: {
+        kind: "enum",
+        label: "ESD protection",
+        default: "recommended",
+        options: [
+          { label: "Off", value: "off" },
+          { label: "Recommended", value: "recommended" },
+          { label: "Required", value: "required" }
+        ]
+      }
+    },
+    signalGroups: [
+      {
+        id: "tmds",
+        include: "tmds",
+        label: "TMDS",
+        signals: [
+          { id: "tmds2_p", label: "D2+", pinControl: "custom_only" },
+          { id: "tmds2_n", label: "D2-", pinControl: "custom_only" },
+          { id: "tmds1_p", label: "D1+", pinControl: "custom_only" },
+          { id: "tmds1_n", label: "D1-", pinControl: "custom_only" },
+          { id: "tmds0_p", label: "D0+", pinControl: "custom_only" },
+          { id: "tmds0_n", label: "D0-", pinControl: "custom_only" },
+          { id: "clock_p", label: "CLK+", pinControl: "custom_only" },
+          { id: "clock_n", label: "CLK-", pinControl: "custom_only" }
+        ]
+      },
+      {
+        id: "ddc",
+        include: "ddc",
+        label: "DDC",
+        signals: [
+          { id: "ddc_sda", label: "SDA", pinControl: "always" },
+          { id: "ddc_scl", label: "SCL", pinControl: "always" }
+        ]
+      },
+      {
+        id: "hpd",
+        include: "hpd",
+        label: "HPD",
+        signals: [{ id: "hpd", label: "HPD", pinControl: "always" }]
+      },
+      {
+        id: "cec",
+        include: "cec",
+        label: "CEC",
+        signals: [{ id: "cec", label: "CEC", pinControl: "always" }]
+      }
+    ]
   }
 };
 

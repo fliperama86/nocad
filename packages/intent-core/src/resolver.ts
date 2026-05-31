@@ -1,4 +1,4 @@
-import { components, contracts, packageVersions } from "./fixtures";
+import { components, contracts, functions, packageVersions } from "./fixtures";
 import type {
   ComponentDefinition,
   ComponentNode,
@@ -8,6 +8,7 @@ import type {
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
+  FunctionIncludeDefinition,
   FunctionNode,
   ProjectEdge,
   ProjectNode,
@@ -21,16 +22,6 @@ import type {
 
 const RESOLVER_VERSION = "0.1.0";
 const HDMI_OUTPUT_CONTRACT = "@nocad/video:hdmi_output.v1";
-const hdmiTmdsSignals = [
-  "tmds2_p",
-  "tmds2_n",
-  "tmds1_p",
-  "tmds1_n",
-  "tmds0_p",
-  "tmds0_n",
-  "clock_p",
-  "clock_n"
-];
 const rp2350VideoModePins: Record<string, Record<string, string>> = {
   auto: {
     clock_n: "gpio19",
@@ -460,12 +451,39 @@ function findSource5vRail(nodes: ProjectNode[]): PowerDomainNode | null {
 }
 
 function hdmiSignalsForFunction(functionNode: FunctionNode) {
-  return [
-    ...(functionNode.include?.tmds === false ? [] : hdmiTmdsSignals),
-    ...(functionNode.include?.ddc ? ["ddc_sda", "ddc_scl"] : []),
-    ...(functionNode.include?.hpd ? ["hpd"] : []),
-    ...(functionNode.include?.cec ? ["cec"] : [])
-  ];
+  const definition = functions[functionNode.function];
+
+  if (!definition) {
+    return [];
+  }
+
+  return definition.signalGroups.flatMap((group) =>
+    functionSignalGroupEnabled(functionNode, group.include, group.include ? definition.include[group.include] : undefined)
+      ? group.signals.map((signal) => signal.id)
+      : []
+  );
+}
+
+function functionSignalGroupEnabled(
+  node: FunctionNode,
+  includeId: string | undefined,
+  includeDefinition: FunctionIncludeDefinition | undefined
+) {
+  if (!includeId) {
+    return true;
+  }
+
+  const value = node.include?.[includeId];
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === undefined && includeDefinition?.kind === "boolean") {
+    return includeDefinition.default ?? false;
+  }
+
+  return Boolean(value);
 }
 
 function chooseAvailablePin(

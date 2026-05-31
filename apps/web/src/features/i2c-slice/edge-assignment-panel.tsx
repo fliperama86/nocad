@@ -1,5 +1,10 @@
-import { getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
-import type { ComponentPinOption } from "@nocad/intent-core";
+import { functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
+import type {
+  ComponentPinOption,
+  FunctionIncludeDefinition,
+  FunctionIncludeFieldDefinition,
+  FunctionSignalDefinition
+} from "@nocad/intent-core";
 import type {
   FunctionNode,
   IntentConnectionEdge,
@@ -11,7 +16,7 @@ import type {
 } from "@nocad/intent-core";
 
 import { cn } from "../../lib/utils";
-import { Panel, PanelHeader } from "./panel";
+import { Panel } from "./panel";
 
 type PinPair = {
   sda: string;
@@ -23,10 +28,7 @@ type ProviderModeOption = {
   label: string;
   value: string;
 };
-type ProviderSignal = {
-  id: string;
-  label: string;
-};
+type ProviderSignal = FunctionSignalDefinition;
 type MappingSource = "auto" | "mode" | "unassigned" | "user";
 
 const defaultProviderModes: ProviderModeOption[] = [
@@ -42,16 +44,6 @@ const providerModesByComponent: Record<string, ProviderModeOption[]> = {
     { label: "Custom GPIO", value: "custom_gpio" }
   ]
 };
-const tmdsSignals: ProviderSignal[] = [
-  { id: "tmds2_p", label: "D2+" },
-  { id: "tmds2_n", label: "D2-" },
-  { id: "tmds1_p", label: "D1+" },
-  { id: "tmds1_n", label: "D1-" },
-  { id: "tmds0_p", label: "D0+" },
-  { id: "tmds0_n", label: "D0-" },
-  { id: "clock_p", label: "CLK+" },
-  { id: "clock_n", label: "CLK-" }
-];
 const gpio12To19Preset = {
   clock_n: "gpio19",
   clock_p: "gpio18",
@@ -85,7 +77,7 @@ export function EdgeAssignmentPanel({
   className?: string;
   onLockCurrent: (edgeId: string) => void;
   onSetAuto: (edgeId: string) => void;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
   onSetManualPair: (edgeId: string, pair: PinPair) => void;
   onSetProviderMode: (edgeId: string, providerMode: string) => void;
   onSetProviderPin: (edgeId: string, signal: string, pin: string | undefined) => void;
@@ -101,8 +93,7 @@ export function EdgeAssignmentPanel({
 
   return (
     <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
-      <PanelHeader eyebrow="Properties" title="Selection" />
-      <div className="grid gap-4 overflow-auto p-4">
+      <div className="grid gap-3 overflow-auto p-3 pr-12">
         {!selectedEdgeId && !selectedNode ? (
           <EmptyState text="Select a node or edge to inspect its source intent." />
         ) : !edge ? (
@@ -146,7 +137,7 @@ function NodeProperties({
   onSetFunctionInclude
 }: {
   node: ProjectNode;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
   if (node.kind === "intent.function") {
     return <FunctionNodeProperties node={node} onSetFunctionInclude={onSetFunctionInclude} />;
@@ -168,8 +159,10 @@ function FunctionNodeProperties({
   onSetFunctionInclude
 }: {
   node: FunctionNode;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
+  const definition = functions[node.function];
+
   return (
     <>
       <NodeHeading node={node} />
@@ -178,55 +171,175 @@ function FunctionNodeProperties({
         <Field label="Function" value={node.function} />
       </div>
 
-      {node.function === "@nocad/video:hdmi_output.v1" ? (
+      {definition ? (
         <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
           <div className="text-sm font-medium">Features</div>
-          <FeatureToggle
-            checked={node.include?.ddc !== false && Boolean(node.include?.ddc)}
-            label="DDC"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "ddc", enabled)}
-          />
-          <FeatureToggle
-            checked={node.include?.hpd !== false && Boolean(node.include?.hpd)}
-            label="HPD"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "hpd", enabled)}
-          />
-          <FeatureToggle
-            checked={Boolean(node.include?.cec)}
-            label="CEC"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "cec", enabled)}
-          />
-          <FeatureToggle
-            checked={node.include?.source5v !== false && Boolean(node.include?.source5v)}
-            label="5V source"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "source5v", enabled)}
-          />
+          {Object.entries(definition.include).map(([featureId, featureDefinition]) => (
+            <IncludeControl
+              definition={featureDefinition}
+              featureId={featureId}
+              key={featureId}
+              node={node}
+              onSetFunctionInclude={onSetFunctionInclude}
+            />
+          ))}
         </div>
-      ) : null}
+      ) : (
+        <EmptyState text="This function has no render schema yet." />
+      )}
     </>
   );
 }
 
-function FeatureToggle({
-  checked,
-  label,
-  onChange
+function IncludeControl({
+  definition,
+  featureId,
+  node,
+  onSetFunctionInclude
 }: {
-  checked: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
+  definition: FunctionIncludeDefinition;
+  featureId: string;
+  node: FunctionNode;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
+  if (definition.kind === "boolean") {
+    return (
+      <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+        <span className="font-medium">{definition.label}</span>
+        <input
+          checked={includeBooleanValue(node, featureId, definition.default)}
+          className="size-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={definition.readonly}
+          onChange={(event) => onSetFunctionInclude(node.id, featureId, event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+    );
+  }
+
+  if (definition.kind === "enum") {
+    return (
+      <label className="grid gap-2 rounded-md border border-border px-3 py-2 text-sm">
+        <span className="font-medium">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => onSetFunctionInclude(node.id, featureId, event.target.value)}
+          value={includeStringValue(node, featureId, definition.default ?? definition.options[0]?.value ?? "")}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  const objectValue = includeObjectValue(node, featureId);
+
   return (
-    <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
-      <span className="font-medium">{label}</span>
+    <div className="grid gap-2 rounded-md border border-border px-3 py-2 text-sm">
+      <div className="font-medium">{definition.label}</div>
+      {Object.entries(definition.fields).map(([fieldId, fieldDefinition]) => (
+        <IncludeObjectField
+          definition={fieldDefinition}
+          featureId={featureId}
+          fieldId={fieldId}
+          key={fieldId}
+          node={node}
+          objectValue={objectValue}
+          onSetFunctionInclude={onSetFunctionInclude}
+        />
+      ))}
+    </div>
+  );
+}
+
+function IncludeObjectField({
+  definition,
+  featureId,
+  fieldId,
+  node,
+  objectValue,
+  onSetFunctionInclude
+}: {
+  definition: FunctionIncludeFieldDefinition;
+  featureId: string;
+  fieldId: string;
+  node: FunctionNode;
+  objectValue: Record<string, unknown>;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
+}) {
+  const value = includeObjectFieldValue(objectValue, fieldId, definition.default ?? "");
+  const updateField = (nextValue: string) =>
+    onSetFunctionInclude(node.id, featureId, {
+      ...objectValue,
+      [fieldId]: nextValue
+    });
+
+  if (definition.kind === "enum") {
+    return (
+      <label className="grid gap-1">
+        <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => updateField(event.target.value)}
+          value={value}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
       <input
-        checked={checked}
-        className="size-4 accent-primary"
-        onChange={(event) => onChange(event.target.checked)}
-        type="checkbox"
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        onChange={(event) => updateField(event.target.value)}
+        type="text"
+        value={value}
       />
     </label>
   );
+}
+
+function includeBooleanValue(node: FunctionNode, featureId: string, defaultValue = false) {
+  const value = node.include?.[featureId];
+
+  return typeof value === "boolean" ? value : defaultValue;
+}
+
+function includeStringValue(node: FunctionNode, featureId: string, defaultValue: string) {
+  const value = node.include?.[featureId];
+
+  return typeof value === "string" ? value : defaultValue;
+}
+
+function includeObjectValue(node: FunctionNode, featureId: string): Record<string, unknown> {
+  const value = node.include?.[featureId];
+
+  return isRecord(value) ? value : {};
+}
+
+function includeObjectFieldValue(
+  objectValue: Record<string, unknown>,
+  fieldId: string,
+  defaultValue: string
+) {
+  const value = objectValue[fieldId];
+
+  return typeof value === "string" ? value : defaultValue;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function I2cEdgeProperties({
@@ -436,8 +549,8 @@ function SignalMapping({
           const resolvedPin = resolvedChoice?.selected.bindings[signal.id]?.from?.pin;
           const selectedPin = sourcePin ?? "";
           const visiblePin = sourcePin ?? derivedPin ?? resolvedPin;
-          const source = mappingSource({ derivedPin, mode, resolvedPin, signal: signal.id, sourcePin });
-          const editable = mode === "custom_gpio" || !isTmdsSignal(signal.id);
+          const source = mappingSource({ derivedPin, mode, pinControl: signal.pinControl, resolvedPin, sourcePin });
+          const editable = mode === "custom_gpio" || signal.pinControl === "always";
 
           return (
             <label className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-2 text-sm" key={signal.id}>
@@ -478,21 +591,17 @@ function SignalMapping({
   );
 }
 
-function isTmdsSignal(signal: string) {
-  return tmdsSignals.some((item) => item.id === signal);
-}
-
 function mappingSource({
   derivedPin,
   mode,
+  pinControl,
   resolvedPin,
-  signal,
   sourcePin
 }: {
   derivedPin: string | undefined;
   mode: string;
+  pinControl: ProviderSignal["pinControl"];
   resolvedPin: string | undefined;
-  signal: string;
   sourcePin: string | undefined;
 }): MappingSource {
   if (sourcePin) {
@@ -507,7 +616,7 @@ function mappingSource({
     return "auto";
   }
 
-  return mode === "custom_gpio" || !isTmdsSignal(signal) ? "unassigned" : "auto";
+  return mode === "custom_gpio" || pinControl === "always" ? "unassigned" : "auto";
 }
 
 function mappingSourceLabel(source: MappingSource, mode: string) {
@@ -641,24 +750,42 @@ function providerSignalsForEdge(source: ProjectSource, edge: IntentProvidesEdge)
   const functionNode = source.nodes.find((node) => node.id === edge.to.node);
 
   if (functionNode?.kind !== "intent.function") {
-    return tmdsSignals;
+    return [];
   }
 
-  const signals = [...tmdsSignals];
+  const definition = functions[functionNode.function];
 
-  if (functionNode.include?.ddc) {
-    signals.push({ id: "ddc_sda", label: "SDA" }, { id: "ddc_scl", label: "SCL" });
+  if (!definition) {
+    return [];
   }
 
-  if (functionNode.include?.hpd) {
-    signals.push({ id: "hpd", label: "HPD" });
+  return definition.signalGroups.flatMap((group) =>
+    signalGroupEnabled(functionNode, group.include, group.include ? definition.include[group.include] : undefined)
+      ? group.signals
+      : []
+  );
+}
+
+function signalGroupEnabled(
+  node: FunctionNode,
+  includeId: string | undefined,
+  includeDefinition: FunctionIncludeDefinition | undefined
+) {
+  if (!includeId) {
+    return true;
   }
 
-  if (functionNode.include?.cec) {
-    signals.push({ id: "cec", label: "CEC" });
+  const value = node.include?.[includeId];
+
+  if (typeof value === "boolean") {
+    return value;
   }
 
-  return signals;
+  if (value === undefined && includeDefinition?.kind === "boolean") {
+    return includeDefinition.default ?? false;
+  }
+
+  return Boolean(value);
 }
 
 function presetFitsOptions(preset: Record<string, string>, pinOptions: ComponentPinOption[]) {

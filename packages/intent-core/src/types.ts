@@ -110,6 +110,62 @@ export type ComponentDefinition = {
   preferredI2cPairs?: Array<{ sda: string; scl: string }>;
 };
 
+export type FunctionDefinition = {
+  id: string;
+  include: Record<string, FunctionIncludeDefinition>;
+  signalGroups: FunctionSignalGroup[];
+};
+
+export type FunctionIncludeDefinition =
+  | {
+      kind: "boolean";
+      label: string;
+      default?: boolean;
+      readonly?: boolean;
+    }
+  | {
+      kind: "enum";
+      label: string;
+      default?: string;
+      options: FunctionEnumOption[];
+    }
+  | {
+      kind: "object";
+      label: string;
+      fields: Record<string, FunctionIncludeFieldDefinition>;
+    };
+
+export type FunctionIncludeFieldDefinition =
+  | {
+      kind: "enum";
+      label: string;
+      default?: string;
+      options: FunctionEnumOption[];
+    }
+  | {
+      kind: "resistance" | "string";
+      label: string;
+      default?: string;
+    };
+
+export type FunctionEnumOption = {
+  label: string;
+  value: string;
+};
+
+export type FunctionSignalGroup = {
+  id: string;
+  include?: string;
+  label: string;
+  signals: FunctionSignalDefinition[];
+};
+
+export type FunctionSignalDefinition = {
+  id: string;
+  label: string;
+  pinControl: "always" | "custom_only";
+};
+
 export type PinDefinition = {
   name: string;
   capabilities: string[];

@@ -20,7 +20,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
-import { Panel, PanelHeader } from "./panel";
+import { Panel } from "./panel";
 
 type NodePositions = Record<string, XYPosition>;
 
@@ -172,11 +172,10 @@ export function IntentGraphView({
 
   return (
     <Panel className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
-      <PanelHeader eyebrow="Source graph" title="Intent topology" />
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-2 py-2">
         {componentTemplates.map((template) => (
           <button
-            className="h-8 rounded-md border border-border px-3 text-sm font-medium"
+            className="h-7 rounded-md border border-border px-2.5 text-xs font-medium"
             key={template.id}
             onClick={() => onAddComponent(template.id)}
             type="button"
@@ -185,7 +184,7 @@ export function IntentGraphView({
           </button>
         ))}
         <button
-          className="h-8 rounded-md border border-border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-7 rounded-md border border-border px-2.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!hasSelection}
           onClick={deleteSelection}
           type="button"

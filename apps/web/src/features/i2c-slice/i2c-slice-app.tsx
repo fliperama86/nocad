@@ -10,8 +10,10 @@ import type {
   SignalBindings
 } from "@nocad/intent-core";
 import type { Connection, XYPosition } from "@xyflow/react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
+import { cn } from "../../lib/utils";
 import { BindingsPanel } from "./bindings-panel";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
@@ -210,6 +212,7 @@ export function I2cSliceApp() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
 
   const resolved = useMemo(() => resolveProject(source), [source]);
   const selectedChoice = selectedEdgeId
@@ -325,7 +328,7 @@ export function I2cSliceApp() {
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
   }
 
-  function setFunctionInclude(nodeId: string, feature: string, enabled: boolean) {
+  function setFunctionInclude(nodeId: string, feature: string, value: unknown) {
     setSource((current) => ({
       ...current,
       nodes: current.nodes.map((node) =>
@@ -334,7 +337,7 @@ export function I2cSliceApp() {
               ...node,
               include: {
                 ...node.include,
-                [feature]: enabled
+                [feature]: value
               }
             }
           : node
@@ -477,55 +480,53 @@ export function I2cSliceApp() {
 
   return (
     <main className="h-svh overflow-hidden bg-background text-foreground">
-      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 overflow-hidden px-4 py-4 sm:px-6">
-        <header className="flex shrink-0 flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              Intent resolver slice
-            </p>
-            <h1 className="text-2xl font-semibold tracking-normal">RP2350 intent graph</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className="h-9 rounded-md border border-border px-4 text-sm font-medium"
-              onClick={clearCanvas}
-              type="button"
-            >
-              Clear
-            </button>
-            <button
-              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-              onClick={resetSample}
-              type="button"
-            >
-              Load HDMI sample
-            </button>
-          </div>
-        </header>
-
+      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 overflow-hidden px-3 py-3 sm:px-4">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div aria-label="Workspace views" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border pb-3" role="tablist">
-            {workspaceTabs.map((tab) => (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+            <div aria-label="Workspace views" className="flex flex-wrap items-center gap-1.5" role="tablist">
+              {workspaceTabs.map((tab) => (
+                <button
+                  aria-controls={`${tab.id}-panel`}
+                  aria-selected={activeTab === tab.id}
+                  className={workspaceTabClassName(activeTab === tab.id)}
+                  id={`${tab.id}-tab`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
-                aria-controls={`${tab.id}-panel`}
-                aria-selected={activeTab === tab.id}
-                className={workspaceTabClassName(activeTab === tab.id)}
-                id={`${tab.id}-tab`}
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                role="tab"
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={clearCanvas}
                 type="button"
               >
-                {tab.label}
+                Clear
               </button>
-            ))}
+              <button
+                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+                onClick={resetSample}
+                type="button"
+              >
+                Load HDMI sample
+              </button>
+            </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden pt-4">
+          <div className="min-h-0 flex-1 overflow-hidden pt-2">
             {activeTab === "graph" ? (
               <div
                 aria-labelledby="graph-tab"
-                className="grid h-full min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
+                className={cn(
+                  "grid h-full min-h-0 gap-2",
+                  propertiesCollapsed
+                    ? "lg:grid-cols-[minmax(0,1fr)_44px]"
+                    : "lg:grid-cols-[minmax(0,1fr)_360px]"
+                )}
                 id="graph-panel"
                 role="tabpanel"
               >
@@ -544,20 +545,43 @@ export function I2cSliceApp() {
                   resolved={resolved}
                   source={source}
                 />
-                <EdgeAssignmentPanel
-                  className="min-h-0 lg:w-[360px]"
-                  onLockCurrent={lockCurrentAssignment}
-                  onSetAuto={setEdgeAuto}
-                  onSetFunctionInclude={setFunctionInclude}
-                  onSetManualPair={setManualPinPair}
-                  onSetProviderMode={setProviderMode}
-                  onSetProviderPin={setProviderPin}
-                  onSetProviderPinPreset={applyProviderPinPreset}
-                  resolved={resolved}
-                  selectedEdgeId={selectedEdgeId}
-                  selectedNodeId={selectedNodeId}
-                  source={source}
-                />
+                {propertiesCollapsed ? (
+                  <button
+                    aria-label="Expand properties panel"
+                    className="flex h-12 min-h-0 w-full items-center justify-center rounded-md border border-border bg-card text-card-foreground hover:bg-muted lg:h-full"
+                    onClick={() => setPropertiesCollapsed(false)}
+                    title="Expand properties panel"
+                    type="button"
+                  >
+                    <PanelRightOpen aria-hidden="true" className="size-5" strokeWidth={1.8} />
+                  </button>
+                ) : (
+                  <div className="relative h-full min-h-0 lg:w-[360px]">
+                    <button
+                      aria-label="Collapse properties panel"
+                      className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => setPropertiesCollapsed(true)}
+                      title="Collapse properties panel"
+                      type="button"
+                    >
+                      <PanelRightClose aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                    </button>
+                    <EdgeAssignmentPanel
+                      className="h-full min-h-0"
+                      onLockCurrent={lockCurrentAssignment}
+                      onSetAuto={setEdgeAuto}
+                      onSetFunctionInclude={setFunctionInclude}
+                      onSetManualPair={setManualPinPair}
+                      onSetProviderMode={setProviderMode}
+                      onSetProviderPin={setProviderPin}
+                      onSetProviderPinPreset={applyProviderPinPreset}
+                      resolved={resolved}
+                      selectedEdgeId={selectedEdgeId}
+                      selectedNodeId={selectedNodeId}
+                      source={source}
+                    />
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -596,8 +620,8 @@ export function I2cSliceApp() {
 
 function workspaceTabClassName(active: boolean) {
   return active
-    ? "h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-    : "h-9 rounded-md border border-border px-4 text-sm font-medium text-muted-foreground";
+    ? "h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+    : "h-8 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground";
 }
 
 function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {
