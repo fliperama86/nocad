@@ -13,6 +13,7 @@ export const hdmiSliceIds = {
   hdmiFunction: "node_64d3015a-b0d0-48d7-993c-82de06745b65",
   hdmiPort: "node_799c5368-fb8d-44c1-83f3-c98d5e73e8d4",
   mcu: "node_2a4dbf1f-1f50-42b1-8f67-b92a7c5d0f12",
+  rail5v: "node_9e42e934-42f4-4c9f-b3de-fdd097d43ef8",
   videoProvider: "edge_fef00f36-d6ba-472f-b798-98bce467254e"
 } as const;
 
@@ -71,6 +72,13 @@ export function createHdmiSliceProject(): ProjectSource {
           },
           esdProtection: "recommended"
         }
+      },
+      {
+        id: hdmiSliceIds.rail5v,
+        kind: "powerDomain",
+        label: "5V rail",
+        role: "power_5v",
+        voltage: "5V"
       },
       {
         id: hdmiSliceIds.hdmiPort,

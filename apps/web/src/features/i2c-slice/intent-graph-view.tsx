@@ -46,6 +46,7 @@ const defaultViewport: Viewport = {
   zoom: 1
 };
 
+const maxNodeDetailRows = 4;
 const pointerIntentThreshold = 8;
 
 export function IntentGraphView({
@@ -58,6 +59,7 @@ export function IntentGraphView({
   onRemoveEdges,
   onRemoveNodes,
   onSelectedEdgeChange,
+  onSelectedNodeChange,
   positions,
   resolved,
   source
@@ -71,6 +73,7 @@ export function IntentGraphView({
   onRemoveEdges: (edgeIds: string[]) => void;
   onRemoveNodes: (nodeIds: string[]) => void;
   onSelectedEdgeChange: (edgeId: string | undefined) => void;
+  onSelectedNodeChange: (nodeId: string | undefined) => void;
   positions: NodePositions;
   resolved: ResolvedProject;
   source: ProjectSource;
@@ -107,16 +110,22 @@ export function IntentGraphView({
     setSelectedEdgeIds((currentEdgeIds) => (sameStringList(currentEdgeIds, nextEdgeIds) ? currentEdgeIds : nextEdgeIds));
     if (nextEdgeIds.length > 0) {
       onSelectedEdgeChange(nextEdgeIds[0]);
+      onSelectedNodeChange(undefined);
     } else if (nextNodeIds.length > 0) {
       onSelectedEdgeChange(undefined);
+      onSelectedNodeChange(nextNodeIds[0]);
+    } else {
+      onSelectedEdgeChange(undefined);
+      onSelectedNodeChange(undefined);
     }
-  }, [onSelectedEdgeChange]);
+  }, [onSelectedEdgeChange, onSelectedNodeChange]);
 
   const clearSelection = useCallback(() => {
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
     onSelectedEdgeChange(undefined);
-  }, [onSelectedEdgeChange]);
+    onSelectedNodeChange(undefined);
+  }, [onSelectedEdgeChange, onSelectedNodeChange]);
 
   const commitNodePosition = useCallback((node: IntentFlowNode) => {
     onPositionsChange((currentPositions) => ({
@@ -137,9 +146,10 @@ export function IntentGraphView({
       onRemoveNodes(selectedNodeIds);
     }
     onSelectedEdgeChange(undefined);
+    onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [hasSelection, onRemoveEdges, onRemoveNodes, onSelectedEdgeChange, selectedEdgeIds, selectedNodeIds]);
+  }, [hasSelection, onRemoveEdges, onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
 
   const removeDeletedEdges = useCallback((deletedEdges: Edge[]) => {
     const deletableEdgeIds = deletedEdges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
@@ -148,15 +158,17 @@ export function IntentGraphView({
       onRemoveEdges(deletableEdgeIds);
     }
     onSelectedEdgeChange(undefined);
+    onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
-  }, [onRemoveEdges, onSelectedEdgeChange]);
+  }, [onRemoveEdges, onSelectedEdgeChange, onSelectedNodeChange]);
 
   const removeDeletedNodes = useCallback((deletedNodes: IntentFlowNode[]) => {
     onRemoveNodes(deletedNodes.map((node) => node.id));
     onSelectedEdgeChange(undefined);
+    onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [onRemoveNodes, onSelectedEdgeChange]);
+  }, [onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange]);
 
   return (
     <Panel className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
@@ -344,9 +356,9 @@ function buildFlowModel(
   resolved: ResolvedProject,
   positions: NodePositions
 ): { edges: Edge[]; nodes: IntentFlowNode[] } {
-  const resolvedChoices = resolved.resolvedChoices;
   const reservations = collectReservations(source);
   const hasPullups = resolved.generated.some((item) => item.sourceMap.feature === "pullups");
+  const source5vNets = resolved.nets.filter((net) => net.sourceMap.signal === "source5v");
   const pullupRail = source.nodes.find((node) => node.kind === "powerDomain" && node.role === "power_3v3");
   const pullupTargetIds = new Set(
     source.edges.flatMap((edge) =>
@@ -356,6 +368,10 @@ function buildFlowModel(
         : []
     )
   );
+  const generatedPowerTargetIds = new Set([
+    ...pullupTargetIds,
+    ...source5vNets.map((net) => net.endpoints.to.node)
+  ]);
 
   const nodes: IntentFlowNode[] = source.nodes.map((node, index) => {
     const tone =
@@ -371,8 +387,8 @@ function buildFlowModel(
       id: node.id,
       data: {
         connectable: node.kind === "component" || node.kind === "intent.function",
-        details: nodeDetails(node, source.edges, resolvedChoices, reservations.get(node.id) ?? []),
-        generatedPowerTarget: hasPullups && pullupTargetIds.has(node.id),
+        details: nodeDetails(node, source.edges, reservations.get(node.id) ?? []),
+        generatedPowerTarget: generatedPowerTargetIds.has(node.id),
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
         tone
@@ -442,9 +458,27 @@ function buildFlowModel(
           type: "smoothstep"
         }))
       : [];
+  const source5vEdges: Edge[] = source5vNets.map((net) => ({
+    id: net.id,
+    deletable: false,
+    label: "HDMI +5V",
+    markerEnd: {
+      type: MarkerType.ArrowClosed
+    },
+    source: net.endpoints.from.node,
+    sourceHandle: "generated",
+    style: {
+      stroke: "var(--chart-2)",
+      strokeDasharray: "6 4",
+      strokeWidth: 2
+    },
+    target: net.endpoints.to.node,
+    targetHandle: "power",
+    type: "smoothstep"
+  }));
 
   return {
-    edges: [...intentEdges, ...generatedEdges],
+    edges: [...intentEdges, ...generatedEdges, ...source5vEdges],
     nodes
   };
 }
@@ -464,7 +498,6 @@ function nodeSubtitle(node: ProjectNode) {
 function nodeDetails(
   node: ProjectNode,
   sourceEdges: ProjectSource["edges"],
-  resolvedChoices: ResolvedProject["resolvedChoices"],
   reservations: string[]
 ) {
   if (node.kind === "powerDomain") {
@@ -479,59 +512,70 @@ function nodeDetails(
     return enabledFeatures.length > 0 ? enabledFeatures.slice(0, 4) : ["waiting for provider"];
   }
 
-  const bindingLines = resolvedChoices.flatMap((choice) =>
-    Object.entries(choice.selected.bindings).flatMap(([signal, binding]) =>
-      (["from", "to"] as const).flatMap((role) => {
-        const endpoint = binding[role];
+  const sourceIntentLines = sourceIntentDetails(node, sourceEdges);
+  const detailLines = uniqueStrings([...reservationDetails(reservations), ...sourceIntentLines]);
 
-        return endpoint?.node === node.id && endpoint.pin ? [`${signal.toUpperCase()} ${endpoint.pin}`] : [];
-      })
-    )
-  );
-  const sourceIntentLines = bindingLines.length === 0 ? sourceIntentDetails(node, sourceEdges) : [];
+  return detailLines.length > 0 ? capDetailLines(detailLines) : ["no connections"];
+}
 
-  return [
-    ...reservations,
-    ...bindingLines,
-    ...sourceIntentLines,
-    ...(bindingLines.length === 0 && reservations.length === 0 && sourceIntentLines.length === 0 ? ["no connections"] : [])
-  ];
+function capDetailLines(lines: string[]) {
+  if (lines.length <= maxNodeDetailRows) {
+    return lines;
+  }
+
+  return [...lines.slice(0, maxNodeDetailRows - 1), `+${lines.length - maxNodeDetailRows + 1} more`];
 }
 
 function sourceIntentDetails(node: ProjectNode, sourceEdges: ProjectSource["edges"]) {
   return sourceEdges.flatMap((edge) => {
     if (edge.kind === "intent.provides") {
       if (edge.from.node === node.id) {
-        return [`provides ${edge.from.port ?? "source"} / ${edge.strategy?.providerMode ?? "auto"}`];
+        return [`provides ${humanDetailLabel(edge.from.port ?? "source")}`];
       }
 
       if (edge.to.node === node.id) {
-        return [`provider ${edge.to.port ?? "source"} / ${edge.strategy?.providerMode ?? "auto"}`];
+        return [`provider ${humanDetailLabel(edge.to.port ?? "source")}`];
       }
     }
 
     if (edge.kind === "intent.exposes") {
       if (edge.from.node === node.id) {
-        return [`connector ${edge.from.port ?? "connector"}`];
+        return [`connector ${humanDetailLabel(edge.from.port ?? "connector")}`];
       }
 
       if (edge.to.node === node.id) {
-        return [`exposes ${edge.to.port ?? "connector"}`];
+        return [`exposes ${humanDetailLabel(edge.to.port ?? "connector")}`];
       }
     }
 
     if (edge.kind === "intent.connection") {
       if (edge.from.node === node.id) {
-        return [`connects ${edge.from.port ?? "from"}`];
+        return [`connects to ${humanDetailLabel(edge.from.port ?? "connection")}`];
       }
 
       if (edge.to.node === node.id) {
-        return [`connects ${edge.to.port ?? "to"}`];
+        return [`connects to ${humanDetailLabel(edge.to.port ?? "connection")}`];
       }
     }
 
     return [];
   });
+}
+
+function reservationDetails(reservations: string[]) {
+  if (reservations.length === 0) {
+    return [];
+  }
+
+  return [reservations.length === 1 ? "manual pin reservation" : `${reservations.length} manual pin reservations`];
+}
+
+function humanDetailLabel(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)];
 }
 
 function collectReservations(source: ProjectSource) {

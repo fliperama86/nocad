@@ -34,7 +34,7 @@ function createBlankSource() {
   } satisfies ProjectSource;
 }
 
-type ComponentTemplate = "hdmiFunction" | "hdmiPort" | "mcu" | "sensor" | "rail";
+type ComponentTemplate = "hdmiFunction" | "hdmiPort" | "mcu" | "sensor" | "rail3v3" | "rail5v";
 type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
@@ -77,7 +77,8 @@ const dependencyVersions: Record<string, string> = {
 const defaultPositions: NodePositions = {
   [hdmiSliceIds.mcu]: { x: 110, y: 270 },
   [hdmiSliceIds.hdmiFunction]: { x: 460, y: 215 },
-  [hdmiSliceIds.hdmiPort]: { x: 820, y: 270 }
+  [hdmiSliceIds.hdmiPort]: { x: 820, y: 270 },
+  [hdmiSliceIds.rail5v]: { x: 820, y: 80 }
 };
 
 const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition> = {
@@ -97,7 +98,7 @@ const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition>
       refdesHint: "U?"
     }
   },
-  rail: {
+  rail3v3: {
     idPrefix: "node",
     label: "3V3 rail",
     node: {
@@ -105,6 +106,16 @@ const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition>
       label: "3V3 rail",
       role: "power_3v3",
       voltage: "3.3V"
+    }
+  },
+  rail5v: {
+    idPrefix: "node",
+    label: "5V rail",
+    node: {
+      kind: "powerDomain",
+      label: "5V rail",
+      role: "power_5v",
+      voltage: "5V"
     }
   },
   sensor: {
@@ -197,6 +208,7 @@ export function I2cSliceApp() {
   const [positions, setPositions] = useState<NodePositions>({});
   const [graphRevision, setGraphRevision] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
+  const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
 
   const resolved = useMemo(() => resolveProject(source), [source]);
@@ -210,10 +222,15 @@ export function I2cSliceApp() {
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId === edgeId ? currentEdgeId : edgeId));
   }, []);
 
+  const setSelectedGraphNode = useCallback((nodeId: string | undefined) => {
+    setSelectedNodeId((currentNodeId) => (currentNodeId === nodeId ? currentNodeId : nodeId));
+  }, []);
+
   function resetSample() {
     setSource(createSource());
     setPositions(defaultPositions);
     setSelectedEdgeId(undefined);
+    setSelectedNodeId(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -221,6 +238,7 @@ export function I2cSliceApp() {
     setSource(createBlankSource());
     setPositions({});
     setSelectedEdgeId(undefined);
+    setSelectedNodeId(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -294,6 +312,7 @@ export function I2cSliceApp() {
       Object.fromEntries(Object.entries(currentPositions).filter(([nodeId]) => !nodeIdSet.has(nodeId)))
     );
     setSelectedEdgeId(undefined);
+    setSelectedNodeId(undefined);
   }
 
   function removeEdges(edgeIds: string[]) {
@@ -304,6 +323,23 @@ export function I2cSliceApp() {
       edges: current.edges.filter((edge) => !edgeIdSet.has(edge.id))
     }));
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
+  }
+
+  function setFunctionInclude(nodeId: string, feature: string, enabled: boolean) {
+    setSource((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) =>
+        node.id === nodeId && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                [feature]: enabled
+              }
+            }
+          : node
+      )
+    }));
   }
 
   function setEdgeAuto(edgeId: string) {
@@ -503,6 +539,7 @@ export function I2cSliceApp() {
                   onRemoveNodes={removeNodes}
                   onPositionsChange={setPositions}
                   onSelectedEdgeChange={setSelectedGraphEdge}
+                  onSelectedNodeChange={setSelectedGraphNode}
                   positions={positions}
                   resolved={resolved}
                   source={source}
@@ -511,12 +548,14 @@ export function I2cSliceApp() {
                   className="min-h-0 lg:w-[360px]"
                   onLockCurrent={lockCurrentAssignment}
                   onSetAuto={setEdgeAuto}
+                  onSetFunctionInclude={setFunctionInclude}
                   onSetManualPair={setManualPinPair}
                   onSetProviderMode={setProviderMode}
                   onSetProviderPin={setProviderPin}
                   onSetProviderPinPreset={applyProviderPinPreset}
                   resolved={resolved}
                   selectedEdgeId={selectedEdgeId}
+                  selectedNodeId={selectedNodeId}
                   source={source}
                 />
               </div>

@@ -2,9 +2,13 @@ import { components, contracts, packageVersions } from "./fixtures";
 import type {
   ComponentDefinition,
   ComponentNode,
+  ContractSignal,
   Diagnostic,
   EndpointRef,
   IntentConnectionEdge,
+  IntentExposesEdge,
+  IntentProvidesEdge,
+  FunctionNode,
   ProjectEdge,
   ProjectNode,
   ProjectSource,
@@ -16,6 +20,49 @@ import type {
 } from "./types";
 
 const RESOLVER_VERSION = "0.1.0";
+const HDMI_OUTPUT_CONTRACT = "@nocad/video:hdmi_output.v1";
+const hdmiTmdsSignals = [
+  "tmds2_p",
+  "tmds2_n",
+  "tmds1_p",
+  "tmds1_n",
+  "tmds0_p",
+  "tmds0_n",
+  "clock_p",
+  "clock_n"
+];
+const rp2350VideoModePins: Record<string, Record<string, string>> = {
+  auto: {
+    clock_n: "gpio19",
+    clock_p: "gpio18",
+    tmds0_n: "gpio17",
+    tmds0_p: "gpio16",
+    tmds1_n: "gpio15",
+    tmds1_p: "gpio14",
+    tmds2_n: "gpio13",
+    tmds2_p: "gpio12"
+  },
+  hstx: {
+    clock_n: "gpio19",
+    clock_p: "gpio18",
+    tmds0_n: "gpio17",
+    tmds0_p: "gpio16",
+    tmds1_n: "gpio15",
+    tmds1_p: "gpio14",
+    tmds2_n: "gpio13",
+    tmds2_p: "gpio12"
+  },
+  pio_gpio: {
+    clock_n: "gpio19",
+    clock_p: "gpio18",
+    tmds0_n: "gpio17",
+    tmds0_p: "gpio16",
+    tmds1_n: "gpio15",
+    tmds1_p: "gpio14",
+    tmds2_n: "gpio13",
+    tmds2_p: "gpio12"
+  }
+};
 
 type ComponentContext = {
   node: ComponentNode;
@@ -115,6 +162,10 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     }
   }
 
+  const resolvedFunctions = resolveHdmiFunctions(source, context);
+  resolvedChoices.push(...resolvedFunctions.choices);
+  nets.push(...resolvedFunctions.nets);
+
   return {
     schema: "nocad.lock.v0",
     sourceSet: {
@@ -162,6 +213,308 @@ function findPullupRail(nodes: ProjectNode[]): PowerDomainNode | null {
         node.kind === "powerDomain" && (node.role === "power_3v3" || node.voltage === "3.3V")
     ) ?? null
   );
+}
+
+function resolveHdmiFunctions(
+  source: ProjectSource,
+  context: ResolutionContext
+): { choices: ResolvedProject["resolvedChoices"]; nets: ResolvedNet[] } {
+  const choices: ResolvedProject["resolvedChoices"] = [];
+  const nets: ResolvedNet[] = [];
+
+  for (const node of source.nodes) {
+    if (node.kind !== "intent.function" || node.function !== HDMI_OUTPUT_CONTRACT) {
+      continue;
+    }
+
+    const providerEdge = source.edges.find(
+      (edge): edge is IntentProvidesEdge =>
+        edge.kind === "intent.provides" && edge.to.node === node.id && edge.contract === HDMI_OUTPUT_CONTRACT
+    );
+    const connectorEdge = source.edges.find(
+      (edge): edge is IntentExposesEdge =>
+        edge.kind === "intent.exposes" && edge.from.node === node.id && edge.contract === HDMI_OUTPUT_CONTRACT
+    );
+
+    if (!providerEdge || !connectorEdge) {
+      continue;
+    }
+
+    const resolvedProvider = resolveHdmiProvider(node, providerEdge, connectorEdge, context);
+
+    if (resolvedProvider) {
+      choices.push(resolvedProvider.choice);
+      nets.push(...resolvedProvider.nets);
+      reserveBindings(providerEdge.id, resolvedProvider.choice.selected.bindings, context.reservedPins);
+    }
+
+    const source5vNet = resolveHdmiSource5v(node, connectorEdge, source.nodes, context);
+
+    if (source5vNet) {
+      nets.push(source5vNet);
+    }
+  }
+
+  return { choices, nets };
+}
+
+function resolveHdmiProvider(
+  functionNode: FunctionNode,
+  providerEdge: IntentProvidesEdge,
+  connectorEdge: IntentExposesEdge,
+  context: ResolutionContext
+): ResolvedConnection | null {
+  const provider = resolveComponentEndpoint(providerEdge.id, providerEdge.from, context);
+  const connector = resolveComponentEndpoint(connectorEdge.id, connectorEdge.to, context);
+
+  if (!provider || !connector) {
+    return null;
+  }
+
+  const providerMap = provider.definition.ports[providerEdge.from.port ?? ""]?.contractMaps?.[HDMI_OUTPUT_CONTRACT];
+  const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[HDMI_OUTPUT_CONTRACT];
+
+  if (!providerMap || providerMap.role !== "from") {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PORT_CONTRACT_MISMATCH",
+      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not support ${HDMI_OUTPUT_CONTRACT} as the provider endpoint.`,
+      targets: [{ kind: "edge", id: providerEdge.id }]
+    });
+    return null;
+  }
+
+  if (!connectorMap || connectorMap.role !== "to") {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PORT_CONTRACT_MISMATCH",
+      message: `${connectorEdge.to.node}.${connectorEdge.to.port ?? ""} does not support ${HDMI_OUTPUT_CONTRACT} as the connector endpoint.`,
+      targets: [{ kind: "edge", id: connectorEdge.id }]
+    });
+    return null;
+  }
+
+  const signals = hdmiSignalsForFunction(functionNode);
+  const modePins = rp2350VideoModePins[providerEdge.strategy?.providerMode ?? "auto"] ?? {};
+  const localReservedPins = new Set<string>();
+  const bindings: SignalBindings = {};
+
+  for (const signal of signals) {
+    const connectorSignalMap = connectorMap.signalMap[signal];
+    const providerSignalMap = providerMap.signalMap[signal];
+    const connectorPin = connectorSignalMap && "pin" in connectorSignalMap ? connectorSignalMap.pin : undefined;
+
+    if (!connectorPin || !providerSignalMap || !("pinSelector" in providerSignalMap)) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "PORT_CONTRACT_MISMATCH",
+        message: `${HDMI_OUTPUT_CONTRACT} signal "${signal}" is not mapped by the selected provider or connector port.`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      return null;
+    }
+
+    const sourcePin =
+      providerEdge.bindings?.[signal]?.from?.pin ??
+      modePins[signal] ??
+      chooseAvailablePin(
+        provider.node.id,
+        provider.definition,
+        providerSignalMap.pinSelector.capabilities,
+        context,
+        localReservedPins
+      );
+
+    if (!sourcePin) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "NO_AVAILABLE_PIN",
+        message: `No available MCU pin could satisfy HDMI signal "${signal}".`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      return null;
+    }
+
+    const sourceEndpoint = { node: providerEdge.from.node, pin: sourcePin };
+    const sourcePinKey = pinKey(sourceEndpoint);
+    const reserved = context.reservedPins.get(sourcePinKey);
+
+    if (reserved) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "PIN_CONFLICT",
+        message: `${reserved.node}.${reserved.pin} is already reserved by ${reserved.edge}.`,
+        targets: [
+          { kind: "edge", id: providerEdge.id },
+          { kind: "pin", node: reserved.node, pin: reserved.pin }
+        ]
+      });
+      return null;
+    }
+
+    if (localReservedPins.has(sourcePinKey)) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "PIN_CONFLICT",
+        message: `${sourceEndpoint.node}.${sourceEndpoint.pin} is assigned to more than one HDMI signal.`,
+        targets: [
+          { kind: "edge", id: providerEdge.id },
+          { kind: "pin", node: sourceEndpoint.node, pin: sourceEndpoint.pin }
+        ]
+      });
+      return null;
+    }
+
+    if (!pinSatisfiesCapabilities(provider.definition, sourcePin, providerSignalMap.pinSelector.capabilities)) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "PIN_CAPABILITY_MISMATCH",
+        message: `${sourceEndpoint.node}.${sourceEndpoint.pin} cannot satisfy HDMI signal "${signal}".`,
+        targets: [
+          { kind: "edge", id: providerEdge.id },
+          { kind: "pin", node: sourceEndpoint.node, pin: sourceEndpoint.pin }
+        ]
+      });
+      return null;
+    }
+
+    localReservedPins.add(sourcePinKey);
+    bindings[signal] = {
+      from: sourceEndpoint,
+      to: { node: connectorEdge.to.node, pin: connectorPin }
+    };
+  }
+
+  return {
+    choice: {
+      id: `${providerEdge.id}.pinAssignment`,
+      sourceEdge: providerEdge.id,
+      strategy: providerEdge.bindings ? "manual" : "auto",
+      selected: {
+        bindings
+      },
+      reason: "Resolved enabled HDMI output features against MCU capabilities and connector pins."
+    },
+    nets: Object.keys(bindings).map((signal) => createHdmiNet(signal, bindings, providerEdge.id))
+  };
+}
+
+function resolveHdmiSource5v(
+  functionNode: FunctionNode,
+  connectorEdge: IntentExposesEdge,
+  nodes: ProjectNode[],
+  context: ResolutionContext
+): ResolvedNet | null {
+  if (!functionNode.include?.source5v) {
+    return null;
+  }
+
+  const rail = findSource5vRail(nodes);
+
+  if (!rail) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "MISSING_HDMI_5V_POWER",
+      message: "HDMI source power requires a 5V power domain.",
+      targets: [{ kind: "node", id: functionNode.id }]
+    });
+    return null;
+  }
+
+  const connector = context.componentByNodeId.get(connectorEdge.to.node);
+  const source5vPin = connector?.definition.pins.source_5v ? "source_5v" : undefined;
+
+  if (!source5vPin) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PORT_CONTRACT_MISMATCH",
+      message: `${connectorEdge.to.node} does not expose an HDMI +5V pin.`,
+      targets: [{ kind: "edge", id: connectorEdge.id }]
+    });
+    return null;
+  }
+
+  return {
+    id: `net_${functionNode.id}_source5v`,
+    name: "HDMI_5V",
+    endpoints: {
+      from: { node: rail.id },
+      to: { node: connectorEdge.to.node, pin: source5vPin }
+    },
+    direction: "from_to_to",
+    sourceEdge: connectorEdge.id,
+    sourceMap: {
+      edge: connectorEdge.id,
+      signal: "source5v"
+    }
+  };
+}
+
+function findSource5vRail(nodes: ProjectNode[]): PowerDomainNode | null {
+  return (
+    nodes.find(
+      (node): node is PowerDomainNode =>
+        node.kind === "powerDomain" && (node.role === "power_5v" || node.voltage === "5V")
+    ) ?? null
+  );
+}
+
+function hdmiSignalsForFunction(functionNode: FunctionNode) {
+  return [
+    ...(functionNode.include?.tmds === false ? [] : hdmiTmdsSignals),
+    ...(functionNode.include?.ddc ? ["ddc_sda", "ddc_scl"] : []),
+    ...(functionNode.include?.hpd ? ["hpd"] : []),
+    ...(functionNode.include?.cec ? ["cec"] : [])
+  ];
+}
+
+function chooseAvailablePin(
+  nodeId: string,
+  definition: ComponentDefinition,
+  capabilities: string[],
+  context: ResolutionContext,
+  localReservedPins: Set<string>
+) {
+  const pin = Object.entries(definition.pins).find(
+    ([pinId, candidate]) =>
+      capabilities.every((capability) => candidate.capabilities.includes(capability)) &&
+      !context.reservedPins.has(`${nodeId}.${pinId}`) &&
+      !localReservedPins.has(`${nodeId}.${pinId}`)
+  );
+
+  return pin?.[0];
+}
+
+function pinSatisfiesCapabilities(definition: ComponentDefinition, pin: string, capabilities: string[]) {
+  const candidate = definition.pins[pin];
+
+  return Boolean(candidate && capabilities.every((capability) => candidate.capabilities.includes(capability)));
+}
+
+function createHdmiNet(signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
+  const binding = bindings[signal];
+  const from = binding?.from;
+  const to = binding?.to;
+  const contractSignal = contracts[HDMI_OUTPUT_CONTRACT]?.signals[signal] as ContractSignal | undefined;
+
+  if (!from?.pin || !to?.pin || !contractSignal) {
+    throw new Error(`Resolved HDMI ${signal} binding is incomplete.`);
+  }
+
+  return {
+    id: `net_${edgeId}_${signal}`,
+    name: `HDMI_${signal.toUpperCase()}`,
+    endpoints: {
+      from,
+      to
+    },
+    direction: contractSignal.direction,
+    sourceEdge: edgeId,
+    sourceMap: {
+      edge: edgeId,
+      signal
+    }
+  };
 }
 
 function resolveIntentConnection(
@@ -260,14 +613,22 @@ function resolveEndpoint(
   context: ResolutionContext
 ): ComponentContext | null {
   const endpoint = edge[role];
+  return resolveComponentEndpoint(edge.id, endpoint, context);
+}
+
+function resolveComponentEndpoint(
+  edgeId: string,
+  endpoint: EndpointRef,
+  context: ResolutionContext
+): ComponentContext | null {
   const node = context.nodeById.get(endpoint.node);
 
   if (!node) {
     context.diagnostics.push({
       severity: "error",
       code: "UNKNOWN_NODE",
-      message: `Edge "${edge.id}" references missing node "${endpoint.node}".`,
-      targets: [{ kind: "edge", id: edge.id }]
+      message: `Edge "${edgeId}" references missing node "${endpoint.node}".`,
+      targets: [{ kind: "edge", id: edgeId }]
     });
     return null;
   }
@@ -276,9 +637,9 @@ function resolveEndpoint(
     context.diagnostics.push({
       severity: "error",
       code: "INVALID_ENDPOINT_NODE",
-      message: `Edge "${edge.id}" endpoint "${endpoint.node}" is not a component.`,
+      message: `Edge "${edgeId}" endpoint "${endpoint.node}" is not a component.`,
       targets: [
-        { kind: "edge", id: edge.id },
+        { kind: "edge", id: edgeId },
         { kind: "node", id: endpoint.node }
       ]
     });
@@ -297,7 +658,7 @@ function resolveEndpoint(
       code: "UNKNOWN_PORT",
       message: `Node "${endpoint.node}" does not expose port "${endpoint.port ?? ""}".`,
       targets: [
-        { kind: "edge", id: edge.id },
+        { kind: "edge", id: edgeId },
         { kind: "node", id: endpoint.node }
       ]
     });

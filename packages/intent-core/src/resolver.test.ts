@@ -132,18 +132,85 @@ describe("resolveProject", () => {
     );
   });
 
-  it("accepts HDMI function-node source objects that are not elaborated yet", () => {
+  it("elaborates HDMI output features into provider bindings and 5V power", () => {
     const source = createHdmiSliceProject();
 
     const resolved = resolveProject(source);
 
     expect(resolved.diagnostics).toEqual([]);
-    expect(resolved.resolvedChoices).toEqual([]);
-    expect(resolved.nets).toEqual([]);
+    expect(resolved.resolvedChoices).toHaveLength(1);
+    expect(resolved.resolvedChoices[0]?.sourceEdge).toBe(hdmiSliceIds.videoProvider);
+    expect(resolved.resolvedChoices[0]?.selected.bindings).toMatchObject({
+      tmds2_p: {
+        from: { node: hdmiSliceIds.mcu, pin: "gpio12" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+      },
+      ddc_sda: {
+        from: { node: hdmiSliceIds.mcu, pin: "gpio4" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "ddc_sda" }
+      },
+      ddc_scl: {
+        from: { node: hdmiSliceIds.mcu, pin: "gpio5" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "ddc_scl" }
+      },
+      hpd: {
+        from: { node: hdmiSliceIds.mcu, pin: "gpio0" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "hpd" }
+      }
+    });
+    expect(resolved.resolvedChoices[0]?.selected.bindings.cec).toBeUndefined();
+    expect(resolved.nets.map((net) => net.name)).toEqual(
+      expect.arrayContaining(["HDMI_TMDS2_P", "HDMI_DDC_SDA", "HDMI_HPD", "HDMI_5V"])
+    );
     expect(source.edges.map((edge) => edge.id)).toEqual([
       hdmiSliceIds.videoProvider,
       hdmiSliceIds.hdmiConnector
     ]);
+  });
+
+  it("reports a missing 5V rail when HDMI source power is enabled", () => {
+    const source = createHdmiSliceProject();
+    const sourceWithout5v: ProjectSource = {
+      ...source,
+      nodes: source.nodes.filter((node) => node.id !== hdmiSliceIds.rail5v)
+    };
+
+    const resolved = resolveProject(sourceWithout5v);
+
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MISSING_HDMI_5V_POWER"
+        })
+      ])
+    );
+  });
+
+  it("moves HDMI DDC to another I2C pair when GPIO4/GPIO5 are used by a sensor", () => {
+    const hdmiSource = createHdmiSliceProject();
+    const i2cSource = createI2cSliceProject();
+    const source: ProjectSource = {
+      ...hdmiSource,
+      dependencies: {
+        ...hdmiSource.dependencies,
+        "@nocad/sensors": "0.1.0"
+      },
+      nodes: [
+        ...hdmiSource.nodes,
+        ...i2cSource.nodes.filter((node) => node.id !== i2cSliceIds.mcu)
+      ],
+      edges: [
+        ...hdmiSource.edges,
+        ...i2cSource.edges
+      ]
+    };
+
+    const resolved = resolveProject(source);
+    const hdmiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiSliceIds.videoProvider);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(hdmiChoice?.selected.bindings.ddc_sda?.from?.pin).toBe("gpio8");
+    expect(hdmiChoice?.selected.bindings.ddc_scl?.from?.pin).toBe("gpio9");
   });
 
   it("reports missing node references", () => {

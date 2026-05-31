@@ -1,9 +1,11 @@
 import { getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
 import type { ComponentPinOption } from "@nocad/intent-core";
 import type {
+  FunctionNode,
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
+  ProjectNode,
   ProjectSource,
   ResolvedProject
 } from "@nocad/intent-core";
@@ -61,6 +63,7 @@ const gpio12To19Preset = {
   tmds2_p: "gpio12"
 };
 const derivedPinsByProviderMode: Record<string, Record<string, string>> = {
+  auto: gpio12To19Preset,
   hstx: gpio12To19Preset,
   pio_gpio: gpio12To19Preset
 };
@@ -69,36 +72,45 @@ export function EdgeAssignmentPanel({
   className,
   onLockCurrent,
   onSetAuto,
+  onSetFunctionInclude,
   onSetManualPair,
   onSetProviderMode,
   onSetProviderPin,
   onSetProviderPinPreset,
   resolved,
   selectedEdgeId,
+  selectedNodeId,
   source
 }: {
   className?: string;
   onLockCurrent: (edgeId: string) => void;
   onSetAuto: (edgeId: string) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
   onSetManualPair: (edgeId: string, pair: PinPair) => void;
   onSetProviderMode: (edgeId: string, providerMode: string) => void;
   onSetProviderPin: (edgeId: string, signal: string, pin: string | undefined) => void;
   onSetProviderPinPreset: (edgeId: string, pinsBySignal: Record<string, string>) => void;
   resolved: ResolvedProject;
   selectedEdgeId: string | undefined;
+  selectedNodeId: string | undefined;
   source: ProjectSource;
 }) {
   const edge = selectedEdgeId ? findIntentEdge(source, selectedEdgeId) : undefined;
+  const selectedNode = !selectedEdgeId && selectedNodeId ? source.nodes.find((node) => node.id === selectedNodeId) : undefined;
   const labels = nodeLabels(source);
 
   return (
     <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
       <PanelHeader eyebrow="Properties" title="Selection" />
       <div className="grid gap-4 overflow-auto p-4">
-        {!selectedEdgeId ? (
-          <EmptyState text="Select an edge to inspect or edit its source intent." />
+        {!selectedEdgeId && !selectedNode ? (
+          <EmptyState text="Select a node or edge to inspect its source intent." />
         ) : !edge ? (
-          <EmptyState text="The selected graph item has no editable source intent." />
+          selectedNode ? (
+            <NodeProperties node={selectedNode} onSetFunctionInclude={onSetFunctionInclude} />
+          ) : (
+            <EmptyState text="The selected graph item has no editable source intent." />
+          )
         ) : edge.kind === "intent.connection" ? (
           <I2cEdgeProperties
             edge={edge}
@@ -118,6 +130,7 @@ export function EdgeAssignmentPanel({
             onSetProviderPinPreset={onSetProviderPinPreset}
             onSetProviderMode={onSetProviderMode}
             pinOptions={getComponentPinOptions(source, edge.from.node, "gpio")}
+            resolvedChoice={resolved.resolvedChoices.find((choice) => choice.sourceEdge === edge.id)}
             signals={providerSignalsForEdge(source, edge)}
           />
         ) : (
@@ -125,6 +138,94 @@ export function EdgeAssignmentPanel({
         )}
       </div>
     </Panel>
+  );
+}
+
+function NodeProperties({
+  node,
+  onSetFunctionInclude
+}: {
+  node: ProjectNode;
+  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+}) {
+  if (node.kind === "intent.function") {
+    return <FunctionNodeProperties node={node} onSetFunctionInclude={onSetFunctionInclude} />;
+  }
+
+  return (
+    <>
+      <NodeHeading node={node} />
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <Field label="Kind" value={node.kind} />
+        <Field label="Role" value={node.role ?? "none"} />
+      </div>
+    </>
+  );
+}
+
+function FunctionNodeProperties({
+  node,
+  onSetFunctionInclude
+}: {
+  node: FunctionNode;
+  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+}) {
+  return (
+    <>
+      <NodeHeading node={node} />
+
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <Field label="Function" value={node.function} />
+      </div>
+
+      {node.function === "@nocad/video:hdmi_output.v1" ? (
+        <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+          <div className="text-sm font-medium">Features</div>
+          <FeatureToggle
+            checked={node.include?.ddc !== false && Boolean(node.include?.ddc)}
+            label="DDC"
+            onChange={(enabled) => onSetFunctionInclude(node.id, "ddc", enabled)}
+          />
+          <FeatureToggle
+            checked={node.include?.hpd !== false && Boolean(node.include?.hpd)}
+            label="HPD"
+            onChange={(enabled) => onSetFunctionInclude(node.id, "hpd", enabled)}
+          />
+          <FeatureToggle
+            checked={Boolean(node.include?.cec)}
+            label="CEC"
+            onChange={(enabled) => onSetFunctionInclude(node.id, "cec", enabled)}
+          />
+          <FeatureToggle
+            checked={node.include?.source5v !== false && Boolean(node.include?.source5v)}
+            label="5V source"
+            onChange={(enabled) => onSetFunctionInclude(node.id, "source5v", enabled)}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function FeatureToggle({
+  checked,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+      <span className="font-medium">{label}</span>
+      <input
+        checked={checked}
+        className="size-4 accent-primary"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+    </label>
   );
 }
 
@@ -229,6 +330,7 @@ function ProviderEdgeProperties({
   onSetProviderPin,
   onSetProviderPinPreset,
   pinOptions,
+  resolvedChoice,
   signals
 }: {
   edge: IntentProvidesEdge;
@@ -238,6 +340,7 @@ function ProviderEdgeProperties({
   onSetProviderPin: (edgeId: string, signal: string, pin: string | undefined) => void;
   onSetProviderPinPreset: (edgeId: string, pinsBySignal: Record<string, string>) => void;
   pinOptions: ComponentPinOption[];
+  resolvedChoice: ResolvedProject["resolvedChoices"][number] | undefined;
   signals: ProviderSignal[];
 }) {
   const mode = edge.strategy?.providerMode ?? "auto";
@@ -271,6 +374,7 @@ function ProviderEdgeProperties({
         onSetProviderPin={onSetProviderPin}
         onSetProviderPinPreset={onSetProviderPinPreset}
         pinOptions={pinOptions}
+        resolvedChoice={resolvedChoice}
         signals={signals}
       />
     </>
@@ -283,6 +387,7 @@ function SignalMapping({
   onSetProviderPin,
   onSetProviderPinPreset,
   pinOptions,
+  resolvedChoice,
   signals
 }: {
   edge: IntentProvidesEdge;
@@ -290,12 +395,16 @@ function SignalMapping({
   onSetProviderPin: (edgeId: string, signal: string, pin: string | undefined) => void;
   onSetProviderPinPreset: (edgeId: string, pinsBySignal: Record<string, string>) => void;
   pinOptions: ComponentPinOption[];
+  resolvedChoice: ResolvedProject["resolvedChoices"][number] | undefined;
   signals: ProviderSignal[];
 }) {
   const derivedPins = derivedPinsByProviderMode[mode] ?? {};
   const selectedPins = new Set(
     [
       ...Object.values(derivedPins),
+      ...Object.values(resolvedChoice?.selected.bindings ?? {}).flatMap((binding) =>
+        binding.from?.pin ? [binding.from.pin] : []
+      ),
       ...signals.flatMap((signal) => {
         const pin = edge.bindings?.[signal.id]?.from?.pin;
 
@@ -324,9 +433,10 @@ function SignalMapping({
         {signals.map((signal) => {
           const sourcePin = edge.bindings?.[signal.id]?.from?.pin;
           const derivedPin = derivedPins[signal.id];
+          const resolvedPin = resolvedChoice?.selected.bindings[signal.id]?.from?.pin;
           const selectedPin = sourcePin ?? "";
-          const visiblePin = sourcePin ?? derivedPin;
-          const source = mappingSource({ derivedPin, mode, signal: signal.id, sourcePin });
+          const visiblePin = sourcePin ?? derivedPin ?? resolvedPin;
+          const source = mappingSource({ derivedPin, mode, resolvedPin, signal: signal.id, sourcePin });
           const editable = mode === "custom_gpio" || !isTmdsSignal(signal.id);
 
           return (
@@ -340,7 +450,13 @@ function SignalMapping({
                     onChange={(event) => onSetProviderPin(edge.id, signal.id, event.target.value || undefined)}
                     value={selectedPin}
                   >
-                    <option value="">{derivedPin ? `${pinLabel(derivedPin)} (mode)` : "Unassigned"}</option>
+                    <option value="">
+                      {derivedPin
+                        ? `${pinLabel(derivedPin)} (mode)`
+                        : resolvedPin
+                          ? `${pinLabel(resolvedPin)} (auto)`
+                          : "Unassigned"}
+                    </option>
                     {pinOptions.map((pin) => (
                       <option disabled={selectedPin !== pin.id && selectedPins.has(pin.id)} key={pin.id} value={pin.id}>
                         {pinLabel(pin.id)}
@@ -369,11 +485,13 @@ function isTmdsSignal(signal: string) {
 function mappingSource({
   derivedPin,
   mode,
+  resolvedPin,
   signal,
   sourcePin
 }: {
   derivedPin: string | undefined;
   mode: string;
+  resolvedPin: string | undefined;
   signal: string;
   sourcePin: string | undefined;
 }): MappingSource {
@@ -383,6 +501,10 @@ function mappingSource({
 
   if (derivedPin) {
     return "mode";
+  }
+
+  if (resolvedPin) {
+    return "auto";
   }
 
   return mode === "custom_gpio" || !isTmdsSignal(signal) ? "unassigned" : "auto";
@@ -435,6 +557,15 @@ function EdgeHeading({ edge, labels }: { edge: SelectableIntentEdge; labels: Map
       <div className="text-xs text-muted-foreground">
         {labels.get(edge.from.node) ?? "Unknown"} {"->"} {labels.get(edge.to.node) ?? "Unknown"}
       </div>
+    </div>
+  );
+}
+
+function NodeHeading({ node }: { node: ProjectNode }) {
+  return (
+    <div className="grid gap-1">
+      <div className="text-sm font-semibold">{node.label ?? node.role ?? "Node"}</div>
+      <div className="text-xs text-muted-foreground">{node.kind}</div>
     </div>
   );
 }

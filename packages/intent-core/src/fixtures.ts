@@ -7,6 +7,23 @@ export const contracts: Record<string, ConnectionContract> = {
       sda: { direction: "bidirectional" },
       scl: { direction: "bidirectional" }
     }
+  },
+  "@nocad/video:hdmi_output.v1": {
+    id: "@nocad/video:hdmi_output.v1",
+    signals: {
+      tmds2_p: { direction: "from_to_to" },
+      tmds2_n: { direction: "from_to_to" },
+      tmds1_p: { direction: "from_to_to" },
+      tmds1_n: { direction: "from_to_to" },
+      tmds0_p: { direction: "from_to_to" },
+      tmds0_n: { direction: "from_to_to" },
+      clock_p: { direction: "from_to_to" },
+      clock_n: { direction: "from_to_to" },
+      ddc_sda: { direction: "bidirectional" },
+      ddc_scl: { direction: "bidirectional" },
+      hpd: { direction: "to_to_from" },
+      cec: { direction: "bidirectional" }
+    }
   }
 };
 
@@ -23,6 +40,28 @@ export const components: Record<string, ComponentDefinition> = {
             signalMap: {
               sda: { pinSelector: { capabilities: ["i2c.sda", "gpio"] } },
               scl: { pinSelector: { capabilities: ["i2c.scl", "gpio"] } }
+            }
+          }
+        }
+      },
+      video_out: {
+        kind: "derived_port",
+        contractMaps: {
+          "@nocad/video:hdmi_output.v1": {
+            role: "from",
+            signalMap: {
+              tmds2_p: { pinSelector: { capabilities: ["gpio"] } },
+              tmds2_n: { pinSelector: { capabilities: ["gpio"] } },
+              tmds1_p: { pinSelector: { capabilities: ["gpio"] } },
+              tmds1_n: { pinSelector: { capabilities: ["gpio"] } },
+              tmds0_p: { pinSelector: { capabilities: ["gpio"] } },
+              tmds0_n: { pinSelector: { capabilities: ["gpio"] } },
+              clock_p: { pinSelector: { capabilities: ["gpio"] } },
+              clock_n: { pinSelector: { capabilities: ["gpio"] } },
+              ddc_sda: { pinSelector: { capabilities: ["i2c.sda", "gpio"] } },
+              ddc_scl: { pinSelector: { capabilities: ["i2c.scl", "gpio"] } },
+              hpd: { pinSelector: { capabilities: ["gpio"] } },
+              cec: { pinSelector: { capabilities: ["gpio"] } }
             }
           }
         }
@@ -122,7 +161,26 @@ export const components: Record<string, ComponentDefinition> = {
     },
     ports: {
       hdmi: {
-        kind: "fixed_port"
+        kind: "fixed_port",
+        contractMaps: {
+          "@nocad/video:hdmi_output.v1": {
+            role: "to",
+            signalMap: {
+              tmds2_p: { pin: "tmds2_p" },
+              tmds2_n: { pin: "tmds2_n" },
+              tmds1_p: { pin: "tmds1_p" },
+              tmds1_n: { pin: "tmds1_n" },
+              tmds0_p: { pin: "tmds0_p" },
+              tmds0_n: { pin: "tmds0_n" },
+              clock_p: { pin: "clock_p" },
+              clock_n: { pin: "clock_n" },
+              ddc_sda: { pin: "ddc_sda" },
+              ddc_scl: { pin: "ddc_scl" },
+              hpd: { pin: "hpd" },
+              cec: { pin: "cec" }
+            }
+          }
+        }
       }
     }
   },
@@ -161,6 +219,10 @@ function createRp2350Pins(): Record<string, PinDefinition> {
 
       if (index === 5 || index === 9) {
         capabilities.push("i2c.scl");
+      }
+
+      if (index >= 12 && index <= 19) {
+        capabilities.push("hstx");
       }
 
       return [
