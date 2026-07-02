@@ -6,9 +6,13 @@ import {
   MarkerType,
   Position,
   ReactFlow,
+  applyEdgeChanges,
+  applyNodeChanges,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
+  type NodeChange,
   type NodeProps,
   type NodeTypes,
   type OnSelectionChangeFunc,
@@ -83,8 +87,18 @@ export function IntentGraphView({
   const [flowReady, setFlowReady] = useState(false);
   const flowContainerRef = useRef<HTMLDivElement>(null);
   const flowModel = useMemo(() => buildFlowModel(source, resolved, positions), [positions, source, resolved]);
-  const graphKey = useMemo(() => createGraphKey(source, graphRevision), [graphRevision, source]);
+  const [flowNodes, setFlowNodes] = useState<IntentFlowNode[]>(flowModel.nodes);
+  const [flowEdges, setFlowEdges] = useState<Edge[]>(flowModel.edges);
+  const previousGraphRevisionRef = useRef(graphRevision);
   const hasSelection = selectedNodeIds.length > 0 || selectedEdgeIds.length > 0;
+
+  useEffect(() => {
+    const shouldResetGraphState = previousGraphRevisionRef.current !== graphRevision;
+
+    previousGraphRevisionRef.current = graphRevision;
+    setFlowNodes((currentNodes) => reconcileNodes(currentNodes, flowModel.nodes, shouldResetGraphState));
+    setFlowEdges((currentEdges) => reconcileEdges(currentEdges, flowModel.edges, shouldResetGraphState));
+  }, [flowModel.edges, flowModel.nodes, graphRevision]);
 
   useEffect(() => {
     const container = flowContainerRef.current;
@@ -119,6 +133,14 @@ export function IntentGraphView({
       onSelectedNodeChange(undefined);
     }
   }, [onSelectedEdgeChange, onSelectedNodeChange]);
+
+  const updateNodes = useCallback((changes: NodeChange<IntentFlowNode>[]) => {
+    setFlowNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
+  }, []);
+
+  const updateEdges = useCallback((changes: EdgeChange<Edge>[]) => {
+    setFlowEdges((currentEdges) => applyEdgeChanges(changes, currentEdges));
+  }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedEdgeIds([]);
@@ -202,20 +224,22 @@ export function IntentGraphView({
             className="intent-flow"
             colorMode="system"
             connectionDragThreshold={pointerIntentThreshold}
-            defaultEdges={flowModel.edges}
-            defaultNodes={flowModel.nodes}
             defaultViewport={defaultViewport}
             deleteKeyCode={["Backspace", "Delete"]}
+            edges={flowEdges}
             edgesFocusable
             elementsSelectable
-            key={graphKey}
+            key={graphRevision}
+            nodes={flowNodes}
             nodesFocusable
             nodeTypes={nodeTypes}
             nodeClickDistance={pointerIntentThreshold}
             nodeDragThreshold={pointerIntentThreshold}
             onConnect={onConnectNodes}
+            onEdgesChange={updateEdges}
             onEdgesDelete={removeDeletedEdges}
             onNodeDragStop={(_, node) => commitNodePosition(node)}
+            onNodesChange={updateNodes}
             onNodesDelete={removeDeletedNodes}
             onPaneClick={clearSelection}
             onSelectionChange={updateSelection}
@@ -235,26 +259,47 @@ function sameStringList(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function createGraphKey(source: ProjectSource, revision: number) {
-  return JSON.stringify({
-    edges: source.edges.map((edge) => [
-      edge.id,
-      edge.kind,
-      edge.label,
-      edge.role,
-      edge.kind === "intent.connection" ? edge.strategy?.pinAssignment : undefined,
-      edge.kind === "intent.provides" ? edge.strategy?.providerMode : undefined,
-      edge.kind === "intent.connection" || edge.kind === "intent.provides" ? edge.bindings : undefined
-    ]),
-    nodes: source.nodes.map((node) => [
-      node.id,
-      node.kind,
-      node.label,
-      node.role,
-      node.kind === "intent.function" ? node.function : undefined,
-      node.kind === "intent.function" ? node.include : undefined
-    ]),
-    revision
+function reconcileNodes(
+  currentNodes: IntentFlowNode[],
+  nextNodes: IntentFlowNode[],
+  resetGraphState: boolean
+) {
+  if (resetGraphState) {
+    return nextNodes;
+  }
+
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+
+  return nextNodes.map((nextNode) => {
+    const currentNode = currentById.get(nextNode.id);
+
+    return currentNode
+      ? {
+          ...nextNode,
+          dragging: currentNode.dragging,
+          position: currentNode.position,
+          selected: currentNode.selected
+        }
+      : nextNode;
+  });
+}
+
+function reconcileEdges(currentEdges: Edge[], nextEdges: Edge[], resetGraphState: boolean) {
+  if (resetGraphState) {
+    return nextEdges;
+  }
+
+  const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+
+  return nextEdges.map((nextEdge) => {
+    const currentEdge = currentById.get(nextEdge.id);
+
+    return currentEdge
+      ? {
+          ...nextEdge,
+          selected: currentEdge.selected
+        }
+      : nextEdge;
   });
 }
 

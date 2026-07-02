@@ -1,4 +1,11 @@
-import { createHdmiSliceProject, hdmiSliceIds, resolveProject } from "@nocad/intent-core";
+import {
+  createHdmiSliceProject,
+  createHdmiTxSliceProject,
+  createRp2350HdmiTxSliceProject,
+  hdmiSliceIds,
+  hdmiTxSliceIds,
+  resolveProject
+} from "@nocad/intent-core";
 import type {
   GraphObjectMetadata,
   IntentConnectionEdge,
@@ -36,7 +43,7 @@ function createBlankSource() {
   } satisfies ProjectSource;
 }
 
-type ComponentTemplate = "hdmiFunction" | "hdmiPort" | "mcu" | "sensor" | "rail3v3" | "rail5v";
+type ComponentTemplate = "fpga" | "hdmiFunction" | "hdmiPort" | "hdmiTx" | "mcu" | "sensor" | "rail3v3" | "rail5v";
 type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
@@ -72,18 +79,59 @@ type ComponentTemplateDefinition = {
 const dependencyVersions: Record<string, string> = {
   "@nocad/connectors": "0.1.0",
   "@nocad/video": "0.1.0",
+  "@nocad/fpga": "0.1.0",
+  "@nocad/hdmi-tx": "0.1.0",
   "@nocad/rp2350": "0.1.0",
   "@nocad/sensors": "0.1.0"
 };
 
-const defaultPositions: NodePositions = {
+const directHdmiPositions: NodePositions = {
   [hdmiSliceIds.mcu]: { x: 110, y: 270 },
   [hdmiSliceIds.hdmiFunction]: { x: 460, y: 215 },
   [hdmiSliceIds.hdmiPort]: { x: 820, y: 270 },
   [hdmiSliceIds.rail5v]: { x: 820, y: 80 }
 };
 
+const hdmiTxPositions: NodePositions = {
+  [hdmiTxSliceIds.videoSource]: { x: 80, y: 280 },
+  [hdmiTxSliceIds.tx]: { x: 400, y: 280 },
+  [hdmiTxSliceIds.hdmiFunction]: { x: 720, y: 220 },
+  [hdmiTxSliceIds.hdmiPort]: { x: 1040, y: 280 },
+  [hdmiTxSliceIds.rail5v]: { x: 1040, y: 80 }
+};
+
 const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition> = {
+  fpga: {
+    dependency: {
+      name: "@nocad/fpga",
+      version: dependencyVersions["@nocad/fpga"]
+    },
+    idPrefix: "node",
+    label: "FPGA",
+    node: {
+      kind: "component",
+      label: "Video source",
+      role: "video_source",
+      component: "@nocad/fpga:GENERIC_FPGA",
+      package: "BGA",
+      refdesHint: "U?"
+    }
+  },
+  hdmiTx: {
+    dependency: {
+      name: "@nocad/hdmi-tx",
+      version: dependencyVersions["@nocad/hdmi-tx"]
+    },
+    idPrefix: "node",
+    label: "HDMI TX",
+    node: {
+      kind: "component",
+      label: "HDMI transmitter",
+      role: "hdmi_tx",
+      component: "@nocad/hdmi-tx:IT66121",
+      refdesHint: "U?"
+    }
+  },
   mcu: {
     dependency: {
       name: "@nocad/rp2350",
@@ -229,12 +277,24 @@ export function I2cSliceApp() {
     setSelectedNodeId((currentNodeId) => (currentNodeId === nodeId ? currentNodeId : nodeId));
   }, []);
 
-  function resetSample() {
-    setSource(createSource());
-    setPositions(defaultPositions);
+  function loadSource(nextSource: ProjectSource, nextPositions: NodePositions) {
+    setSource(nextSource);
+    setPositions(nextPositions);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setGraphRevision((revision) => revision + 1);
+  }
+
+  function resetSample() {
+    loadSource(createSource(), directHdmiPositions);
+  }
+
+  function loadTxSample() {
+    loadSource(createHdmiTxSliceProject(), hdmiTxPositions);
+  }
+
+  function loadRp2350TxSample() {
+    loadSource(createRp2350HdmiTxSliceProject(), hdmiTxPositions);
   }
 
   function clearCanvas() {
@@ -508,11 +568,25 @@ export function I2cSliceApp() {
                 Clear
               </button>
               <button
-                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
                 onClick={resetSample}
                 type="button"
               >
-                Load HDMI sample
+                Load direct HDMI
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={loadTxSample}
+                type="button"
+              >
+                Load FPGA via TX IC
+              </button>
+              <button
+                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+                onClick={loadRp2350TxSample}
+                type="button"
+              >
+                Load RP2350 via TX IC
               </button>
             </div>
           </div>
@@ -844,7 +918,19 @@ function isConnectorNode(node: ProjectNode) {
 }
 
 function componentProviderPort(node: ProjectNode) {
-  return node.kind === "component" && node.role === "mcu" ? "video_out" : "provider";
+  if (node.kind !== "component") {
+    return "provider";
+  }
+
+  if (node.role === "mcu") {
+    return "video_out";
+  }
+
+  if (node.role === "hdmi_tx") {
+    return "hdmi_tx";
+  }
+
+  return "provider";
 }
 
 function connectorPort(node: ProjectNode) {

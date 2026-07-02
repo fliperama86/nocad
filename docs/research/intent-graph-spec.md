@@ -168,6 +168,68 @@ Provider modes live in component definitions. A source edge selects a provider m
 
 The target function node does not know what `hstx` means. The RP2350 package defines that mode, its required resources, its pin constraints, and any implementation-specific signal mapping options.
 
+### Provider Chains
+
+A function node describes board-level behavior at an external or user-facing boundary. Implementation choices are represented by provider topology. If a user chooses an HDMI transmitter IC instead of direct TMDS drive, the HDMI function node is unchanged. The `intent.provides` edge simply moves from the MCU or FPGA to the transmitter IC, and the upstream pixel and control links become ordinary `intent.connection` edges.
+
+Direct drive:
+
+```txt
+mcu.video_out --intent.provides--> hdmi_output --intent.exposes--> hdmi_connector
+```
+
+HDMI transmitter IC:
+
+```txt
+mcu.dpi_out --intent.connection, builtin:dpi.v1--> tx.video_in
+mcu.i2c     --intent.connection, builtin:i2c.v1--> tx.ctrl
+tx.hdmi_tx  --intent.provides---------------> hdmi_output --intent.exposes--> hdmi_connector
+```
+
+The `hdmi_output` node and its `intent.exposes` edge to the connector remain the same in both cases. The difference is which concrete port provides the function, and which upstream contracts must be satisfied before that provider mode is valid.
+
+Provider modes may declare cross-port requirements. A provider requirement states that a port on the same component must be bound to a compatible contract before this mode can provide the function. Requirements are mandatory by default; use `"optional": true` only for dependencies that improve or modify a mode but are not required for validity.
+
+```json
+{
+  "ports": {
+    "hdmi_tx": {
+      "kind": "fixed_port",
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "hdmi_1v4": {
+              "requires": {
+                "ports": {
+                  "video_in": {
+                    "contract": "builtin:dpi.v1"
+                  },
+                  "ctrl": {
+                    "contract": "builtin:i2c.v1"
+                  }
+                }
+              },
+              "signalMap": {
+                "tmds2.p": { "pin": "tmds2_p" },
+                "tmds2.n": { "pin": "tmds2_n" },
+                "ddc.sda": { "pin": "ddc_sda" },
+                "ddc.scl": { "pin": "ddc_scl" },
+                "hpd": { "pin": "hpd" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The resolver validates these requirements against the resolved graph. If `tx.hdmi_tx` provides `@nocad/video:hdmi_output.v1` but no authored edge binds `tx.video_in` to `builtin:dpi.v1`, the resolver should emit a diagnostic on the provider edge instead of changing the function node schema. If an authored upstream edge exists but fails to resolve, the primary diagnostic should stay on that upstream edge and the provider-requirement diagnostic should not misleadingly tell the user to add an edge that already exists.
+
+This pattern is not HDMI-specific. A USB-serial bridge can provide a debug UART exposure while requiring a USB device connection. An audio codec can provide line out while requiring I2S and I2C. If adding a feature seems to require separate function node types for each implementation, that is a sign that implementation detail has leaked into the function definition and should move to provider topology or provider-mode requirements.
+
 ### Connection Contract
 
 A connection contract is the semantic signal contract for an edge. It may be a built-in contract, a package-provided contract, a project-local contract, or an inline object.

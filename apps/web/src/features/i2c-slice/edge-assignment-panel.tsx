@@ -1,4 +1,4 @@
-import { functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
+import { components, functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
 import type {
   ComponentPinOption,
   FunctionIncludeDefinition,
@@ -36,14 +36,6 @@ const defaultProviderModes: ProviderModeOption[] = [
   { label: "Custom GPIO", value: "custom_gpio" }
 ];
 
-const providerModesByComponent: Record<string, ProviderModeOption[]> = {
-  "@nocad/rp2350:RP2350A": [
-    { label: "Auto", value: "auto" },
-    { label: "HSTX", value: "hstx" },
-    { label: "PIO GPIO", value: "pio_gpio" },
-    { label: "Custom GPIO", value: "custom_gpio" }
-  ]
-};
 const gpio12To19Preset = {
   clock_n: "gpio19",
   clock_p: "gpio18",
@@ -360,6 +352,11 @@ function I2cEdgeProperties({
   source: ProjectSource;
 }) {
   const choice = resolved.resolvedChoices.find((resolvedChoice) => resolvedChoice.sourceEdge === edge.id);
+
+  if (edge.contract !== "builtin:i2c.v1") {
+    return <GenericConnectionEdgeProperties choice={choice} edge={edge} labels={labels} />;
+  }
+
   const options = getI2cPinPairOptions(source, edge.id);
   const sourcePair = bindingPair(edge.bindings);
   const resolvedPair = bindingPair(choice?.selected.bindings);
@@ -430,6 +427,50 @@ function I2cEdgeProperties({
         >
           Clear override
         </button>
+      </div>
+    </>
+  );
+}
+
+function GenericConnectionEdgeProperties({
+  choice,
+  edge,
+  labels
+}: {
+  choice: ResolvedProject["resolvedChoices"][number] | undefined;
+  edge: IntentConnectionEdge;
+  labels: Map<string, string>;
+}) {
+  const bindings = Object.entries(choice?.selected.bindings ?? {});
+
+  return (
+    <>
+      <EdgeHeading edge={edge} labels={labels} />
+
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <Field label="Contract" value={edge.contract} />
+        <Field label="From port" value={edge.from.port ?? "from"} />
+        <Field label="To port" value={edge.to.port ?? "to"} />
+        <Field label="Resolved signals" value={bindings.length.toString()} />
+      </div>
+
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <div className="text-sm font-medium">Resolved bindings</div>
+        {bindings.length > 0 ? (
+          bindings.slice(0, 10).map(([signal, binding]) => (
+            <div className="grid gap-1 rounded-md bg-muted px-2 py-2 text-xs" key={signal}>
+              <div className="font-mono font-medium">{signal}</div>
+              <div className="font-mono text-muted-foreground">
+                {endpointLabel(binding.from, labels)} {"->"} {endpointLabel(binding.to, labels)}
+              </div>
+            </div>
+          ))
+        ) : (
+          <EmptyState text="No resolved bindings for this connection." />
+        )}
+        {bindings.length > 10 ? (
+          <div className="text-xs text-muted-foreground">+{bindings.length - 10} more in the Resolution or JSON tab</div>
+        ) : null}
       </div>
     </>
   );
@@ -736,6 +777,14 @@ function nodeLabels(source: ProjectSource) {
   return new Map(source.nodes.map((node) => [node.id, node.label ?? node.role ?? "Node"]));
 }
 
+function endpointLabel(endpoint: { node?: string; pin?: string; port?: string } | undefined, labels: Map<string, string>) {
+  if (!endpoint?.node) {
+    return "unassigned";
+  }
+
+  return `${labels.get(endpoint.node) ?? endpoint.node}.${endpoint.pin ?? endpoint.port ?? "?"}`;
+}
+
 function providerModesForEdge(source: ProjectSource, edge: IntentProvidesEdge) {
   const providerNode = source.nodes.find((node) => node.id === edge.from.node);
 
@@ -743,7 +792,21 @@ function providerModesForEdge(source: ProjectSource, edge: IntentProvidesEdge) {
     return defaultProviderModes;
   }
 
-  return providerModesByComponent[providerNode.component] ?? defaultProviderModes;
+  const modeDefinitions =
+    components[providerNode.component]?.ports[edge.from.port ?? ""]?.provides?.[edge.contract]?.modes;
+
+  if (!modeDefinitions) {
+    return defaultProviderModes;
+  }
+
+  return Object.entries(modeDefinitions).map(([value, definition]) => ({
+    label: definition.label ?? humanModeLabel(value),
+    value
+  }));
+}
+
+function humanModeLabel(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function providerSignalsForEdge(source: ProjectSource, edge: IntentProvidesEdge): ProviderSignal[] {

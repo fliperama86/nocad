@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { getComponentPinOptions, getI2cPinPairOptions } from "./assignment";
-import { createHdmiSliceProject, createI2cSliceProject, hdmiSliceIds, i2cSliceIds } from "./samples";
+import {
+  createHdmiSliceProject,
+  createHdmiTxSliceProject,
+  createI2cSliceProject,
+  createRp2350HdmiTxSliceProject,
+  hdmiSliceIds,
+  hdmiTxSliceIds,
+  i2cSliceIds
+} from "./samples";
 import { resolveProject } from "./resolver";
 import type { ProjectSource } from "./types";
 
@@ -213,6 +221,182 @@ describe("resolveProject", () => {
     expect(hdmiChoice?.selected.bindings.ddc_scl?.from?.pin).toBe("gpio9");
   });
 
+  it("resolves HDMI output through an authored TX IC provider chain", () => {
+    const source = createHdmiTxSliceProject();
+
+    const resolved = resolveProject(source);
+    const hdmiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider);
+    const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
+    const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(dpiChoice?.selected.bindings.pclk).toMatchObject({
+      from: { node: hdmiTxSliceIds.videoSource, pin: "io0" },
+      to: { node: hdmiTxSliceIds.tx, pin: "pclk" }
+    });
+    expect(ctrlChoice?.selected.bindings).toMatchObject({
+      sda: {
+        from: { node: hdmiTxSliceIds.videoSource, pin: "io60" },
+        to: { node: hdmiTxSliceIds.tx, pin: "ctrl_sda" }
+      },
+      scl: {
+        from: { node: hdmiTxSliceIds.videoSource, pin: "io61" },
+        to: { node: hdmiTxSliceIds.tx, pin: "ctrl_scl" }
+      }
+    });
+    expect(hdmiChoice?.selected.bindings).toMatchObject({
+      tmds2_p: {
+        from: { node: hdmiTxSliceIds.tx, pin: "tmds2_p" },
+        to: { node: hdmiTxSliceIds.hdmiPort, pin: "tmds2_p" }
+      },
+      ddc_sda: {
+        from: { node: hdmiTxSliceIds.tx, pin: "ddc_sda" },
+        to: { node: hdmiTxSliceIds.hdmiPort, pin: "ddc_sda" }
+      },
+      hpd: {
+        from: { node: hdmiTxSliceIds.tx, pin: "hpd" },
+        to: { node: hdmiTxSliceIds.hdmiPort, pin: "hpd" }
+      }
+    });
+    expect(hdmiChoice?.selected.providerMode).toBe("hdmi_1v4");
+    expect(resolved.nets.map((net) => net.name)).toEqual(
+      expect.arrayContaining(["DPI_PCLK", "I2C_SDA", "HDMI_TMDS2_P", "HDMI_5V"])
+    );
+  });
+
+  it("resolves a pin-constrained TX IC provider chain independent of connection edge order", () => {
+    const dpiFirst = resolveProject(createRp2350HdmiTxProject("dpi-first"));
+    const ctrlFirst = resolveProject(createRp2350HdmiTxProject("ctrl-first"));
+
+    for (const resolved of [dpiFirst, ctrlFirst]) {
+      const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
+      const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
+
+      expect(resolved.diagnostics).toEqual([]);
+      expect(ctrlChoice?.selected.bindings).toMatchObject({
+        sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio4" } },
+        scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio5" } }
+      });
+      expect(sourcePinsForChoice(dpiChoice)).not.toEqual(expect.arrayContaining(["gpio4", "gpio5"]));
+    }
+  });
+
+  it("exposes RP2350 as an upstream DPI and I2C driver for an HDMI TX IC", () => {
+    const resolved = resolveProject(createRp2350HdmiTxSliceProject());
+    const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
+    const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
+    const hdmiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(ctrlChoice?.selected.bindings).toMatchObject({
+      sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio4" } },
+      scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio5" } }
+    });
+    expect(sourcePinsForChoice(dpiChoice)).toHaveLength(28);
+    expect(sourcePinsForChoice(dpiChoice)).not.toEqual(expect.arrayContaining(["gpio4", "gpio5"]));
+    expect(hdmiChoice?.selected.bindings.tmds2_p).toMatchObject({
+      from: { node: hdmiTxSliceIds.tx, pin: "tmds2_p" },
+      to: { node: hdmiTxSliceIds.hdmiPort, pin: "tmds2_p" }
+    });
+  });
+
+  it("suppresses provider-requirement cascades when the required edge is authored but unresolved", () => {
+    const source = createHdmiTxSliceProject();
+    const badSource: ProjectSource = {
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === hdmiTxSliceIds.ctrlConnection && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              bindings: {
+                sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "io0" } },
+                scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "io1" } }
+              },
+              strategy: {
+                pinAssignment: "manual"
+              }
+            }
+          : edge
+      )
+    };
+
+    const resolved = resolveProject(badSource);
+    const codes = resolved.diagnostics.map((diagnostic) => diagnostic.code);
+
+    expect(codes).toContain("PIN_CAPABILITY_MISMATCH");
+    expect(codes).not.toContain("PROVIDER_REQUIREMENT_UNSATISFIED");
+    expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(false);
+  });
+
+  it("rejects manual overrides that disagree with fixed provider signal maps", () => {
+    const source = createHdmiTxSliceProject();
+    const badSource: ProjectSource = {
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === hdmiTxSliceIds.txVideoProvider && edge.kind === "intent.provides"
+          ? {
+              ...edge,
+              bindings: {
+                tmds2_p: { from: { node: hdmiTxSliceIds.tx, pin: "ddc_scl" } }
+              }
+            }
+          : edge
+      )
+    };
+
+    const resolved = resolveProject(badSource);
+
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PIN_BINDING_MISMATCH"
+        })
+      ])
+    );
+    expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(false);
+  });
+
+  it("treats preferred I2C pairs as preferences and falls back to compatible selector pins", () => {
+    const source = createHdmiTxSliceProject();
+    const sourceWithReservedPreferredPair: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "edge_reserved_i2c_preferred_pair",
+          kind: "net.binding",
+          bindings: {
+            reserved_sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "io60" } },
+            reserved_scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "io61" } }
+          }
+        },
+        ...source.edges
+      ]
+    };
+
+    const resolved = resolveProject(sourceWithReservedPreferredPair);
+    const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(ctrlChoice?.selected.bindings).toMatchObject({
+      sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "io62" } },
+      scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "io63" } }
+    });
+  });
+
+  it("reports an unsatisfied provider requirement when a TX IC input port is unbound", () => {
+    const resolved = resolveProject(createHdmiTxSliceProject({ omitVideoIn: true }));
+
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PROVIDER_REQUIREMENT_UNSATISFIED",
+          message: expect.stringContaining("video_in")
+        })
+      ])
+    );
+    expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(false);
+  });
+
   it("reports missing node references", () => {
     const source = createI2cSliceProject();
     const badSource: ProjectSource = {
@@ -294,3 +478,30 @@ describe("resolveProject", () => {
     );
   });
 });
+
+function createRp2350HdmiTxProject(order: "ctrl-first" | "dpi-first"): ProjectSource {
+  const source = createRp2350HdmiTxSliceProject();
+  const edgeById = new Map(source.edges.map((edge) => [edge.id, edge]));
+  const firstConnection =
+    order === "ctrl-first" ? edgeById.get(hdmiTxSliceIds.ctrlConnection) : edgeById.get(hdmiTxSliceIds.dpiConnection);
+  const secondConnection =
+    order === "ctrl-first" ? edgeById.get(hdmiTxSliceIds.dpiConnection) : edgeById.get(hdmiTxSliceIds.ctrlConnection);
+
+  return {
+    ...source,
+    edges: [
+      ...[firstConnection, secondConnection].filter((edge): edge is ProjectSource["edges"][number] => Boolean(edge)),
+      ...source.edges.filter(
+        (edge) => edge.id !== hdmiTxSliceIds.ctrlConnection && edge.id !== hdmiTxSliceIds.dpiConnection
+      )
+    ]
+  };
+}
+
+function sourcePinsForChoice(choice: ReturnType<typeof resolveProject>["resolvedChoices"][number] | undefined) {
+  return Object.values(choice?.selected.bindings ?? {}).flatMap((binding) => {
+    const pin = binding.from?.pin;
+
+    return pin ? [pin] : [];
+  });
+}

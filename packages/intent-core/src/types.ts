@@ -174,11 +174,32 @@ export type PinDefinition = {
 export type PortDefinition = {
   kind: "fixed_port" | "derived_port" | "pin_pool";
   contractMaps?: Record<string, PortContractMap>;
+  provides?: Record<string, PortProvidesDefinition>;
 };
 
 export type PortContractMap = {
   role: EndpointRole;
   signalMap: Record<string, SignalPinMap>;
+};
+
+export type PortProvidesDefinition = {
+  role: "provider";
+  modes: Record<string, ProviderModeDefinition>;
+};
+
+export type ProviderModeDefinition = {
+  label?: string;
+  requires?: ProviderModeRequirements;
+  signalMap: Record<string, SignalPinMap>;
+};
+
+export type ProviderModeRequirements = {
+  ports?: Record<string, ProviderPortRequirement>;
+};
+
+export type ProviderPortRequirement = {
+  contract: string | string[];
+  optional?: boolean;
 };
 
 export type SignalPinMap =
@@ -270,6 +291,7 @@ export type ResolvedChoice = {
   strategy: "auto" | "manual";
   selected: {
     bindings: SignalBindings;
+    providerMode?: string;
   };
   reason: string;
 };

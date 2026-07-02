@@ -9,10 +9,12 @@ This checkout uses a bare-repo + worktree pattern: the bare repo lives in `.bare
 Monorepo structure:
 
 - `apps/web` — Vite + React 19 + Tailwind v4 web workspace (`@nocad/web`). Runs on `http://127.0.0.1:3000`.
+- `packages/intent-core` - portable intent graph model: types, resolver, contracts/component fixtures, sample projects, tests. No React/Electron imports allowed.
 - `packages/eslint-config` — shared ESLint flat config (`base.js`, `react.js`).
 - `packages/typescript-config` — shared `tsconfig` presets (`base`, `node`, `react-app`).
 - `packages/vitest-config` — shared Vitest config (jsdom + globals + tsconfig-paths).
-- `docs/research/` — product vision and research notes.
+- `docs/roadmap.md` - **the tracking document**: current state, in-progress work, ordered milestones with acceptance criteria, architecture invariants. Read it when resuming work; update it in the same change that completes or reorders a milestone.
+- `docs/research/` - product vision, intent graph spec, PCB layout approach.
 
 Node 22.14 (see `.nvmrc`), pnpm 10, Turborepo 2. Only `esbuild` is in `onlyBuiltDependencies`.
 
@@ -45,7 +47,7 @@ pnpm --filter @nocad/web exec vitest run src/path/to/file.test.tsx
 pnpm --filter @nocad/web exec vitest run -t "test name pattern"
 ```
 
-There are no tests yet; `@nocad/web`'s `test` script runs `vitest run --passWithNoTests`, so `pnpm test` is green on the empty repo. The shared Vitest config (`packages/vitest-config`) sets `jsdom` + `globals` and wires `vite-tsconfig-paths`, so the `@/*` alias works in tests too.
+Resolver tests live in `packages/intent-core/src/resolver.test.ts` (`pnpm --filter @nocad/intent-core exec vitest run`). The shared Vitest config (`packages/vitest-config`) sets `jsdom` + `globals` and wires `vite-tsconfig-paths`, so the `@/*` alias works in tests too.
 
 shadcn/ui is configured in `apps/web/components.json` (style: new-york, base: neutral, icons: lucide). Add components from `main/`:
 
@@ -91,4 +93,4 @@ Avoid early effort on: marketing pages, decorative UI, premature autorouting, fu
 
 ## Repo State
 
-The repo currently contains scaffolding only. `apps/web/src/App.tsx` is an empty `<main>`; `main.tsx` mounts it under a `ThemeProvider` (`defaultTheme="system"`, `storageKey="nocad-theme"`) whose implementation lives in `src/components/` (`theme-provider.tsx`, `theme-context.ts`, `use-theme.ts`). Everything else is shared config. Before assuming deeper architecture exists, inspect the tree.
+`docs/roadmap.md` is the authoritative status document; check it before assuming what exists. As of 2026-07-02: `packages/intent-core` holds the resolver slice (I2C connections, HDMI function with provider chains and TX IC support, generic contract resolution, diagnostics, lockfile-shaped output). `apps/web/src/App.tsx` mounts the intent graph slice UI (`src/features/i2c-slice/`, `@xyflow/react` canvas plus inspectors and resolution/diagnostics/JSON panels, with direct-HDMI, FPGA-via-TX-IC, and RP2350-via-TX-IC sample loaders) under a `ThemeProvider` (`defaultTheme="system"`, `storageKey="nocad-theme"`, implementation in `src/components/`). There is no document API, no undo/redo, no persistence, and no custom editor engine yet; the graph slice mutates React state directly. Key invariants live in the "Architecture Invariants" section of `docs/roadmap.md`.

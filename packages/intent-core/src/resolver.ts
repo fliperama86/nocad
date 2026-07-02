@@ -10,6 +10,8 @@ import type {
   IntentProvidesEdge,
   FunctionIncludeDefinition,
   FunctionNode,
+  PortContractMap,
+  ProviderModeDefinition,
   ProjectEdge,
   ProjectNode,
   ProjectSource,
@@ -17,43 +19,12 @@ import type {
   ResolvedDependency,
   ResolvedNet,
   ResolvedProject,
+  SignalPinMap,
   SignalBindings
 } from "./types";
 
 const RESOLVER_VERSION = "0.1.0";
 const HDMI_OUTPUT_CONTRACT = "@nocad/video:hdmi_output.v1";
-const rp2350VideoModePins: Record<string, Record<string, string>> = {
-  auto: {
-    clock_n: "gpio19",
-    clock_p: "gpio18",
-    tmds0_n: "gpio17",
-    tmds0_p: "gpio16",
-    tmds1_n: "gpio15",
-    tmds1_p: "gpio14",
-    tmds2_n: "gpio13",
-    tmds2_p: "gpio12"
-  },
-  hstx: {
-    clock_n: "gpio19",
-    clock_p: "gpio18",
-    tmds0_n: "gpio17",
-    tmds0_p: "gpio16",
-    tmds1_n: "gpio15",
-    tmds1_p: "gpio14",
-    tmds2_n: "gpio13",
-    tmds2_p: "gpio12"
-  },
-  pio_gpio: {
-    clock_n: "gpio19",
-    clock_p: "gpio18",
-    tmds0_n: "gpio17",
-    tmds0_p: "gpio16",
-    tmds1_n: "gpio15",
-    tmds1_p: "gpio14",
-    tmds2_n: "gpio13",
-    tmds2_p: "gpio12"
-  }
-};
 
 type ComponentContext = {
   node: ComponentNode;
@@ -66,13 +37,25 @@ type ReservedPin = {
   edge: string;
 };
 
+type BoundPort = {
+  contract: string;
+  edge: string;
+};
+
 type ResolvedConnection = {
   choice: ResolvedProject["resolvedChoices"][number];
   nets: ResolvedNet[];
 };
 
+type ResolvedProviderMode = {
+  id: string;
+  mode: ProviderModeDefinition;
+};
+
 type ResolutionContext = {
+  authoredPorts: Map<string, BoundPort[]>;
   diagnostics: Diagnostic[];
+  boundPorts: Map<string, BoundPort[]>;
   nodeById: Map<string, ProjectNode>;
   componentByNodeId: Map<string, ComponentContext>;
   reservedPins: Map<string, ReservedPin>;
@@ -83,11 +66,15 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
   const nodeById = indexNodes(source.nodes, diagnostics);
   const componentByNodeId = indexComponentContexts(source.nodes, diagnostics);
   const reservedPins = collectInitialReservations(source.edges);
+  const boundPorts = new Map<string, BoundPort[]>();
+  const validEdges: ProjectEdge[] = [];
   const edgeIds = new Set<string>();
   const dependencies = createResolvedDependencies(source.dependencies);
 
   const context: ResolutionContext = {
+    authoredPorts: new Map(),
     diagnostics,
+    boundPorts,
     nodeById,
     componentByNodeId,
     reservedPins
@@ -109,11 +96,16 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     }
 
     edgeIds.add(edge.id);
+    validEdges.push(edge);
+  }
 
-    if (edge.kind !== "intent.connection") {
-      continue;
-    }
+  context.authoredPorts = collectAuthoredPortBindings(validEdges);
 
+  const connectionEdges = validEdges.filter(
+    (edge): edge is IntentConnectionEdge => edge.kind === "intent.connection"
+  );
+
+  for (const edge of sortIntentConnectionEdges(connectionEdges, context)) {
     const resolved = resolveIntentConnection(edge, context);
 
     if (!resolved) {
@@ -124,6 +116,8 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     nets.push(...resolved.nets);
 
     reserveBindings(edge.id, resolved.choice.selected.bindings, context.reservedPins);
+    recordBoundPort(edge.from, edge.contract, edge.id, context.boundPorts);
+    recordBoundPort(edge.to, edge.contract, edge.id, context.boundPorts);
 
     if (edge.include?.pullups) {
       dependencies["@nocad/passives"] = {
@@ -153,7 +147,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     }
   }
 
-  const resolvedFunctions = resolveHdmiFunctions(source, context);
+  const resolvedFunctions = resolveHdmiFunctions({ ...source, edges: validEdges }, context);
   resolvedChoices.push(...resolvedFunctions.choices);
   nets.push(...resolvedFunctions.nets);
 
@@ -204,6 +198,51 @@ function findPullupRail(nodes: ProjectNode[]): PowerDomainNode | null {
         node.kind === "powerDomain" && (node.role === "power_3v3" || node.voltage === "3.3V")
     ) ?? null
   );
+}
+
+function sortIntentConnectionEdges(edges: IntentConnectionEdge[], context: ResolutionContext): IntentConnectionEdge[] {
+  return edges
+    .map((edge, index) => ({
+      edge,
+      index,
+      score: connectionPinFlexibilityScore(edge, context)
+    }))
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(({ edge }) => edge);
+}
+
+function connectionPinFlexibilityScore(edge: IntentConnectionEdge, context: ResolutionContext) {
+  const contract = contracts[edge.contract];
+  const from = context.componentByNodeId.get(edge.from.node);
+  const to = context.componentByNodeId.get(edge.to.node);
+  const fromMap = from?.definition.ports[edge.from.port ?? ""]?.contractMaps?.[edge.contract];
+  const toMap = to?.definition.ports[edge.to.port ?? ""]?.contractMaps?.[edge.contract];
+
+  if (!contract || !from || !to || !fromMap || !toMap) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Object.keys(contract.signals).reduce(
+    (score, signal) =>
+      score +
+      signalMapFlexibility(from.definition, fromMap.signalMap[signal]) +
+      signalMapFlexibility(to.definition, toMap.signalMap[signal]),
+    0
+  );
+}
+
+function signalMapFlexibility(definition: ComponentDefinition, signalMap: SignalPinMap | undefined) {
+  if (!signalMap) {
+    return Number.MAX_SAFE_INTEGER / 4;
+  }
+
+  if ("pin" in signalMap) {
+    return 0;
+  }
+
+  return Object.values(definition.pins).filter((pin) =>
+    signalMap.pinSelector.capabilities.every((capability) => pin.capabilities.includes(capability))
+  ).length;
 }
 
 function resolveHdmiFunctions(
@@ -262,16 +301,10 @@ function resolveHdmiProvider(
     return null;
   }
 
-  const providerMap = provider.definition.ports[providerEdge.from.port ?? ""]?.contractMaps?.[HDMI_OUTPUT_CONTRACT];
   const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[HDMI_OUTPUT_CONTRACT];
+  const providerModeChoice = resolveProviderMode(providerEdge, provider, context);
 
-  if (!providerMap || providerMap.role !== "from") {
-    context.diagnostics.push({
-      severity: "error",
-      code: "PORT_CONTRACT_MISMATCH",
-      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not support ${HDMI_OUTPUT_CONTRACT} as the provider endpoint.`,
-      targets: [{ kind: "edge", id: providerEdge.id }]
-    });
+  if (!providerModeChoice) {
     return null;
   }
 
@@ -285,17 +318,19 @@ function resolveHdmiProvider(
     return null;
   }
 
+  if (!checkProviderModeRequirements(providerEdge, providerModeChoice.mode, context)) {
+    return null;
+  }
+
   const signals = hdmiSignalsForFunction(functionNode);
-  const modePins = rp2350VideoModePins[providerEdge.strategy?.providerMode ?? "auto"] ?? {};
   const localReservedPins = new Set<string>();
   const bindings: SignalBindings = {};
 
   for (const signal of signals) {
     const connectorSignalMap = connectorMap.signalMap[signal];
-    const providerSignalMap = providerMap.signalMap[signal];
-    const connectorPin = connectorSignalMap && "pin" in connectorSignalMap ? connectorSignalMap.pin : undefined;
+    const providerSignalMap = providerModeChoice.mode.signalMap[signal];
 
-    if (!connectorPin || !providerSignalMap || !("pinSelector" in providerSignalMap)) {
+    if (!connectorSignalMap || !providerSignalMap) {
       context.diagnostics.push({
         severity: "error",
         code: "PORT_CONTRACT_MISMATCH",
@@ -305,74 +340,34 @@ function resolveHdmiProvider(
       return null;
     }
 
-    const sourcePin =
-      providerEdge.bindings?.[signal]?.from?.pin ??
-      modePins[signal] ??
-      chooseAvailablePin(
-        provider.node.id,
-        provider.definition,
-        providerSignalMap.pinSelector.capabilities,
-        context,
-        localReservedPins
-      );
+    const sourceEndpoint = resolveMappedEndpoint(
+      providerEdge.id,
+      signal,
+      providerEdge.from.node,
+      provider.definition,
+      providerSignalMap,
+      providerEdge.bindings?.[signal]?.from,
+      context,
+      localReservedPins
+    );
+    const connectorEndpoint = resolveMappedEndpoint(
+      providerEdge.id,
+      signal,
+      connectorEdge.to.node,
+      connector.definition,
+      connectorSignalMap,
+      providerEdge.bindings?.[signal]?.to,
+      context,
+      localReservedPins
+    );
 
-    if (!sourcePin) {
-      context.diagnostics.push({
-        severity: "error",
-        code: "NO_AVAILABLE_PIN",
-        message: `No available MCU pin could satisfy HDMI signal "${signal}".`,
-        targets: [{ kind: "edge", id: providerEdge.id }]
-      });
+    if (!sourceEndpoint || !connectorEndpoint) {
       return null;
     }
 
-    const sourceEndpoint = { node: providerEdge.from.node, pin: sourcePin };
-    const sourcePinKey = pinKey(sourceEndpoint);
-    const reserved = context.reservedPins.get(sourcePinKey);
-
-    if (reserved) {
-      context.diagnostics.push({
-        severity: "error",
-        code: "PIN_CONFLICT",
-        message: `${reserved.node}.${reserved.pin} is already reserved by ${reserved.edge}.`,
-        targets: [
-          { kind: "edge", id: providerEdge.id },
-          { kind: "pin", node: reserved.node, pin: reserved.pin }
-        ]
-      });
-      return null;
-    }
-
-    if (localReservedPins.has(sourcePinKey)) {
-      context.diagnostics.push({
-        severity: "error",
-        code: "PIN_CONFLICT",
-        message: `${sourceEndpoint.node}.${sourceEndpoint.pin} is assigned to more than one HDMI signal.`,
-        targets: [
-          { kind: "edge", id: providerEdge.id },
-          { kind: "pin", node: sourceEndpoint.node, pin: sourceEndpoint.pin }
-        ]
-      });
-      return null;
-    }
-
-    if (!pinSatisfiesCapabilities(provider.definition, sourcePin, providerSignalMap.pinSelector.capabilities)) {
-      context.diagnostics.push({
-        severity: "error",
-        code: "PIN_CAPABILITY_MISMATCH",
-        message: `${sourceEndpoint.node}.${sourceEndpoint.pin} cannot satisfy HDMI signal "${signal}".`,
-        targets: [
-          { kind: "edge", id: providerEdge.id },
-          { kind: "pin", node: sourceEndpoint.node, pin: sourceEndpoint.pin }
-        ]
-      });
-      return null;
-    }
-
-    localReservedPins.add(sourcePinKey);
     bindings[signal] = {
       from: sourceEndpoint,
-      to: { node: connectorEdge.to.node, pin: connectorPin }
+      to: connectorEndpoint
     };
   }
 
@@ -382,12 +377,93 @@ function resolveHdmiProvider(
       sourceEdge: providerEdge.id,
       strategy: providerEdge.bindings ? "manual" : "auto",
       selected: {
-        bindings
+        bindings,
+        providerMode: providerModeChoice.id
       },
-      reason: "Resolved enabled HDMI output features against MCU capabilities and connector pins."
+      reason: `Resolved enabled HDMI output features using provider mode "${providerModeChoice.id}" and connector pins.`
     },
     nets: Object.keys(bindings).map((signal) => createHdmiNet(signal, bindings, providerEdge.id))
   };
+}
+
+function resolveProviderMode(
+  providerEdge: IntentProvidesEdge,
+  provider: ComponentContext,
+  context: ResolutionContext
+): ResolvedProviderMode | null {
+  const port = provider.definition.ports[providerEdge.from.port ?? ""];
+  const provides = port?.provides?.[providerEdge.contract];
+
+  if (!provides || provides.role !== "provider") {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PORT_CONTRACT_MISMATCH",
+      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not provide ${providerEdge.contract}.`,
+      targets: [{ kind: "edge", id: providerEdge.id }]
+    });
+    return null;
+  }
+
+  const requestedMode = providerEdge.strategy?.providerMode ?? "auto";
+  const fallbackMode = requestedMode === "auto" ? Object.entries(provides.modes)[0] : undefined;
+  const modeEntry = provides.modes[requestedMode]
+    ? ([requestedMode, provides.modes[requestedMode]] as const)
+    : fallbackMode;
+
+  if (!modeEntry) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PROVIDER_MODE_NOT_FOUND",
+      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not expose provider mode "${requestedMode}" for ${providerEdge.contract}.`,
+      targets: [{ kind: "edge", id: providerEdge.id }]
+    });
+    return null;
+  }
+
+  return {
+    id: modeEntry[0],
+    mode: modeEntry[1]
+  };
+}
+
+function checkProviderModeRequirements(
+  providerEdge: IntentProvidesEdge,
+  providerMode: ProviderModeDefinition,
+  context: ResolutionContext
+): boolean {
+  const portRequirements = providerMode.requires?.ports ?? {};
+
+  for (const [port, requirement] of Object.entries(portRequirements)) {
+    if (requirement.optional) {
+      continue;
+    }
+
+    const acceptedContracts = Array.isArray(requirement.contract) ? requirement.contract : [requirement.contract];
+    const bindings = context.boundPorts.get(portKey(providerEdge.from.node, port)) ?? [];
+    const authoredBindings = context.authoredPorts.get(portKey(providerEdge.from.node, port)) ?? [];
+    const matched = bindings.find((binding) => acceptedContracts.includes(binding.contract));
+
+    if (!matched) {
+      const authoredMatch = authoredBindings.find((binding) => acceptedContracts.includes(binding.contract));
+
+      if (authoredMatch) {
+        return false;
+      }
+
+      context.diagnostics.push({
+        severity: "error",
+        code: "PROVIDER_REQUIREMENT_UNSATISFIED",
+        message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} requires ${providerEdge.from.node}.${port} to be bound to ${acceptedContracts.join(" or ")}.`,
+        targets: [
+          { kind: "edge", id: providerEdge.id },
+          { kind: "node", id: providerEdge.from.node }
+        ]
+      });
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function resolveHdmiSource5v(
@@ -503,10 +579,145 @@ function chooseAvailablePin(
   return pin?.[0];
 }
 
+function resolveMappedEndpoint(
+  edgeId: string,
+  signal: string,
+  nodeId: string,
+  definition: ComponentDefinition,
+  signalMap: SignalPinMap,
+  override: EndpointRef | undefined,
+  context: ResolutionContext,
+  localReservedPins: Set<string>
+): EndpointRef | null {
+  if (override?.node && override.node !== nodeId) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "INVALID_ENDPOINT_NODE",
+      message: `Signal "${signal}" on edge "${edgeId}" cannot bind ${nodeId} through node "${override.node}".`,
+      targets: [{ kind: "edge", id: edgeId }]
+    });
+    return null;
+  }
+
+  if ("pin" in signalMap && override?.pin && override.pin !== signalMap.pin) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PIN_BINDING_MISMATCH",
+      message: `${nodeId}.${override.pin} cannot override fixed mapping for signal "${signal}", expected ${nodeId}.${signalMap.pin}.`,
+      targets: [
+        { kind: "edge", id: edgeId },
+        { kind: "pin", node: nodeId, pin: override.pin }
+      ]
+    });
+    return null;
+  }
+
+  const selectedPin =
+    "pin" in signalMap
+      ? signalMap.pin
+      : (override?.pin ??
+        chooseAvailablePin(nodeId, definition, signalMap.pinSelector.capabilities, context, localReservedPins));
+
+  if (!selectedPin) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "NO_AVAILABLE_PIN",
+      message: `No available pin could satisfy signal "${signal}" on edge "${edgeId}".`,
+      targets: [{ kind: "edge", id: edgeId }],
+      suggestions: i2cPinSuggestion(edgeId, nodeId, definition, signal)
+    });
+    return null;
+  }
+
+  if (!definition.pins[selectedPin]) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "UNKNOWN_PIN",
+      message: `${nodeId}.${selectedPin} does not exist.`,
+      targets: [
+        { kind: "edge", id: edgeId },
+        { kind: "pin", node: nodeId, pin: selectedPin }
+      ]
+    });
+    return null;
+  }
+
+  if ("pinSelector" in signalMap && !pinSatisfiesCapabilities(definition, selectedPin, signalMap.pinSelector.capabilities)) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PIN_CAPABILITY_MISMATCH",
+      message: `${nodeId}.${selectedPin} cannot satisfy signal "${signal}".`,
+      targets: [
+        { kind: "edge", id: edgeId },
+        { kind: "pin", node: nodeId, pin: selectedPin }
+      ]
+    });
+    return null;
+  }
+
+  const endpoint = { node: nodeId, pin: selectedPin };
+  const endpointKey = pinKey(endpoint);
+  const reserved = context.reservedPins.get(endpointKey);
+
+  if (reserved) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PIN_CONFLICT",
+      message: `${reserved.node}.${reserved.pin} is already reserved by ${reserved.edge}.`,
+      targets: [
+        { kind: "edge", id: edgeId },
+        { kind: "pin", node: reserved.node, pin: reserved.pin }
+      ]
+    });
+    return null;
+  }
+
+  if (localReservedPins.has(endpointKey)) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PIN_CONFLICT",
+      message: `${endpoint.node}.${endpoint.pin} is assigned to more than one signal on edge "${edgeId}".`,
+      targets: [
+        { kind: "edge", id: edgeId },
+        { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+      ]
+    });
+    return null;
+  }
+
+  localReservedPins.add(endpointKey);
+  return endpoint;
+}
+
 function pinSatisfiesCapabilities(definition: ComponentDefinition, pin: string, capabilities: string[]) {
   const candidate = definition.pins[pin];
 
   return Boolean(candidate && capabilities.every((capability) => candidate.capabilities.includes(capability)));
+}
+
+function i2cPinSuggestion(
+  edgeId: string,
+  nodeId: string,
+  definition: ComponentDefinition,
+  signal: string
+): Diagnostic["suggestions"] {
+  if ((signal !== "sda" && signal !== "scl") || !definition.pins.gpio8 || !definition.pins.gpio9) {
+    return undefined;
+  }
+
+  return [
+    {
+      title: "Move I2C to GPIO8/GPIO9",
+      patch: {
+        op: "setEdgeBindings",
+        edge: edgeId,
+        value: {
+          sda: { from: { node: nodeId, pin: "gpio8" } },
+          scl: { from: { node: nodeId, pin: "gpio9" } }
+        }
+      }
+    }
+  ];
 }
 
 function createHdmiNet(signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
@@ -533,6 +744,44 @@ function createHdmiNet(signal: string, bindings: SignalBindings, edgeId: string)
       signal
     }
   };
+}
+
+function createContractNet(contractId: string, signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
+  const binding = bindings[signal];
+  const from = binding?.from;
+  const to = binding?.to;
+  const contractSignal = contracts[contractId]?.signals[signal] as ContractSignal | undefined;
+
+  if (!from?.pin || !to?.pin || !contractSignal) {
+    throw new Error(`Resolved ${contractId} ${signal} binding is incomplete.`);
+  }
+
+  return {
+    id: createNetId(edgeId, signal),
+    name: formatNetName(contractId, signal),
+    endpoints: {
+      from,
+      to
+    },
+    direction: contractSignal.direction,
+    sourceEdge: edgeId,
+    sourceMap: {
+      edge: edgeId,
+      signal
+    }
+  };
+}
+
+function formatNetName(contractId: string, signal: string): string {
+  if (contractId === "builtin:i2c.v1") {
+    return `I2C_${signal.toUpperCase()}`;
+  }
+
+  if (contractId === "builtin:dpi.v1") {
+    return `DPI_${signal.toUpperCase()}`;
+  }
+
+  return `${contractId.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
 }
 
 function resolveIntentConnection(
@@ -581,27 +830,9 @@ function resolveIntentConnection(
     return null;
   }
 
-  const bindings =
-    edge.strategy?.pinAssignment === "manual" && edge.bindings
-      ? completeManualBindings(edge, to.definition)
-      : chooseAutoI2cBindings(edge, from, to, context);
+  const bindings = resolveContractBindings(edge, contract.signals, from, to, fromMap, toMap, context);
 
   if (!bindings) {
-    return null;
-  }
-
-  const hasConflict = findBindingConflict(bindings, context.reservedPins);
-
-  if (hasConflict) {
-    context.diagnostics.push({
-      severity: "error",
-      code: "PIN_CONFLICT",
-      message: `${hasConflict.node}.${hasConflict.pin} is already reserved by ${hasConflict.edge}.`,
-      targets: [
-        { kind: "edge", id: edge.id },
-        { kind: "pin", node: hasConflict.node, pin: hasConflict.pin }
-      ]
-    });
     return null;
   }
 
@@ -615,14 +846,171 @@ function resolveIntentConnection(
       },
       reason:
         edge.strategy?.pinAssignment === "manual"
-          ? "Used source-provided I2C pin bindings."
-          : "Selected first available I2C-capable RP2350 pin pair."
+          ? `Used source-provided bindings for ${edge.contract}.`
+          : `Resolved ${edge.contract} against endpoint signal maps.`
     },
-    nets: [
-      createNet("sda", "I2C_SDA", bindings, edge.id),
-      createNet("scl", "I2C_SCL", bindings, edge.id)
-    ]
+    nets: Object.keys(contract.signals).map((signal) => createContractNet(edge.contract, signal, bindings, edge.id))
   };
+}
+
+function resolveContractBindings(
+  edge: IntentConnectionEdge,
+  signals: Record<string, ContractSignal>,
+  from: ComponentContext,
+  to: ComponentContext,
+  fromMap: PortContractMap,
+  toMap: PortContractMap,
+  context: ResolutionContext
+): SignalBindings | null {
+  const preferredI2cBindings = resolvePreferredI2cPairBindings(
+    edge,
+    from,
+    to,
+    fromMap,
+    toMap,
+    context.reservedPins
+  );
+
+  if (preferredI2cBindings !== undefined) {
+    return preferredI2cBindings;
+  }
+
+  const localReservedPins = new Set<string>();
+  const bindings: SignalBindings = {};
+
+  for (const signal of Object.keys(signals)) {
+    const fromSignalMap = fromMap.signalMap[signal];
+    const toSignalMap = toMap.signalMap[signal];
+
+    if (!fromSignalMap || !toSignalMap) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "PORT_CONTRACT_MISMATCH",
+        message: `${edge.contract} signal "${signal}" is not mapped by both endpoint ports.`,
+        targets: [{ kind: "edge", id: edge.id }]
+      });
+      return null;
+    }
+
+    const fromEndpoint = resolveMappedEndpoint(
+      edge.id,
+      signal,
+      edge.from.node,
+      from.definition,
+      fromSignalMap,
+      edge.bindings?.[signal]?.from,
+      context,
+      localReservedPins
+    );
+    const toEndpoint = resolveMappedEndpoint(
+      edge.id,
+      signal,
+      edge.to.node,
+      to.definition,
+      toSignalMap,
+      edge.bindings?.[signal]?.to,
+      context,
+      localReservedPins
+    );
+
+    if (!fromEndpoint || !toEndpoint) {
+      return null;
+    }
+
+    bindings[signal] = {
+      from: fromEndpoint,
+      to: toEndpoint
+    };
+  }
+
+  return bindings;
+}
+
+function resolvePreferredI2cPairBindings(
+  edge: IntentConnectionEdge,
+  from: ComponentContext,
+  to: ComponentContext,
+  fromMap: PortContractMap,
+  toMap: PortContractMap,
+  reservedPins: Map<string, ReservedPin>
+): SignalBindings | undefined {
+  const pairs = from.definition.preferredI2cPairs ?? [];
+
+  if (edge.contract !== "builtin:i2c.v1" || edge.strategy?.pinAssignment === "manual" || pairs.length === 0) {
+    return undefined;
+  }
+
+  for (const pair of pairs) {
+    const sda = createPreferredI2cEndpoint(edge, "sda", pair.sda, from, to, fromMap, toMap);
+    const scl = createPreferredI2cEndpoint(edge, "scl", pair.scl, from, to, fromMap, toMap);
+
+    if (!sda || !scl) {
+      continue;
+    }
+
+    const bindings: SignalBindings = {
+      sda,
+      scl
+    };
+
+    if (bindingPinsAvailable(bindings, reservedPins)) {
+      return bindings;
+    }
+  }
+
+  return undefined;
+}
+
+function createPreferredI2cEndpoint(
+  edge: IntentConnectionEdge,
+  signal: "sda" | "scl",
+  fromPin: string,
+  from: ComponentContext,
+  to: ComponentContext,
+  fromMap: PortContractMap,
+  toMap: PortContractMap
+): Partial<Record<"from" | "to", EndpointRef>> | null {
+  const fromSignalMap = fromMap.signalMap[signal];
+  const toSignalMap = toMap.signalMap[signal];
+  const toPin = toSignalMap && "pin" in toSignalMap ? toSignalMap.pin : undefined;
+
+  if (
+    !toPin ||
+    !from.definition.pins[fromPin] ||
+    !to.definition.pins[toPin] ||
+    !fromSignalMap ||
+    !("pinSelector" in fromSignalMap) ||
+    !pinSatisfiesCapabilities(from.definition, fromPin, fromSignalMap.pinSelector.capabilities)
+  ) {
+    return null;
+  }
+
+  return {
+    from: { node: edge.from.node, pin: fromPin },
+    to: { node: edge.to.node, pin: toPin }
+  };
+}
+
+function bindingPinsAvailable(bindings: SignalBindings, reservedPins: Map<string, ReservedPin>): boolean {
+  const localReservedPins = new Set<string>();
+
+  for (const binding of Object.values(bindings)) {
+    for (const endpoint of Object.values(binding)) {
+      if (!endpoint?.pin) {
+        continue;
+      }
+
+      const key = pinKey(endpoint);
+
+      if (reservedPins.has(key) || localReservedPins.has(key)) {
+        return false;
+      }
+
+      localReservedPins.add(key);
+    }
+  }
+
+  return true;
 }
 
 function resolveEndpoint(
@@ -686,104 +1074,7 @@ function resolveComponentEndpoint(
   return component;
 }
 
-function completeManualBindings(edge: IntentConnectionEdge, toDefinition: ComponentDefinition): SignalBindings {
-  const sensorI2cMap = toDefinition.ports[edge.to.port ?? ""]?.contractMaps?.[edge.contract]?.signalMap ?? {};
-
-  return Object.fromEntries(
-    Object.entries(edge.bindings ?? {}).map(([signal, binding]) => {
-      const signalMap = sensorI2cMap[signal];
-      const toPin = signalMap && "pin" in signalMap ? signalMap.pin : signal;
-
-      return [
-        signal,
-        {
-          ...binding,
-          to: binding.to ?? { node: edge.to.node, pin: toPin }
-        }
-      ];
-    })
-  );
-}
-
-function chooseAutoI2cBindings(
-  edge: IntentConnectionEdge,
-  from: ComponentContext,
-  to: ComponentContext,
-  context: ResolutionContext
-): SignalBindings | null {
-  for (const pair of from.definition.preferredI2cPairs ?? []) {
-    const bindings: SignalBindings = {
-      sda: {
-        from: { node: edge.from.node, pin: pair.sda },
-        to: { node: edge.to.node, pin: "sda" }
-      },
-      scl: {
-        from: { node: edge.from.node, pin: pair.scl },
-        to: { node: edge.to.node, pin: "scl" }
-      }
-    };
-
-    if (!findBindingConflict(bindings, context.reservedPins) && pinsSatisfyI2cPair(pair, from.definition)) {
-      return bindings;
-    }
-  }
-
-  context.diagnostics.push({
-    severity: "error",
-    code: "NO_AVAILABLE_PIN_PAIR",
-    message: `No available I2C pin pair could satisfy edge "${edge.id}".`,
-    targets: [{ kind: "edge", id: edge.id }],
-    suggestions: [
-      {
-        title: "Move I2C to GPIO8/GPIO9",
-        patch: {
-          op: "setEdgeBindings",
-          edge: edge.id,
-          value: {
-            sda: { from: { node: edge.from.node, pin: "gpio8" } },
-            scl: { from: { node: edge.from.node, pin: "gpio9" } }
-          }
-        }
-      }
-    ]
-  });
-
-  return null;
-}
-
-function pinsSatisfyI2cPair(pair: { sda: string; scl: string }, definition: ComponentDefinition): boolean {
-  return (
-    definition.pins[pair.sda]?.capabilities.includes("i2c.sda") === true &&
-    definition.pins[pair.scl]?.capabilities.includes("i2c.scl") === true
-  );
-}
-
-function createNet(signal: "sda" | "scl", name: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
-  const binding = bindings[signal];
-  const from = binding?.from;
-  const to = binding?.to;
-
-  if (!from?.pin || !to?.pin) {
-    throw new Error(`Resolved ${signal} binding is incomplete.`);
-  }
-
-  return {
-    id: createNetId(edgeId, signal),
-    name,
-    endpoints: {
-      from,
-      to
-    },
-    direction: "bidirectional",
-    sourceEdge: edgeId,
-    sourceMap: {
-      edge: edgeId,
-      signal
-    }
-  };
-}
-
-function createNetId(edgeId: string, signal: "sda" | "scl") {
+function createNetId(edgeId: string, signal: string) {
   return `net_${edgeId}_${signal}`;
 }
 
@@ -866,22 +1157,37 @@ function reserveBindings(edgeId: string, bindings: SignalBindings, reservedPins:
   }
 }
 
-function findBindingConflict(bindings: SignalBindings, reservedPins: Map<string, ReservedPin>): ReservedPin | null {
-  for (const binding of Object.values(bindings)) {
-    for (const endpoint of Object.values(binding)) {
-      if (!endpoint?.pin) {
-        continue;
-      }
-
-      const reserved = reservedPins.get(pinKey(endpoint));
-
-      if (reserved) {
-        return reserved;
-      }
-    }
+function recordBoundPort(endpoint: EndpointRef, contract: string, edgeId: string, boundPorts: Map<string, BoundPort[]>) {
+  if (!endpoint.port) {
+    return;
   }
 
-  return null;
+  const key = portKey(endpoint.node, endpoint.port);
+  const bindings = boundPorts.get(key) ?? [];
+  bindings.push({
+    contract,
+    edge: edgeId
+  });
+  boundPorts.set(key, bindings);
+}
+
+function collectAuthoredPortBindings(edges: ProjectEdge[]): Map<string, BoundPort[]> {
+  const authoredPorts = new Map<string, BoundPort[]>();
+
+  for (const edge of edges) {
+    if (edge.kind !== "intent.connection") {
+      continue;
+    }
+
+    recordBoundPort(edge.from, edge.contract, edge.id, authoredPorts);
+    recordBoundPort(edge.to, edge.contract, edge.id, authoredPorts);
+  }
+
+  return authoredPorts;
+}
+
+function portKey(node: string, port: string): string {
+  return `${node}.${port}`;
 }
 
 function pinKey(endpoint: EndpointRef): string {
