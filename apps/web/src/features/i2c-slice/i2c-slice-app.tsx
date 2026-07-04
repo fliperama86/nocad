@@ -1,4 +1,6 @@
 import {
+  components,
+  contracts,
   createHdmiSliceProject,
   createHdmiTxSliceProject,
   createRp2350HdmiTxSliceProject,
@@ -7,6 +9,8 @@ import {
   resolveProject
 } from "@nocad/intent-core";
 import type {
+  ContractParams,
+  ContractParamValue,
   GraphObjectMetadata,
   IntentConnectionEdge,
   IntentExposesEdge,
@@ -22,6 +26,11 @@ import { useCallback, useMemo, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { BindingsPanel } from "./bindings-panel";
+import {
+  ConnectionIntentDialog,
+  type ConnectionIntentOption,
+  type PendingConnectionIntent
+} from "./connection-intent-dialog";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
 import { IntentGraphView } from "./intent-graph-view";
@@ -261,6 +270,7 @@ export function I2cSliceApp() {
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<PendingConnectionIntent>();
 
   const resolved = useMemo(() => resolveProject(source), [source]);
   const selectedChoice = selectedEdgeId
@@ -270,10 +280,16 @@ export function I2cSliceApp() {
   const resolvedJson = useMemo(() => JSON.stringify(resolved, null, 2), [resolved]);
 
   const setSelectedGraphEdge = useCallback((edgeId: string | undefined) => {
+    if (edgeId) {
+      setPendingConnection(undefined);
+    }
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId === edgeId ? currentEdgeId : edgeId));
   }, []);
 
   const setSelectedGraphNode = useCallback((nodeId: string | undefined) => {
+    if (nodeId) {
+      setPendingConnection(undefined);
+    }
     setSelectedNodeId((currentNodeId) => (currentNodeId === nodeId ? currentNodeId : nodeId));
   }, []);
 
@@ -282,6 +298,7 @@ export function I2cSliceApp() {
     setPositions(nextPositions);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -302,6 +319,7 @@ export function I2cSliceApp() {
     setPositions({});
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -340,16 +358,42 @@ export function I2cSliceApp() {
       return;
     }
 
-    setSource((current) => {
-      const sourceNode = current.nodes.find((node) => node.id === connection.source);
-      const targetNode = current.nodes.find((node) => node.id === connection.target);
+    const sourceNode = source.nodes.find((node) => node.id === connection.source);
+    const targetNode = source.nodes.find((node) => node.id === connection.target);
 
-      if (!sourceNode || !targetNode) {
+    if (!sourceNode || !targetNode) {
+      return;
+    }
+
+    if (sourceNode.kind === "component" && targetNode.kind === "component") {
+      const options = componentConnectionOptionsForPair(sourceNode, targetNode, source.edges);
+
+      if (options.length === 1 && shouldAutoCreateConnection(options)) {
+        createConnectionFromIntent(options[0], options[0].params);
+        return;
+      }
+
+      setPendingConnection({
+        options,
+        sourceNode: sourceNode.id,
+        targetNode: targetNode.id
+      });
+      setSelectedEdgeId(undefined);
+      setSelectedNodeId(undefined);
+      return;
+    }
+
+    setPendingConnection(undefined);
+    setSource((current) => {
+      const edgeIds = new Set(current.edges.map((edge) => edge.id));
+      const currentSourceNode = current.nodes.find((node) => node.id === connection.source);
+      const currentTargetNode = current.nodes.find((node) => node.id === connection.target);
+
+      if (!currentSourceNode || !currentTargetNode) {
         return current;
       }
 
-      const edgeIds = new Set(current.edges.map((edge) => edge.id));
-      const edge = createIntentEdge(sourceNode, targetNode, edgeIds);
+      const edge = createIntentEdge(currentSourceNode, currentTargetNode, edgeIds);
 
       if (!edge) {
         return current;
@@ -376,6 +420,7 @@ export function I2cSliceApp() {
     );
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
   }
 
   function removeEdges(edgeIds: string[]) {
@@ -386,6 +431,7 @@ export function I2cSliceApp() {
       edges: current.edges.filter((edge) => !edgeIdSet.has(edge.id))
     }));
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
+    setPendingConnection(undefined);
   }
 
   function setFunctionInclude(nodeId: string, feature: string, value: unknown) {
@@ -410,6 +456,53 @@ export function I2cSliceApp() {
       ...current,
       edges: current.edges.map((edge) => (edge.id === edgeId && edge.kind === "intent.connection" ? autoEdge(edge) : edge))
     }));
+  }
+
+  function setConnectionParam(edgeId: string, param: string, value: ContractParamValue) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
+        edge.id === edgeId && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              params: {
+                ...edge.params,
+                [param]: value
+              }
+            }
+          : edge
+      )
+    }));
+  }
+
+  function applyConnectionPreset(edgeId: string, params: ContractParams) {
+    setSource((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
+        edge.id === edgeId && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              params: {
+                ...edge.params,
+                ...params
+              }
+            }
+          : edge
+      )
+    }));
+  }
+
+  function createConnectionFromIntent(option: ConnectionIntentOption, params: ContractParams | undefined) {
+    setSource((current) => {
+      const edgeIds = new Set(current.edges.map((edge) => edge.id));
+      const edge = createComponentConnectionEdge(option, edgeIds, params);
+
+      return {
+        ...current,
+        edges: [...current.edges, edge]
+      };
+    });
+    setPendingConnection(undefined);
   }
 
   function lockCurrentAssignment(edgeId: string) {
@@ -609,6 +702,7 @@ export function I2cSliceApp() {
                   componentTemplates={componentPalette}
                   graphRevision={graphRevision}
                   onAddComponent={addComponent}
+                  onCanvasPaneClick={() => setPropertiesCollapsed(true)}
                   onConnectNodes={connectNodes}
                   onRemoveEdges={removeEdges}
                   onRemoveNodes={removeNodes}
@@ -620,30 +714,36 @@ export function I2cSliceApp() {
                   source={source}
                 />
                 {propertiesCollapsed ? (
-                  <button
-                    aria-label="Expand properties panel"
-                    className="flex h-12 min-h-0 w-full items-center justify-center rounded-md border border-border bg-card text-card-foreground hover:bg-muted lg:h-full"
-                    onClick={() => setPropertiesCollapsed(false)}
-                    title="Expand properties panel"
-                    type="button"
-                  >
-                    <PanelRightOpen aria-hidden="true" className="size-5" strokeWidth={1.8} />
-                  </button>
-                ) : (
-                  <div className="relative h-full min-h-0 lg:w-[360px]">
+                  <div className="flex h-9 min-h-0 items-start justify-end lg:h-auto lg:w-9 lg:justify-center">
                     <button
-                      aria-label="Collapse properties panel"
-                      className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() => setPropertiesCollapsed(true)}
-                      title="Collapse properties panel"
+                      aria-label="Expand properties panel"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-card-foreground hover:bg-muted"
+                      onClick={() => setPropertiesCollapsed(false)}
+                      title="Expand properties panel"
                       type="button"
                     >
-                      <PanelRightClose aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                      <PanelRightOpen aria-hidden="true" className="size-4" strokeWidth={1.8} />
                     </button>
+                  </div>
+                ) : (
+                  <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] lg:w-[360px]">
+                    <div className="flex justify-end pb-2">
+                      <button
+                        aria-label="Collapse properties panel"
+                        className="flex size-8 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => setPropertiesCollapsed(true)}
+                        title="Collapse properties panel"
+                        type="button"
+                      >
+                        <PanelRightClose aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                      </button>
+                    </div>
                     <EdgeAssignmentPanel
                       className="h-full min-h-0"
+                      onApplyConnectionPreset={applyConnectionPreset}
                       onLockCurrent={lockCurrentAssignment}
                       onSetAuto={setEdgeAuto}
+                      onSetConnectionParam={setConnectionParam}
                       onSetFunctionInclude={setFunctionInclude}
                       onSetManualPair={setManualPinPair}
                       onSetProviderMode={setProviderMode}
@@ -688,6 +788,12 @@ export function I2cSliceApp() {
           </div>
         </section>
       </div>
+      <ConnectionIntentDialog
+        onCancel={() => setPendingConnection(undefined)}
+        onCreate={createConnectionFromIntent}
+        pendingConnection={pendingConnection}
+        source={source}
+      />
     </main>
   );
 }
@@ -715,11 +821,7 @@ function createIntentEdge(
   edgeIds: Set<string>
 ): IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge | undefined {
   if (sourceNode.kind === "component" && targetNode.kind === "component") {
-    if (isConnectorNode(sourceNode) || isConnectorNode(targetNode)) {
-      return undefined;
-    }
-
-    return createI2cIntentEdge(sourceNode, targetNode, edgeIds);
+    return undefined;
   }
 
   if (sourceNode.kind === "intent.function" && targetNode.kind === "component") {
@@ -737,32 +839,144 @@ function createIntentEdge(
   return undefined;
 }
 
-function createI2cIntentEdge(
-  sourceNode: ProjectNode,
-  targetNode: ProjectNode,
-  edgeIds: Set<string>
+function createComponentConnectionEdge(
+  option: ConnectionIntentOption,
+  edgeIds: Set<string>,
+  params: ContractParams | undefined
 ): IntentConnectionEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.connection",
-    label: "Sensor I2C bus",
-    role: "sensor_bus",
-    from: {
-      node: sourceNode.id,
-      port: "i2c"
-    },
-    to: {
-      node: targetNode.id,
-      port: "i2c"
-    },
-    contract: "builtin:i2c.v1",
+    label: connectionLabel(option.contract),
+    role: connectionRole(option.contract),
+    from: option.from,
+    to: option.to,
+    contract: option.contract,
+    params,
     strategy: {
       pinAssignment: "auto"
-    },
-    include: {
-      pullups: true
     }
   };
+}
+
+function componentConnectionOptionsForPair(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  currentEdges: ProjectEdge[]
+): ConnectionIntentOption[] {
+  return [
+    ...componentConnectionOptions(sourceNode, targetNode, currentEdges),
+    ...componentConnectionOptions(targetNode, sourceNode, currentEdges)
+  ];
+}
+
+function componentConnectionOptions(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  currentEdges: ProjectEdge[]
+): ConnectionIntentOption[] {
+  if (sourceNode.kind !== "component" || targetNode.kind !== "component") {
+    return [];
+  }
+
+  const sourceDefinition = components[sourceNode.component];
+  const targetDefinition = components[targetNode.component];
+
+  if (!sourceDefinition || !targetDefinition) {
+    return [];
+  }
+
+  const existing = new Set(
+    currentEdges.flatMap((edge) =>
+      edge.kind === "intent.connection"
+        ? [`${edge.from.node}.${edge.from.port ?? ""}->${edge.to.node}.${edge.to.port ?? ""}:${edge.contract}`]
+        : []
+    )
+  );
+  const options: ConnectionIntentOption[] = [];
+
+  for (const [fromPort, fromDefinition] of Object.entries(sourceDefinition.ports)) {
+    for (const [contract, fromMap] of Object.entries(fromDefinition.contractMaps ?? {})) {
+      if (fromMap.role !== "from") {
+        continue;
+      }
+
+      for (const [toPort, toDefinition] of Object.entries(targetDefinition.ports)) {
+        const toMap = toDefinition.contractMaps?.[contract];
+
+        if (toMap?.role !== "to") {
+          continue;
+        }
+
+        if (existing.has(`${sourceNode.id}.${fromPort}->${targetNode.id}.${toPort}:${contract}`)) {
+          continue;
+        }
+
+        options.push({
+          contract,
+          from: {
+            node: sourceNode.id,
+            port: fromPort
+          },
+          id: `${sourceNode.id}.${fromPort}->${targetNode.id}.${toPort}:${contract}`,
+          label: connectionLabel(contract),
+          params: defaultConnectionParams(contract),
+          to: {
+            node: targetNode.id,
+            port: toPort
+          }
+        });
+      }
+    }
+  }
+
+  return [...options].sort(
+    (left, right) =>
+      connectionSignalCount(right.contract) - connectionSignalCount(left.contract) ||
+      left.contract.localeCompare(right.contract)
+  );
+}
+
+function connectionSignalCount(contractId: string) {
+  return Object.keys(contracts[contractId]?.signals ?? {}).length;
+}
+
+function connectionLabel(contractId: string) {
+  return contracts[contractId]?.label ?? humanIdentifier(contractId.split(":").pop() ?? contractId);
+}
+
+function connectionRole(contractId: string) {
+  if (contractId === "builtin:i2c.v1") {
+    return "i2c_bus";
+  }
+
+  if (contractId === "@nocad/video:pixel_stream.v1") {
+    return "pixel_stream";
+  }
+
+  return "connection";
+}
+
+function shouldAutoCreateConnection(options: ConnectionIntentOption[]) {
+  const onlyOption = options[0];
+
+  return options.length === 1 && Boolean(onlyOption) && !connectionNeedsDialog(onlyOption);
+}
+
+function connectionNeedsDialog(option: ConnectionIntentOption) {
+  const contract = contracts[option.contract];
+
+  return Boolean(contract && (Object.keys(contract.params ?? {}).length > 0 || (contract.presets?.length ?? 0) > 0));
+}
+
+function defaultConnectionParams(contractId: string): ContractParams | undefined {
+  const params = Object.fromEntries(
+    Object.entries(contracts[contractId]?.params ?? {})
+      .filter(([, definition]) => definition.default !== undefined)
+      .map(([paramId, definition]) => [paramId, definition.default])
+  ) as ContractParams;
+
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 
 function createProvidesEdge(
@@ -935,4 +1149,8 @@ function componentProviderPort(node: ProjectNode) {
 
 function connectorPort(node: ProjectNode) {
   return node.kind === "component" && node.role === "hdmi_port" ? "hdmi" : "connector";
+}
+
+function humanIdentifier(value: string) {
+  return value.replaceAll(/[_-]/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }

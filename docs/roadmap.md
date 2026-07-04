@@ -25,10 +25,10 @@ What exists and works:
 - `packages/intent-core`: in-memory project source model (`nocad.project.v0` shaped), resolver, component/contract fixtures, sample projects, tests.
   - I2C connections: port/contract matching, auto and manual pin assignment, preferred pin pairs, generated pullups, conflict and reference diagnostics.
   - HDMI output function: feature-driven signal elaboration (TMDS, DDC, HPD, CEC), source 5V power, sideband resolution.
-  - Provider modes and provider chains: function nodes stay implementation-agnostic; providers declare modes with signal maps; provider modes can declare cross-port requirements (`requires.ports`), proven with HDMI TX IC samples driven by either a generic FPGA or RP2350 over DPI + I2C upstream contracts. Resolved choices record selected provider modes.
-  - Generic contract resolution (`intent.connection` works for any fixture contract, e.g. 28-signal DPI).
+  - Provider modes and provider chains: function nodes stay implementation-agnostic; providers declare modes with signal maps; provider modes can declare cross-port requirements (`requires.ports`), proven with HDMI TX IC samples driven by either a generic FPGA or RP2350 over pixel-stream + I2C upstream contracts. Resolved choices record selected provider modes.
+  - Generic contract resolution (`intent.connection` works for any fixture contract). Pixel-stream bindings have authored params (`transport`, RGB bit widths, sync signals) that expand to the active signal set.
   - Regression coverage for provider-chain review issues: fixed-map override validation, authored-but-unresolved requirement cascade suppression, preferred-I2C fallback, and edge-order mitigation for the RP2350 TX-IC pressure case.
-- `apps/web`: intent graph slice UI (`@xyflow/react` graph canvas, inspectors for nodes/edges, resolution/diagnostics/JSON panels, component palette, direct-HDMI, FPGA-via-TX-IC, and RP2350-via-TX-IC samples). React is chrome only; no editor engine exists yet.
+- `apps/web`: intent graph slice UI (`@xyflow/react` graph canvas, inspectors for nodes/edges, resolution/diagnostics/JSON panels, component palette, direct-HDMI, FPGA-via-TX-IC, and RP2350-via-TX-IC samples). Connection params are edited from contract metadata, with pixel-stream presets as UI sugar. React is chrome only; no editor engine exists yet.
 - Shared config packages (eslint, tsconfig, vitest); pnpm + Turborepo workspace.
 
 Known architectural debts (tracked in M1/M2 below):
@@ -132,6 +132,7 @@ Short list; violating one is a design regression, not a style issue:
 ## History
 
 - 2026-07-02 - Provider-chain review fixes landed: constrained-first connection ordering, provider requirement cascade suppression, fixed-map override validation, preferred-I2C fallback, provider mode recording in lockfile-shaped output, UI provider modes derived from component metadata, and `optional` provider requirements.
-- 2026-07-02 - Added first-class RP2350-to-HDMI-TX sample and UI loader. RP2350 drives the TX IC through upstream DPI and I2C contracts; the TX IC remains the HDMI function provider.
+- 2026-07-02 - Added parametric connection contracts for pixel streams. RP2350-to-HDMI-TX now expresses RGB565 as connection params on `@nocad/video:pixel_stream.v1`; RGB presets are UI conveniences, not provider modes.
+- 2026-07-02 - Added first-class RP2350-to-HDMI-TX sample and UI loader. RP2350 drives the TX IC through upstream pixel-stream and I2C contracts; the TX IC remains the HDMI function provider.
 - 2026-07-01 - Provider chains landed (TX IC support, `requires.ports`, generic contract resolution); spec gained "Provider Chains" section; roadmap and PCB approach docs created.
 - Prior - I2C vertical slice (resolver, diagnostics, pullups, slice UI); HDMI function slice (sidebands, source 5V, metadata-driven function UI).

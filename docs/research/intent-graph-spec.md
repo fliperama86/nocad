@@ -181,7 +181,7 @@ mcu.video_out --intent.provides--> hdmi_output --intent.exposes--> hdmi_connecto
 HDMI transmitter IC:
 
 ```txt
-mcu.dpi_out --intent.connection, builtin:dpi.v1--> tx.video_in
+mcu.dpi_out --intent.connection, @nocad/video:pixel_stream.v1 { transport: parallel_rgb, rgb: 5/6/5 }--> tx.video_in
 mcu.i2c     --intent.connection, builtin:i2c.v1--> tx.ctrl
 tx.hdmi_tx  --intent.provides---------------> hdmi_output --intent.exposes--> hdmi_connector
 ```
@@ -203,7 +203,7 @@ Provider modes may declare cross-port requirements. A provider requirement state
               "requires": {
                 "ports": {
                   "video_in": {
-                    "contract": "builtin:dpi.v1"
+                    "contract": "@nocad/video:pixel_stream.v1"
                   },
                   "ctrl": {
                     "contract": "builtin:i2c.v1"
@@ -226,7 +226,7 @@ Provider modes may declare cross-port requirements. A provider requirement state
 }
 ```
 
-The resolver validates these requirements against the resolved graph. If `tx.hdmi_tx` provides `@nocad/video:hdmi_output.v1` but no authored edge binds `tx.video_in` to `builtin:dpi.v1`, the resolver should emit a diagnostic on the provider edge instead of changing the function node schema. If an authored upstream edge exists but fails to resolve, the primary diagnostic should stay on that upstream edge and the provider-requirement diagnostic should not misleadingly tell the user to add an edge that already exists.
+The resolver validates these requirements against the resolved graph. If `tx.hdmi_tx` provides `@nocad/video:hdmi_output.v1` but no authored edge binds `tx.video_in` to `@nocad/video:pixel_stream.v1`, the resolver should emit a diagnostic on the provider edge instead of changing the function node schema. If an authored upstream edge exists but fails to resolve, the primary diagnostic should stay on that upstream edge and the provider-requirement diagnostic should not misleadingly tell the user to add an edge that already exists.
 
 This pattern is not HDMI-specific. A USB-serial bridge can provide a debug UART exposure while requiring a USB device connection. An audio codec can provide line out while requiring I2S and I2C. If adding a feature seems to require separate function node types for each implementation, that is a sign that implementation detail has leaked into the function definition and should move to provider topology or provider-mode requirements.
 
@@ -240,12 +240,34 @@ Examples:
 - `builtin:spi.v1`
 - `builtin:usb2.device.v1`
 - `@nocad/video:hdmi_output.v1`
-- `local:rgb_parallel_8bit.v1`
+- `@nocad/video:pixel_stream.v1`
 - inline custom contract objects
 
 Contracts define signal names, direction, electrical expectations, optional timing information, feature expansion, and routing constraints. They do not need to imply a standard protocol.
 
 An edge must use `contract` for the connection's semantic contract. Endpoint fields use `from.port` and `to.port` to describe where the contract is being bound. Do not use root-level `interface`; it is ambiguous.
+
+Connection contracts may expose parameter metadata. Parameters describe the authored intent of this particular binding; they are not provider modes. For example, a Pico-to-HDMI-TX edge can bind the generic pixel-stream contract and select a parallel RGB transport plus RGB565 color width:
+
+```json
+{
+  "kind": "intent.connection",
+  "from": { "node": "mcu", "port": "dpi_out" },
+  "to": { "node": "tx", "port": "video_in" },
+  "contract": "@nocad/video:pixel_stream.v1",
+  "params": {
+    "transport": "parallel_rgb",
+    "redBits": 5,
+    "greenBits": 6,
+    "blueBits": 5,
+    "hsync": true,
+    "vsync": true,
+    "de": true
+  }
+}
+```
+
+The contract descriptor defines which params are valid, optional UI presets such as RGB332/RGB565/RGB888, and how params expand to active signals. A preset is only a convenience patch over `params`; the resolver should record the resolved params and active bindings, not a hidden mode name.
 
 ### Capability
 

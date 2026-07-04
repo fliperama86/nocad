@@ -234,7 +234,16 @@ export function createHdmiTxSliceProject(options: { omitCtrl?: boolean; omitVide
                 node: hdmiTxSliceIds.tx,
                 port: "video_in"
               },
-              contract: "builtin:dpi.v1",
+              contract: "@nocad/video:pixel_stream.v1",
+              params: {
+                transport: "parallel_rgb",
+                redBits: 8,
+                greenBits: 8,
+                blueBits: 8,
+                hsync: true,
+                vsync: true,
+                de: true
+              },
               strategy: {
                 pinAssignment: "auto" as const
               }
@@ -314,16 +323,41 @@ export function createRp2350HdmiTxSliceProject(
       ...dependencies,
       "@nocad/rp2350": "0.1.0"
     },
-    nodes: source.nodes.map((node) =>
-      node.id === hdmiTxSliceIds.videoSource && node.kind === "component"
-        ? {
-            ...node,
-            label: "Main MCU",
-            role: "mcu",
-            component: "@nocad/rp2350:RP2350A",
-            package: "QFN80"
+    nodes: source.nodes.map((node) => {
+      if (node.id === hdmiTxSliceIds.videoSource && node.kind === "component") {
+        return {
+          ...node,
+          label: "Main MCU",
+          role: "mcu",
+          component: "@nocad/rp2350:RP2350A",
+          package: "QFN80"
+        };
+      }
+
+      if (node.id === hdmiTxSliceIds.hdmiFunction && node.kind === "intent.function") {
+        return {
+          ...node,
+          requirements: {
+            ...node.requirements,
+            colorDepth: "rgb565"
           }
-        : node
+        };
+      }
+
+      return node;
+    }),
+    edges: source.edges.map((edge) =>
+      edge.id === hdmiTxSliceIds.dpiConnection && edge.kind === "intent.connection"
+        ? {
+            ...edge,
+            params: {
+              ...edge.params,
+              redBits: 5,
+              greenBits: 6,
+              blueBits: 5
+            }
+          }
+        : edge
     )
   };
 }

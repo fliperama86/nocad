@@ -259,8 +259,13 @@ describe("resolveProject", () => {
       }
     });
     expect(hdmiChoice?.selected.providerMode).toBe("hdmi_1v4");
+    expect(dpiChoice?.selected.params).toMatchObject({
+      redBits: 8,
+      greenBits: 8,
+      blueBits: 8
+    });
     expect(resolved.nets.map((net) => net.name)).toEqual(
-      expect.arrayContaining(["DPI_PCLK", "I2C_SDA", "HDMI_TMDS2_P", "HDMI_5V"])
+      expect.arrayContaining(["PIXEL_PCLK", "I2C_SDA", "HDMI_TMDS2_P", "HDMI_5V"])
     );
   });
 
@@ -281,7 +286,7 @@ describe("resolveProject", () => {
     }
   });
 
-  it("exposes RP2350 as an upstream DPI and I2C driver for an HDMI TX IC", () => {
+  it("exposes RP2350 as an upstream pixel stream and I2C driver for an HDMI TX IC", () => {
     const resolved = resolveProject(createRp2350HdmiTxSliceProject());
     const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
     const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
@@ -292,7 +297,12 @@ describe("resolveProject", () => {
       sda: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio4" } },
       scl: { from: { node: hdmiTxSliceIds.videoSource, pin: "gpio5" } }
     });
-    expect(sourcePinsForChoice(dpiChoice)).toHaveLength(28);
+    expect(dpiChoice?.selected.params).toMatchObject({
+      redBits: 5,
+      greenBits: 6,
+      blueBits: 5
+    });
+    expect(sourcePinsForChoice(dpiChoice)).toHaveLength(20);
     expect(sourcePinsForChoice(dpiChoice)).not.toEqual(expect.arrayContaining(["gpio4", "gpio5"]));
     expect(hdmiChoice?.selected.bindings.tmds2_p).toMatchObject({
       from: { node: hdmiTxSliceIds.tx, pin: "tmds2_p" },
@@ -395,6 +405,76 @@ describe("resolveProject", () => {
       ])
     );
     expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(false);
+  });
+
+  it("derives pixel stream signal count from authored color width params", () => {
+    const source = createHdmiTxSliceProject();
+    const rgb332Source: ProjectSource = {
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === hdmiTxSliceIds.dpiConnection && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              params: {
+                ...edge.params,
+                redBits: 3,
+                greenBits: 3,
+                blueBits: 2
+              }
+            }
+          : edge
+      )
+    };
+
+    const resolved = resolveProject(rgb332Source);
+    const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
+    const pixelNets = resolved.nets.filter((net) => net.sourceEdge === hdmiTxSliceIds.dpiConnection);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(Object.keys(dpiChoice?.selected.bindings ?? {})).toEqual([
+      "pclk",
+      "hsync",
+      "vsync",
+      "de",
+      "r0",
+      "r1",
+      "r2",
+      "g0",
+      "g1",
+      "g2",
+      "b0",
+      "b1"
+    ]);
+    expect(pixelNets.map((net) => net.name)).not.toContain("PIXEL_R3");
+  });
+
+  it("reports invalid connection contract params", () => {
+    const source = createHdmiTxSliceProject();
+    const badSource: ProjectSource = {
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === hdmiTxSliceIds.dpiConnection && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              params: {
+                ...edge.params,
+                redBits: 7
+              }
+            }
+          : edge
+      )
+    };
+
+    const resolved = resolveProject(badSource);
+
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "CONTRACT_PARAM_INVALID"
+        })
+      ])
+    );
+    expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection)).toBe(false);
   });
 
   it("reports missing node references", () => {

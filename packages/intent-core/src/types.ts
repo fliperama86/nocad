@@ -7,6 +7,8 @@ export type EndpointRef = {
 };
 
 export type SignalBindings = Record<string, Partial<Record<EndpointRole, EndpointRef>>>;
+export type ContractParamValue = string | number | boolean;
+export type ContractParams = Record<string, ContractParamValue>;
 
 export type ProjectSource = {
   schema: "nocad.project.v0";
@@ -72,6 +74,7 @@ export type IntentConnectionEdge = GraphObjectMetadata & {
   from: EndpointRef;
   to: EndpointRef;
   contract: string;
+  params?: ContractParams;
   strategy?: IntentStrategy;
   include?: {
     pullups?: boolean;
@@ -214,8 +217,61 @@ export type SignalPinMap =
 
 export type ConnectionContract = {
   id: string;
+  label?: string;
+  params?: Record<string, ContractParamDefinition>;
+  presets?: ContractParamPreset[];
+  signalPlan?: ContractSignalPlanItem[];
   signals: Record<string, ContractSignal>;
 };
+
+export type ContractParamDefinition =
+  | {
+      kind: "boolean";
+      label: string;
+      default?: boolean;
+    }
+  | {
+      kind: "enum";
+      label: string;
+      default?: string;
+      options: ContractParamOption<string>[];
+    }
+  | {
+      kind: "integer";
+      label: string;
+      default?: number;
+      min?: number;
+      max?: number;
+      options?: ContractParamOption<number>[];
+    };
+
+export type ContractParamOption<T extends ContractParamValue> = {
+  label: string;
+  value: T;
+};
+
+export type ContractParamPreset = {
+  label: string;
+  value: string;
+  params: ContractParams;
+};
+
+export type ContractSignalPlanItem =
+  | {
+      kind: "fixed";
+      signals: string[];
+    }
+  | {
+      kind: "conditional";
+      param: string;
+      signal: string;
+    }
+  | {
+      kind: "bus";
+      prefix: string;
+      widthParam: string;
+      maxWidth: number;
+    };
 
 export type ContractSignal = {
   direction: "bidirectional" | "from_to_to" | "to_to_from";
@@ -291,6 +347,7 @@ export type ResolvedChoice = {
   strategy: "auto" | "manual";
   selected: {
     bindings: SignalBindings;
+    params?: ContractParams;
     providerMode?: string;
   };
   reason: string;

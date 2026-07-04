@@ -2,6 +2,8 @@ import { components, contracts, functions, packageVersions } from "./fixtures";
 import type {
   ComponentDefinition,
   ComponentNode,
+  ConnectionContract,
+  ContractParams,
   ContractSignal,
   Diagnostic,
   EndpointRef,
@@ -222,7 +224,10 @@ function connectionPinFlexibilityScore(edge: IntentConnectionEdge, context: Reso
     return Number.MAX_SAFE_INTEGER;
   }
 
-  return Object.keys(contract.signals).reduce(
+  const params = defaultContractParams(contract, edge.params);
+  const signals = contractSignals(contract, params);
+
+  return Object.keys(signals).reduce(
     (score, signal) =>
       score +
       signalMapFlexibility(from.definition, fromMap.signalMap[signal]) +
@@ -777,11 +782,122 @@ function formatNetName(contractId: string, signal: string): string {
     return `I2C_${signal.toUpperCase()}`;
   }
 
-  if (contractId === "builtin:dpi.v1") {
-    return `DPI_${signal.toUpperCase()}`;
+  if (contractId === "@nocad/video:pixel_stream.v1" || contractId === "builtin:dpi.v1") {
+    return `PIXEL_${signal.toUpperCase()}`;
   }
 
   return `${contractId.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
+}
+
+function normalizeContractParams(
+  contract: ConnectionContract,
+  edge: IntentConnectionEdge,
+  context: ResolutionContext
+): ContractParams | null {
+  const params = defaultContractParams(contract, edge.params);
+
+  for (const [paramId, definition] of Object.entries(contract.params ?? {})) {
+    const value = params[paramId];
+
+    if (definition.kind === "boolean" && typeof value !== "boolean") {
+      pushContractParamDiagnostic(edge.id, paramId, "expected a boolean value", context);
+      return null;
+    }
+
+    if (definition.kind === "enum") {
+      const validValues = new Set(definition.options.map((option) => option.value));
+
+      if (typeof value !== "string" || !validValues.has(value)) {
+        pushContractParamDiagnostic(edge.id, paramId, `expected one of ${[...validValues].join(", ")}`, context);
+        return null;
+      }
+    }
+
+    if (definition.kind === "integer") {
+      const validValues = definition.options ? new Set(definition.options.map((option) => option.value)) : undefined;
+
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        (definition.min !== undefined && value < definition.min) ||
+        (definition.max !== undefined && value > definition.max) ||
+        (validValues && !validValues.has(value))
+      ) {
+        pushContractParamDiagnostic(
+          edge.id,
+          paramId,
+          validValues ? `expected one of ${[...validValues].join(", ")}` : "expected an integer value",
+          context
+        );
+        return null;
+      }
+    }
+  }
+
+  return params;
+}
+
+function defaultContractParams(contract: ConnectionContract, authoredParams: ContractParams | undefined): ContractParams {
+  const params: ContractParams = {};
+
+  for (const [paramId, definition] of Object.entries(contract.params ?? {})) {
+    if (definition.default !== undefined) {
+      params[paramId] = definition.default;
+    }
+  }
+
+  return {
+    ...params,
+    ...(authoredParams ?? {})
+  };
+}
+
+function pushContractParamDiagnostic(
+  edgeId: string,
+  paramId: string,
+  detail: string,
+  context: ResolutionContext
+) {
+  context.diagnostics.push({
+    severity: "error",
+    code: "CONTRACT_PARAM_INVALID",
+    message: `Contract parameter "${paramId}" on edge "${edgeId}" is invalid: ${detail}.`,
+    targets: [{ kind: "edge", id: edgeId }]
+  });
+}
+
+function contractSignals(contract: ConnectionContract, params: ContractParams): Record<string, ContractSignal> {
+  if (!contract.signalPlan) {
+    return contract.signals;
+  }
+
+  const signals: Record<string, ContractSignal> = {};
+  const includeSignal = (signal: string) => {
+    const definition = contract.signals[signal];
+
+    if (definition) {
+      signals[signal] = definition;
+    }
+  };
+
+  for (const item of contract.signalPlan) {
+    if (item.kind === "fixed") {
+      item.signals.forEach(includeSignal);
+    } else if (item.kind === "conditional") {
+      if (params[item.param]) {
+        includeSignal(item.signal);
+      }
+    } else {
+      const paramValue = params[item.widthParam];
+      const width = typeof paramValue === "number" ? paramValue : item.maxWidth;
+
+      for (let index = 0; index < Math.min(width, item.maxWidth); index += 1) {
+        includeSignal(`${item.prefix}${index}`);
+      }
+    }
+  }
+
+  return signals;
 }
 
 function resolveIntentConnection(
@@ -830,7 +946,14 @@ function resolveIntentConnection(
     return null;
   }
 
-  const bindings = resolveContractBindings(edge, contract.signals, from, to, fromMap, toMap, context);
+  const params = normalizeContractParams(contract, edge, context);
+
+  if (!params) {
+    return null;
+  }
+
+  const signals = contractSignals(contract, params);
+  const bindings = resolveContractBindings(edge, signals, from, to, fromMap, toMap, context);
 
   if (!bindings) {
     return null;
@@ -842,14 +965,15 @@ function resolveIntentConnection(
       sourceEdge: edge.id,
       strategy: edge.strategy?.pinAssignment === "manual" ? "manual" : "auto",
       selected: {
-        bindings
+        bindings,
+        params: Object.keys(params).length > 0 ? params : undefined
       },
       reason:
         edge.strategy?.pinAssignment === "manual"
           ? `Used source-provided bindings for ${edge.contract}.`
           : `Resolved ${edge.contract} against endpoint signal maps.`
     },
-    nets: Object.keys(contract.signals).map((signal) => createContractNet(edge.contract, signal, bindings, edge.id))
+    nets: Object.keys(signals).map((signal) => createContractNet(edge.contract, signal, bindings, edge.id))
   };
 }
 

@@ -1,8 +1,12 @@
 import type { ComponentDefinition, ConnectionContract, FunctionDefinition, PinDefinition, SignalPinMap } from "./types";
 
+const PIXEL_STREAM_CONTRACT = "@nocad/video:pixel_stream.v1";
+const pixelStreamSignals = createPixelStreamSignals();
+
 export const contracts: Record<string, ConnectionContract> = {
   "builtin:i2c.v1": {
     id: "builtin:i2c.v1",
+    label: "I2C",
     signals: {
       sda: { direction: "bidirectional" },
       scl: { direction: "bidirectional" }
@@ -10,6 +14,7 @@ export const contracts: Record<string, ConnectionContract> = {
   },
   "@nocad/video:hdmi_output.v1": {
     id: "@nocad/video:hdmi_output.v1",
+    label: "HDMI output",
     signals: {
       tmds2_p: { direction: "from_to_to" },
       tmds2_n: { direction: "from_to_to" },
@@ -25,38 +30,86 @@ export const contracts: Record<string, ConnectionContract> = {
       cec: { direction: "bidirectional" }
     }
   },
+  [PIXEL_STREAM_CONTRACT]: {
+    id: PIXEL_STREAM_CONTRACT,
+    label: "Pixel stream",
+    params: {
+      transport: {
+        kind: "enum",
+        label: "Transport",
+        default: "parallel_rgb",
+        options: [{ label: "Parallel RGB", value: "parallel_rgb" }]
+      },
+      redBits: {
+        kind: "integer",
+        label: "Red bits",
+        default: 8,
+        options: [
+          { label: "3", value: 3 },
+          { label: "5", value: 5 },
+          { label: "6", value: 6 },
+          { label: "8", value: 8 }
+        ]
+      },
+      greenBits: {
+        kind: "integer",
+        label: "Green bits",
+        default: 8,
+        options: [
+          { label: "3", value: 3 },
+          { label: "5", value: 5 },
+          { label: "6", value: 6 },
+          { label: "8", value: 8 }
+        ]
+      },
+      blueBits: {
+        kind: "integer",
+        label: "Blue bits",
+        default: 8,
+        options: [
+          { label: "2", value: 2 },
+          { label: "5", value: 5 },
+          { label: "6", value: 6 },
+          { label: "8", value: 8 }
+        ]
+      },
+      hsync: {
+        kind: "boolean",
+        label: "HSYNC",
+        default: true
+      },
+      vsync: {
+        kind: "boolean",
+        label: "VSYNC",
+        default: true
+      },
+      de: {
+        kind: "boolean",
+        label: "Data enable",
+        default: true
+      }
+    },
+    presets: [
+      { label: "RGB332", value: "rgb332", params: { redBits: 3, greenBits: 3, blueBits: 2 } },
+      { label: "RGB565", value: "rgb565", params: { redBits: 5, greenBits: 6, blueBits: 5 } },
+      { label: "RGB666", value: "rgb666", params: { redBits: 6, greenBits: 6, blueBits: 6 } },
+      { label: "RGB888", value: "rgb888", params: { redBits: 8, greenBits: 8, blueBits: 8 } }
+    ],
+    signalPlan: [
+      { kind: "fixed", signals: ["pclk"] },
+      { kind: "conditional", param: "hsync", signal: "hsync" },
+      { kind: "conditional", param: "vsync", signal: "vsync" },
+      { kind: "conditional", param: "de", signal: "de" },
+      { kind: "bus", prefix: "r", widthParam: "redBits", maxWidth: 8 },
+      { kind: "bus", prefix: "g", widthParam: "greenBits", maxWidth: 8 },
+      { kind: "bus", prefix: "b", widthParam: "blueBits", maxWidth: 8 }
+    ],
+    signals: pixelStreamSignals
+  },
   "builtin:dpi.v1": {
     id: "builtin:dpi.v1",
-    signals: {
-      pclk: { direction: "from_to_to" },
-      hsync: { direction: "from_to_to" },
-      vsync: { direction: "from_to_to" },
-      de: { direction: "from_to_to" },
-      r0: { direction: "from_to_to" },
-      r1: { direction: "from_to_to" },
-      r2: { direction: "from_to_to" },
-      r3: { direction: "from_to_to" },
-      r4: { direction: "from_to_to" },
-      r5: { direction: "from_to_to" },
-      r6: { direction: "from_to_to" },
-      r7: { direction: "from_to_to" },
-      g0: { direction: "from_to_to" },
-      g1: { direction: "from_to_to" },
-      g2: { direction: "from_to_to" },
-      g3: { direction: "from_to_to" },
-      g4: { direction: "from_to_to" },
-      g5: { direction: "from_to_to" },
-      g6: { direction: "from_to_to" },
-      g7: { direction: "from_to_to" },
-      b0: { direction: "from_to_to" },
-      b1: { direction: "from_to_to" },
-      b2: { direction: "from_to_to" },
-      b3: { direction: "from_to_to" },
-      b4: { direction: "from_to_to" },
-      b5: { direction: "from_to_to" },
-      b6: { direction: "from_to_to" },
-      b7: { direction: "from_to_to" }
-    }
+    label: "DPI",
+    signals: pixelStreamSignals
   }
 };
 
@@ -183,9 +236,9 @@ export const components: Record<string, ComponentDefinition> = {
       dpi_out: {
         kind: "derived_port",
         contractMaps: {
-          "builtin:dpi.v1": {
+          [PIXEL_STREAM_CONTRACT]: {
             role: "from",
-            signalMap: createSelectableSignalMap(Object.keys(contracts["builtin:dpi.v1"].signals), ["gpio"])
+            signalMap: createSelectableSignalMap(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals), ["gpio"])
           }
         }
       },
@@ -240,9 +293,9 @@ export const components: Record<string, ComponentDefinition> = {
       dpi_out: {
         kind: "derived_port",
         contractMaps: {
-          "builtin:dpi.v1": {
+          [PIXEL_STREAM_CONTRACT]: {
             role: "from",
-            signalMap: createSelectableSignalMap(Object.keys(contracts["builtin:dpi.v1"].signals), ["gpio"])
+            signalMap: createSelectableSignalMap(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals), ["gpio"])
           }
         }
       }
@@ -252,7 +305,7 @@ export const components: Record<string, ComponentDefinition> = {
   "@nocad/hdmi-tx:IT66121": {
     id: "@nocad/hdmi-tx:IT66121",
     pins: {
-      ...createFixedPins(Object.keys(contracts["builtin:dpi.v1"].signals), "DPI"),
+      ...createFixedPins(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals), "PIXEL"),
       ctrl_sda: {
         name: "Control SDA",
         capabilities: ["i2c.sda"]
@@ -314,9 +367,9 @@ export const components: Record<string, ComponentDefinition> = {
       video_in: {
         kind: "fixed_port",
         contractMaps: {
-          "builtin:dpi.v1": {
+          [PIXEL_STREAM_CONTRACT]: {
             role: "to",
-            signalMap: createFixedSignalMap(Object.keys(contracts["builtin:dpi.v1"].signals))
+            signalMap: createFixedSignalMap(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals))
           }
         }
       },
@@ -343,7 +396,7 @@ export const components: Record<string, ComponentDefinition> = {
                 requires: {
                   ports: {
                     video_in: {
-                      contract: "builtin:dpi.v1"
+                      contract: PIXEL_STREAM_CONTRACT
                     },
                     ctrl: {
                       contract: "builtin:i2c.v1"
@@ -545,6 +598,20 @@ function createGenericFpgaPins(): Record<string, PinDefinition> {
         }
       ];
     })
+  );
+}
+
+function createPixelStreamSignals(): ConnectionContract["signals"] {
+  return Object.fromEntries(
+    [
+      "pclk",
+      "hsync",
+      "vsync",
+      "de",
+      ...Array.from({ length: 8 }, (_, index) => `r${index}`),
+      ...Array.from({ length: 8 }, (_, index) => `g${index}`),
+      ...Array.from({ length: 8 }, (_, index) => `b${index}`)
+    ].map((signal) => [signal, { direction: "from_to_to" }])
   );
 }
 

@@ -58,6 +58,7 @@ export function IntentGraphView({
   className,
   graphRevision,
   onAddComponent,
+  onCanvasPaneClick,
   onConnectNodes,
   onPositionsChange,
   onRemoveEdges,
@@ -72,6 +73,7 @@ export function IntentGraphView({
   componentTemplates: ComponentTemplate[];
   graphRevision: number;
   onAddComponent: (template: string) => void;
+  onCanvasPaneClick?: () => void;
   onConnectNodes: (connection: Connection) => void;
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
   onRemoveEdges: (edgeIds: string[]) => void;
@@ -147,7 +149,8 @@ export function IntentGraphView({
     setSelectedNodeIds([]);
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
-  }, [onSelectedEdgeChange, onSelectedNodeChange]);
+    onCanvasPaneClick?.();
+  }, [onCanvasPaneClick, onSelectedEdgeChange, onSelectedNodeChange]);
 
   const commitNodePosition = useCallback((node: IntentFlowNode) => {
     onPositionsChange((currentPositions) => ({
