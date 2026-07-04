@@ -69,7 +69,7 @@ Done when:
 
 ### M3 - Editor engine foundation + schematic projection (read-only) - todo
 
-Start the custom canvas engine (per CLAUDE.md hard rules: no React per document object). First projection: generated schematic view from the lockfile (symbols, generated nets, source-map hover). Product priorities put schematics before PCB; both projections share this engine.
+Start the custom canvas engine (per CLAUDE.md hard rules: no React per document object). First projection: generated schematic view from the lockfile (symbols, generated nets, source-map hover). Product priorities put schematics before PCB; both projections share this engine. Rendering stack decision (custom thin WebGL2 renderer, no scene-graph library; three.js reserved for a possible later 3D preview) is recorded in `docs/research/pcb-layout-approach.md`.
 
 Done when:
 
@@ -131,6 +131,7 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
+- 2026-07-04 - PCB layout plan fleshed out in `docs/research/pcb-layout-approach.md`: rendering stack decision (custom thin WebGL2 renderer; three.js/PixiJS evaluated and rejected for the 2D surface, three.js reserved for a later 3D preview) and an MVP cutline (M1-M8 feature inventory by layer; pours/shove/autorouting/import/3D deferred).
 - 2026-07-02 - Provider-chain review fixes landed: constrained-first connection ordering, provider requirement cascade suppression, fixed-map override validation, preferred-I2C fallback, provider mode recording in lockfile-shaped output, UI provider modes derived from component metadata, and `optional` provider requirements.
 - 2026-07-02 - Added parametric connection contracts for pixel streams. RP2350-to-HDMI-TX now expresses RGB565 as connection params on `@nocad/video:pixel_stream.v1`; RGB presets are UI conveniences, not provider modes.
 - 2026-07-02 - Added first-class RP2350-to-HDMI-TX sample and UI loader. RP2350 drives the TX IC through upstream pixel-stream and I2C contracts; the TX IC remains the HDMI function provider.

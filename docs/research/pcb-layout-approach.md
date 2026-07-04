@@ -113,6 +113,22 @@ The board viewer is the forcing function for the real editor engine. Layering mu
 
 Define the geometry kernel interface in TypeScript now, implement it naively, and port hot paths to Rust/WASM when profiling says so, not before.
 
+### Rendering Stack Decision
+
+Decision: a custom, thin WebGL2 renderer for the 2D document surface. No scene-graph library. Rationale:
+
+- The hard rendering work is EDA-specific either way: stroked segments with round caps/joins, arcs, rounded pads, polygons with holes, SDF text. General-purpose libraries do none of this well (three.js `gl.LINES` is 1px; `Line2` is a screen-space hack without caps), so custom tessellation and shaders are required regardless. Once those exist, a scene-graph library is a heavy context manager.
+- Integer-nanometer coordinates overflow float32 vertex attributes (a 100mm board is 1e8 nm; float32 mantissa ends near 1.6e7). Any renderer needs chunk-local origins and CPU-side double-precision transforms; a custom pipeline makes that explicit instead of fighting library conventions.
+- Hit testing, picking, and spatial queries live in the geometry kernel (above), so library raycasting and per-object scene graphs go unused by design. The kernel hands the renderer flat typed arrays; the renderer uploads buffers and draws layers in order.
+- Flat typed arrays port cleanly to the Rust/WASM kernel. Retained per-object scene graphs do not.
+
+Considered and rejected for this surface:
+
+- **three.js**: viable in principle (Flux.ai shipped on it), but for 2D EDA most of it is dead weight and its line rendering is the weakest part. Revisit as the backend for a future 3D board preview, where it genuinely fits.
+- **PixiJS**: fastest path to first pixels for the read-only board projection, but its retained `Graphics` model retessellates on change and imposes per-object structure; likely outgrown by manual routing.
+
+Small leaf libraries that do not shape the document model are fine: `earcut` for triangulation (portable to the kernel later), an SDF font atlas for text, optionally `regl`/`twgl` to trim WebGL boilerplate. Keep a thin `Renderer` interface between engine and GL so a three.js-backed 3D viewer can be added later without touching the kernel.
+
 ## KiCad Interop
 
 Export `.kicad_pcb` early, before nocad's own routing matures. Users can place in nocad and finish in KiCad. This is the adoption trust-builder, and it forces the board model to remain KiCad-expressible. Export before import; import is much harder and can wait.
@@ -127,6 +143,52 @@ Milestone ordering, acceptance criteria, and current status live in `docs/roadma
 4. Placement editing before routing; placement plus pin-assignment scoring delivers most of the early value.
 5. Obligations panel before routing tools; manual routing MVP (45-degree segments, vias, live clearance DRC, no shove) after.
 6. KiCad export once placement exists; declarative pours and assisted routing (diff-pair assist, pattern replication) after the data model proves out.
+
+## MVP Cutline
+
+MVP definition: **place and route the RP2350 + IT66121 sample board in nocad, see every obligation's status, and export `.kicad_pcb` to finish in KiCad.** That is roadmap M1-M8. Explicitly out of the MVP: pours, push-and-shove, autorouting, length tuning, KiCad import, 3D preview (M9 and later).
+
+Feature inventory by layer:
+
+Resolver prerequisites (intent-core):
+
+- Stable-ID guarantee test-enforced: identical lockfile IDs on re-resolution and under source edge reordering (overlaps M1).
+- Constraint metadata on contracts/signals: diff-pair grouping, impedance class, clearance class, length-match groups, emitted into the lockfile as obligations. `ContractSignal` currently carries only `direction`.
+- Package geometry data: footprints (pad shapes/layers, courtyard, silk) for the sample components and generated passives.
+- Placement hints (`near_provider`, decoupling-near-pin) generated from topology rules, not hardcoded paths.
+
+Geometry kernel (new portable core package):
+
+- Primitives and transforms on integer nm; bboxes; segment/arc/polygon math.
+- Tessellation to flat vertex buffers: stroke expansion, arc discretization, triangulation.
+- Spatial index (R-tree) plus exact hit testing with pick radius and layer priority.
+- Connectivity: net islands via union-find over pads/tracks/vias (drives ratsnest and "unrouted").
+- Clearance and courtyard-overlap checks (DRC v0); orphaned-geometry detection against the lockfile.
+- Ratsnest computation (nearest unconnected island per net).
+
+Board document (core):
+
+- `project.nocad.board.json` schema: placements, tracks, vias, outline, keepouts, stackup; every object individually keyed and referencing lockfile IDs.
+- All board edits through the document API (M2) as inspectable patches with undo/redo; save/load round-trip.
+
+Editor engine (web app):
+
+- Viewport: cursor-anchored pan/zoom across the full zoom range, DPR handling, grid, chunk-local origins for precision.
+- Layered batched rendering: copper, silk, courtyards, outline, ratsnest, selection/hover overlays, drag ghosts; theme-aware colors.
+- SDF text (refdes; net names on hover).
+- Interaction FSM: click and box select, move with grid snap, rotate, keyboard-driven commands.
+
+Chrome (React):
+
+- Board tab, layer visibility panel, inspector for the selected object, obligations panel (M6) with click-to-locate.
+
+Routing MVP (M7):
+
+- 45-degree segment drawing, via insertion with layer switch, snap to pads and track ends, live clearance feedback. No shove.
+
+Export (M8):
+
+- `.kicad_pcb` writer with net mapping that survives KiCad's own DRC. Export before import.
 
 ## Open Questions
 

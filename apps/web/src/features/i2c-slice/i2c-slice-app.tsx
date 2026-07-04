@@ -35,6 +35,7 @@ import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
+import { PcbDesignerPanel } from "./pcb-designer-panel";
 import { ResolutionPanel } from "./resolution-panel";
 
 function createSource() {
@@ -53,7 +54,7 @@ function createBlankSource() {
 }
 
 type ComponentTemplate = "fpga" | "hdmiFunction" | "hdmiPort" | "hdmiTx" | "mcu" | "sensor" | "rail3v3" | "rail5v";
-type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
+type WorkspaceTab = "graph" | "pcb" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
 type SourceDependency = {
@@ -246,6 +247,7 @@ const componentPalette = Object.entries(componentTemplates).map(([id, template])
 
 const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "graph", label: "Graph" },
+  { id: "pcb", label: "PCB" },
   { id: "resolution", label: "Resolution" },
   { id: "diagnostics", label: "Diagnostics" },
   { id: "json", label: "JSON" }
@@ -756,6 +758,12 @@ export function I2cSliceApp() {
                     />
                   </div>
                 )}
+              </div>
+            ) : null}
+
+            {activeTab === "pcb" ? (
+              <div aria-labelledby="pcb-tab" className="h-full min-h-0" id="pcb-panel" role="tabpanel">
+                <PcbDesignerPanel resolved={resolved} source={source} />
               </div>
             ) : null}
 
