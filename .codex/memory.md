@@ -3,6 +3,7 @@
 ## Git Workflow
 
 - Never include `codex` (case-insensitive) or Codex attribution in branch names or pull request titles. Use task-specific, product-oriented names instead.
+- Work directly on `main`; do not create branches or pull requests unless the user explicitly requests them.
 
 ## Visual Fidelity
 
