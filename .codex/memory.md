@@ -20,3 +20,8 @@
 
 - Treat the current Pico RetroDigital main board as the product north star, while keeping the smaller RP2350 plus IT66121 board as an EDA capability MVP.
 - After shared resolver and document foundations, advance two cooperating tracks: full semantic-graph representation of the north-star design and the editor/PCB path through placement, manual routing, zones, and KiCad export. Validate them through subsystem slices and integration gates rather than completing either track only against toy data.
+
+## Resolver Determinism
+
+- Do not pre-reserve bindings from every `intent.provides` edge. Protect hard provider pins only for validated, unambiguous function topology with valid endpoints, modes, signal maps, and overrides. Include fixed mode pins, diagnose collisions between valid provider claims, and let orphan, invalid, or ambiguous provider edges claim nothing.
+- Duplicate edge IDs must invalidate every occurrence rather than selecting a source-order survivor. Canonicalize hard reservation ownership, report conflicts, and test full `ResolvedProject` equality across all source edge-array permutations.

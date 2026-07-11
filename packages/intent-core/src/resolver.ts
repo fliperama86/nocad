@@ -29,7 +29,7 @@ import type {
   SignalBindings
 } from "./types";
 
-const RESOLVER_VERSION = "0.1.0";
+const RESOLVER_VERSION = "0.2.0";
 
 type ComponentContext = {
   node: ComponentNode;
@@ -40,6 +40,7 @@ type ReservedPin = {
   node: string;
   pin: string;
   edge: string;
+  kind: "net.binding" | "provider.claim" | "resolved";
 };
 
 type BoundPort = {
@@ -57,6 +58,13 @@ type ResolvedProviderMode = {
   mode: ProviderModeDefinition;
 };
 
+type FunctionResolutionRequest = {
+  connectorEdge: IntentExposesEdge;
+  definition: FunctionDefinition;
+  functionNode: FunctionNode;
+  providerEdge: IntentProvidesEdge;
+};
+
 type ResolutionContext = {
   authoredPorts: Map<string, BoundPort[]>;
   diagnostics: Diagnostic[];
@@ -70,41 +78,23 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
   const diagnostics: Diagnostic[] = [];
   const nodeById = indexNodes(source.nodes, diagnostics);
   const componentByNodeId = indexComponentContexts(source.nodes, diagnostics);
-  const reservedPins = collectInitialReservations(source.edges);
   const boundPorts = new Map<string, BoundPort[]>();
-  const validEdges: ProjectEdge[] = [];
-  const edgeIds = new Set<string>();
   const dependencies = createResolvedDependencies(source.dependencies);
-
+  const validEdges = collectUniqueEdges(source.edges, diagnostics);
+  const canonicalSource = { ...source, edges: validEdges };
+  const functionRequests = collectFunctionResolutionRequests(canonicalSource, diagnostics);
+  const reservedPins = collectInitialReservations(validEdges, functionRequests, componentByNodeId, diagnostics);
   const context: ResolutionContext = {
-    authoredPorts: new Map(),
+    authoredPorts: collectAuthoredPortBindings(validEdges),
     diagnostics,
     boundPorts,
     nodeById,
     componentByNodeId,
     reservedPins
   };
-
   const resolvedChoices: ResolvedProject["resolvedChoices"] = [];
   const nets: ResolvedNet[] = [];
   const generated: ResolvedProject["generated"] = [];
-
-  for (const edge of source.edges) {
-    if (edgeIds.has(edge.id)) {
-      diagnostics.push({
-        severity: "error",
-        code: "DUPLICATE_EDGE_ID",
-        message: `Edge id "${edge.id}" is used more than once.`,
-        targets: [{ kind: "edge", id: edge.id }]
-      });
-      continue;
-    }
-
-    edgeIds.add(edge.id);
-    validEdges.push(edge);
-  }
-
-  context.authoredPorts = collectAuthoredPortBindings(validEdges);
 
   const connectionEdges = validEdges.filter(
     (edge): edge is IntentConnectionEdge => edge.kind === "intent.connection"
@@ -127,7 +117,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     applyConnectionTopologyRules(edge, resolved, source.nodes, dependencies, generated, context);
   }
 
-  const resolvedFunctions = resolveFunctions({ ...source, edges: validEdges }, context);
+  const resolvedFunctions = resolveFunctions(canonicalSource, functionRequests, context);
   resolvedChoices.push(...resolvedFunctions.choices);
   nets.push(...resolvedFunctions.nets);
 
@@ -172,13 +162,18 @@ function applyConnectionTopologyRules(
     }
 
     const dependencyVersion = packageVersions[rule.dependency];
+    const introducedBy = {
+      edge: edge.id,
+      feature: rule.id
+    };
+    const previousIntroduction = dependencies[rule.dependency]?.introducedBy;
     dependencies[rule.dependency] = {
       version: dependencyVersion,
       hash: stablePackageHash(rule.dependency, dependencyVersion),
-      introducedBy: {
-        edge: edge.id,
-        feature: rule.id
-      }
+      introducedBy:
+        !previousIntroduction || compareDependencyIntroduction(introducedBy, previousIntroduction) < 0
+          ? introducedBy
+          : previousIntroduction
     };
 
     const rail = findPowerDomain(nodes, rule.rail);
@@ -197,6 +192,13 @@ function applyConnectionTopologyRules(
       generated.push(createConnectionTopologyComponent(edge.id, signal, rail.id, rule));
     }
   }
+}
+
+function compareDependencyIntroduction(
+  left: NonNullable<ResolvedDependency["introducedBy"]>,
+  right: NonNullable<ResolvedDependency["introducedBy"]>
+) {
+  return compareStableText(left.edge, right.edge) || compareStableText(left.feature, right.feature);
 }
 
 function createConnectionTopologyComponent(
@@ -291,38 +293,30 @@ function pinAvailableForAllocation(nodeId: string, pin: string, context: Resolut
 
 function resolveFunctions(
   source: ProjectSource,
+  functionRequests: FunctionResolutionRequest[],
   context: ResolutionContext
 ): { choices: ResolvedProject["resolvedChoices"]; nets: ResolvedNet[] } {
   const choices: ResolvedProject["resolvedChoices"] = [];
   const nets: ResolvedNet[] = [];
+  const requests = functionRequests
+    .map((request) => ({
+      request,
+      score: functionProviderPinFlexibilityScore(request, context)
+    }))
+    .sort(
+      (left, right) =>
+        left.score - right.score || compareStableText(left.request.providerEdge.id, right.request.providerEdge.id)
+    )
+    .map(({ request }) => request);
 
-  for (const node of source.nodes) {
-    if (node.kind !== "intent.function") {
-      continue;
-    }
-
-    const definition = functions[node.function];
-
-    if (!definition) {
-      continue;
-    }
-
-    const contractId = definition.topology.contract;
-
-    const providerEdge = source.edges.find(
-      (edge): edge is IntentProvidesEdge =>
-        edge.kind === "intent.provides" && edge.to.node === node.id && edge.contract === contractId
+  for (const { connectorEdge, definition, functionNode, providerEdge } of requests) {
+    const resolvedProvider = resolveFunctionProvider(
+      functionNode,
+      definition,
+      providerEdge,
+      connectorEdge,
+      context
     );
-    const connectorEdge = source.edges.find(
-      (edge): edge is IntentExposesEdge =>
-        edge.kind === "intent.exposes" && edge.from.node === node.id && edge.contract === contractId
-    );
-
-    if (!providerEdge || !connectorEdge) {
-      continue;
-    }
-
-    const resolvedProvider = resolveFunctionProvider(node, definition, providerEdge, connectorEdge, context);
 
     if (resolvedProvider) {
       choices.push(resolvedProvider.choice);
@@ -330,10 +324,216 @@ function resolveFunctions(
       reserveBindings(providerEdge.id, resolvedProvider.choice.selected.bindings, context.reservedPins);
     }
 
-    nets.push(...resolveFunctionGeneratedNets(node, definition, connectorEdge, source.nodes, context));
+    nets.push(...resolveFunctionGeneratedNets(functionNode, definition, connectorEdge, source.nodes, context));
   }
 
   return { choices, nets };
+}
+
+function collectFunctionResolutionRequests(
+  source: ProjectSource,
+  diagnostics: Diagnostic[]
+): FunctionResolutionRequest[] {
+  const requests: FunctionResolutionRequest[] = [];
+
+  for (const functionNode of source.nodes) {
+    if (functionNode.kind !== "intent.function") {
+      continue;
+    }
+
+    const definition = functions[functionNode.function];
+
+    if (!definition) {
+      continue;
+    }
+
+    const contractId = definition.topology.contract;
+    const providerEdges = source.edges.filter(
+      (edge): edge is IntentProvidesEdge =>
+        edge.kind === "intent.provides" && edge.to.node === functionNode.id && edge.contract === contractId
+    );
+    const connectorEdges = source.edges.filter(
+      (edge): edge is IntentExposesEdge =>
+        edge.kind === "intent.exposes" && edge.from.node === functionNode.id && edge.contract === contractId
+    );
+
+    if (providerEdges.length > 1) {
+      diagnostics.push({
+        severity: "error",
+        code: "AMBIGUOUS_FUNCTION_PROVIDER",
+        message: `Function "${functionNode.id}" has multiple providers for ${contractId}.`,
+        targets: [
+          { kind: "node", id: functionNode.id },
+          ...providerEdges.map((edge) => ({ kind: "edge" as const, id: edge.id }))
+        ]
+      });
+    }
+
+    if (connectorEdges.length > 1) {
+      diagnostics.push({
+        severity: "error",
+        code: "AMBIGUOUS_FUNCTION_EXPOSURE",
+        message: `Function "${functionNode.id}" has multiple exposed endpoints for ${contractId}.`,
+        targets: [
+          { kind: "node", id: functionNode.id },
+          ...connectorEdges.map((edge) => ({ kind: "edge" as const, id: edge.id }))
+        ]
+      });
+    }
+
+    const providerEdge = providerEdges.length === 1 ? providerEdges[0] : undefined;
+    const connectorEdge = connectorEdges.length === 1 ? connectorEdges[0] : undefined;
+
+    if (providerEdge && connectorEdge) {
+      requests.push({ connectorEdge, definition, functionNode, providerEdge });
+    }
+  }
+
+  return requests;
+}
+
+function functionProviderPinFlexibilityScore(
+  request: FunctionResolutionRequest,
+  context: ResolutionContext
+): number {
+  const { connectorEdge, definition, functionNode, providerEdge } = request;
+  const provider = context.componentByNodeId.get(providerEdge.from.node);
+  const connector = context.componentByNodeId.get(connectorEdge.to.node);
+
+  if (!provider || !connector) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const mode = selectProviderMode(providerEdge, provider, definition);
+  const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[
+    definition.topology.contract
+  ];
+
+  if (!mode || !connectorMap) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return functionSignalsForDefinition(functionNode, definition).reduce((score, signal) => {
+    return (
+      score +
+      signalMapFlexibility(
+        providerEdge.from.node,
+        provider.definition,
+        mode.mode.signalMap[signal],
+        providerEdge.bindings?.[signal]?.from,
+        context
+      ) +
+      signalMapFlexibility(
+        connectorEdge.to.node,
+        connector.definition,
+        connectorMap.signalMap[signal],
+        providerEdge.bindings?.[signal]?.to,
+        context
+      )
+    );
+  }, 0);
+}
+
+function collectValidatedFunctionPinClaims(
+  request: FunctionResolutionRequest,
+  componentByNodeId: Map<string, ComponentContext>
+): EndpointRef[] {
+  const { connectorEdge, definition, functionNode, providerEdge } = request;
+  const provider = componentByNodeId.get(providerEdge.from.node);
+  const connector = componentByNodeId.get(connectorEdge.to.node);
+
+  if (!provider || !connector) {
+    return [];
+  }
+
+  const mode = selectProviderMode(providerEdge, provider, definition);
+  const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[
+    definition.topology.contract
+  ];
+
+  if (!mode || !connectorMap || connectorMap.role !== "to") {
+    return [];
+  }
+
+  const claims: EndpointRef[] = [];
+  const claimedPins = new Set<string>();
+
+  for (const signal of functionSignalsForDefinition(functionNode, definition)) {
+    const providerMap = mode.mode.signalMap[signal];
+    const exposedMap = connectorMap.signalMap[signal];
+
+    if (!providerMap || !exposedMap) {
+      return [];
+    }
+
+    const providerClaim = validatedHardMappedEndpoint(
+      providerEdge.from.node,
+      provider.definition,
+      providerMap,
+      providerEdge.bindings?.[signal]?.from
+    );
+    const exposedClaim = validatedHardMappedEndpoint(
+      connectorEdge.to.node,
+      connector.definition,
+      exposedMap,
+      providerEdge.bindings?.[signal]?.to
+    );
+
+    if (!providerClaim.valid || !exposedClaim.valid) {
+      return [];
+    }
+
+    for (const endpoint of [providerClaim.endpoint, exposedClaim.endpoint]) {
+      if (!endpoint?.pin) {
+        continue;
+      }
+
+      const key = pinKey(endpoint);
+
+      if (claimedPins.has(key)) {
+        return [];
+      }
+
+      claimedPins.add(key);
+      claims.push(endpoint);
+    }
+  }
+
+  return claims;
+}
+
+function validatedHardMappedEndpoint(
+  nodeId: string,
+  definition: ComponentDefinition,
+  signalMap: SignalPinMap,
+  override: EndpointRef | undefined
+): { valid: boolean; endpoint?: EndpointRef } {
+  if (override && override.node !== nodeId) {
+    return { valid: false };
+  }
+
+  if ("pin" in signalMap && override?.pin && override.pin !== signalMap.pin) {
+    return { valid: false };
+  }
+
+  const selectedPin = "pin" in signalMap ? signalMap.pin : override?.pin;
+
+  if (!selectedPin) {
+    return { valid: true };
+  }
+
+  if (!definition.pins[selectedPin]) {
+    return { valid: false };
+  }
+
+  if (
+    "pinSelector" in signalMap &&
+    !pinSatisfiesCapabilities(definition, selectedPin, signalMap.pinSelector.capabilities)
+  ) {
+    return { valid: false };
+  }
+
+  return { valid: true, endpoint: { node: nodeId, pin: selectedPin } };
 }
 
 function resolveFunctionProvider(
@@ -444,6 +644,39 @@ function resolveProviderMode(
 ): ResolvedProviderMode | null {
   const port = provider.definition.ports[providerEdge.from.port ?? ""];
   const provides = port?.provides?.[providerEdge.contract];
+  const requestedMode = providerEdge.strategy?.providerMode ?? "auto";
+  const selectedMode = selectProviderMode(providerEdge, provider, functionDefinition);
+
+  if (selectedMode) {
+    return selectedMode;
+  }
+
+  if (!provides || provides.role !== "provider") {
+    context.diagnostics.push({
+      severity: "error",
+      code: "PORT_CONTRACT_MISMATCH",
+      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not provide ${providerEdge.contract}.`,
+      targets: [{ kind: "edge", id: providerEdge.id }]
+    });
+    return null;
+  }
+
+  context.diagnostics.push({
+    severity: "error",
+    code: "PROVIDER_MODE_NOT_FOUND",
+    message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not expose provider mode "${requestedMode}" for ${providerEdge.contract}.`,
+    targets: [{ kind: "edge", id: providerEdge.id }]
+  });
+  return null;
+}
+
+function selectProviderMode(
+  providerEdge: IntentProvidesEdge,
+  provider: ComponentContext,
+  functionDefinition: FunctionDefinition
+): ResolvedProviderMode | null {
+  const port = provider.definition.ports[providerEdge.from.port ?? ""];
+  const provides = port?.provides?.[providerEdge.contract];
   const genericProvider = functionDefinition.topology.genericProvider;
   const requestedMode = providerEdge.strategy?.providerMode ?? "auto";
 
@@ -474,12 +707,6 @@ function resolveProviderMode(
   }
 
   if (!provides || provides.role !== "provider") {
-    context.diagnostics.push({
-      severity: "error",
-      code: "PORT_CONTRACT_MISMATCH",
-      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not provide ${providerEdge.contract}.`,
-      targets: [{ kind: "edge", id: providerEdge.id }]
-    });
     return null;
   }
 
@@ -488,20 +715,7 @@ function resolveProviderMode(
     ? ([requestedMode, provides.modes[requestedMode]] as const)
     : fallbackMode;
 
-  if (!modeEntry) {
-    context.diagnostics.push({
-      severity: "error",
-      code: "PROVIDER_MODE_NOT_FOUND",
-      message: `${providerEdge.from.node}.${providerEdge.from.port ?? ""} does not expose provider mode "${requestedMode}" for ${providerEdge.contract}.`,
-      targets: [{ kind: "edge", id: providerEdge.id }]
-    });
-    return null;
-  }
-
-  return {
-    id: modeEntry[0],
-    mode: modeEntry[1]
-  };
+  return modeEntry ? { id: modeEntry[0], mode: modeEntry[1] } : null;
 }
 
 function checkProviderModeRequirements(
@@ -816,7 +1030,7 @@ function resolveMappedEndpoint(
   const endpointKey = pinKey(endpoint);
   const reserved = context.reservedPins.get(endpointKey);
 
-  if (reserved) {
+  if (reserved && reserved.edge !== edgeId) {
     context.diagnostics.push({
       severity: "error",
       code: "PIN_CONFLICT",
@@ -1413,6 +1627,38 @@ function createNetId(edgeId: string, signal: string) {
   return `net_${edgeId}_${signal}`;
 }
 
+function collectUniqueEdges(edges: ProjectEdge[], diagnostics: Diagnostic[]): ProjectEdge[] {
+  const edgesById = new Map<string, ProjectEdge[]>();
+
+  for (const edge of edges) {
+    const matches = edgesById.get(edge.id) ?? [];
+    matches.push(edge);
+    edgesById.set(edge.id, matches);
+  }
+
+  const validEdges: ProjectEdge[] = [];
+
+  for (const [edgeId, matches] of [...edgesById.entries()].sort(([left], [right]) => compareStableText(left, right))) {
+    if (matches.length > 1) {
+      diagnostics.push({
+        severity: "error",
+        code: "DUPLICATE_EDGE_ID",
+        message: `Edge id "${edgeId}" is used more than once; all occurrences were ignored.`,
+        targets: [{ kind: "edge", id: edgeId }]
+      });
+      continue;
+    }
+
+    const edge = matches[0];
+
+    if (edge) {
+      validEdges.push(edge);
+    }
+  }
+
+  return validEdges;
+}
+
 function indexNodes(nodes: ProjectNode[], diagnostics: Diagnostic[]): Map<string, ProjectNode> {
   const nodeById = new Map<string, ProjectNode>();
 
@@ -1462,31 +1708,109 @@ function indexComponentContexts(nodes: ProjectNode[], diagnostics: Diagnostic[])
   return componentByNodeId;
 }
 
-function collectInitialReservations(edges: ProjectEdge[]): Map<string, ReservedPin> {
+function collectInitialReservations(
+  edges: ProjectEdge[],
+  functionRequests: FunctionResolutionRequest[],
+  componentByNodeId: Map<string, ComponentContext>,
+  diagnostics: Diagnostic[]
+): Map<string, ReservedPin> {
   const reservedPins = new Map<string, ReservedPin>();
 
   for (const edge of edges) {
-    if (edge.kind !== "net.binding") {
-      continue;
-    }
+    if (edge.kind === "net.binding") {
+      for (const binding of Object.values(edge.bindings)) {
+        for (const endpoint of Object.values(binding)) {
+          if (!endpoint?.pin) {
+            continue;
+          }
 
-    reserveBindings(edge.id, edge.bindings, reservedPins);
+          const key = pinKey(endpoint);
+          const reserved = reservedPins.get(key);
+
+          if (reserved && reserved.edge !== edge.id) {
+            diagnostics.push({
+              severity: "error",
+              code: "PIN_RESERVATION_CONFLICT",
+              message: `${endpoint.node}.${endpoint.pin} is reserved by both ${reserved.edge} and ${edge.id}; ${reserved.edge} keeps deterministic priority.`,
+              targets: [
+                { kind: "edge", id: reserved.edge },
+                { kind: "edge", id: edge.id },
+                { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+              ]
+            });
+            continue;
+          }
+
+          reservedPins.set(key, {
+            node: endpoint.node,
+            pin: endpoint.pin,
+            edge: edge.id,
+            kind: "net.binding"
+          });
+        }
+      }
+    }
+  }
+
+  for (const request of [...functionRequests].sort((left, right) =>
+    compareStableText(left.providerEdge.id, right.providerEdge.id)
+  )) {
+    const claims = collectValidatedFunctionPinClaims(request, componentByNodeId);
+
+    for (const endpoint of claims) {
+      if (!endpoint.pin) {
+        continue;
+      }
+
+      const key = pinKey(endpoint);
+      const reserved = reservedPins.get(key);
+
+      if (reserved) {
+        if (reserved.kind === "provider.claim" && reserved.edge !== request.providerEdge.id) {
+          diagnostics.push({
+            severity: "error",
+            code: "PIN_PROVIDER_CLAIM_CONFLICT",
+            message: `${endpoint.node}.${endpoint.pin} is claimed by both ${reserved.edge} and ${request.providerEdge.id}; ${reserved.edge} keeps deterministic priority.`,
+            targets: [
+              { kind: "edge", id: reserved.edge },
+              { kind: "edge", id: request.providerEdge.id },
+              { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+            ]
+          });
+        }
+        continue;
+      }
+
+      reservedPins.set(key, {
+        node: endpoint.node,
+        pin: endpoint.pin,
+        edge: request.providerEdge.id,
+        kind: "provider.claim"
+      });
+    }
   }
 
   return reservedPins;
 }
 
-function reserveBindings(edgeId: string, bindings: SignalBindings, reservedPins: Map<string, ReservedPin>) {
+function reserveBindings(
+  edgeId: string,
+  bindings: SignalBindings,
+  reservedPins: Map<string, ReservedPin>
+) {
   for (const binding of Object.values(bindings)) {
     for (const endpoint of Object.values(binding)) {
       if (!endpoint?.pin) {
         continue;
       }
 
-      reservedPins.set(pinKey(endpoint), {
+      const key = pinKey(endpoint);
+
+      reservedPins.set(key, {
         node: endpoint.node,
         pin: endpoint.pin,
-        edge: edgeId
+        edge: edgeId,
+        kind: "resolved"
       });
     }
   }
