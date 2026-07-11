@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "test": "pnpm verify:fixtures && turbo run test",
+    "test": "pnpm verify:fixtures && pnpm verify:north-star && turbo run test",
     "verify:fixtures": "node scripts/verify-kicad-fixtures.mjs",
+    "verify:north-star": "node scripts/verify-north-star-reference.mjs",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix"

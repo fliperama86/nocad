@@ -20,6 +20,10 @@
 
 - Treat the current Pico RetroDigital main board as the product north star, while keeping the smaller RP2350 plus IT66121 board as an EDA capability MVP.
 - After shared resolver and document foundations, advance two cooperating tracks: full semantic-graph representation of the north-star design and the editor/PCB path through placement, manual routing, zones, and KiCad export. Validate them through subsystem slices and integration gates rather than completing either track only against toy data.
+- Pin a dirty hardware reference by exact working-tree file hashes, not Git HEAD alone. Keep semantic design inputs, broader stale/capture evidence, and normalized electrical connectivity as separate deterministic aggregates.
+- A reference with no explicit license, current DRC/ERC, fabrication linkage, or hardware-test evidence is `NOASSERTION`, non-golden, and unqualified even if source and production artifacts exist. Stale reports must say they do not apply to the pinned design.
+- Preserve schematic UUID, footprint UUID, and pad UUID as separate identity levels. Keep 1:N and display-reference anomalies explicit, use pad UUID for net membership, and require one subsystem owner plus closed package/contract/power status for every normalized object.
+- Source-free reference verification must read no external project path and must not claim to re-prove extraction. Validate repository-local hashes, canonical order, internal closure, constraints, and deliberate mutations; record omitted schematic-wire or power-symbol membership as first-class remaining work.
 
 ## Resolver Determinism
 
