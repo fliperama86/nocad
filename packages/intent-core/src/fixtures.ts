@@ -552,10 +552,12 @@ export const components: Record<string, ComponentDefinition> = {
                 requires: {
                   ports: {
                     video_in: {
-                      contract: PIXEL_STREAM_CONTRACT
+                      contract: PIXEL_STREAM_CONTRACT,
+                      label: "Video In"
                     },
                     ctrl: {
-                      contract: "builtin:i2c.v1"
+                      contract: "builtin:i2c.v1",
+                      label: "I2C Control"
                     }
                   }
                 },

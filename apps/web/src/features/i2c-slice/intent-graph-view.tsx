@@ -17,6 +17,7 @@ import {
   type NodeProps,
   type NodeTypes,
   type OnSelectionChangeFunc,
+  useUpdateNodeInternals,
   type Viewport,
   type XYPosition
 } from "@xyflow/react";
@@ -26,6 +27,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Panel } from "./panel";
+import {
+  providerRequirementHandlesForNode,
+  providerRequirementTargetHandle,
+  type ProviderRequirementHandle
+} from "./provider-requirement-handles";
 
 type NodePositions = Record<string, XYPosition>;
 
@@ -38,6 +44,7 @@ type IntentNodeData = Record<string, unknown> & {
   connectable: boolean;
   details: string[];
   generatedPowerTarget: boolean;
+  providerRequirements: ProviderRequirementHandle[];
   subtitle: string;
   title: string;
   tone: "default" | "function" | "rail" | "warning";
@@ -83,7 +90,7 @@ export function IntentGraphView({
   onCanvasPaneClick?: () => void;
   onConnectNodes: (connection: Connection) => void;
   onDismissConnectionFeedback: () => void;
-  onInvalidConnection: (sourceNodeId: string, targetNodeId: string) => void;
+  onInvalidConnection: (sourceNodeId: string, targetNodeId: string, targetHandle?: string | null) => void;
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
   onRemoveEdges: (edgeIds: string[]) => void;
   onRemoveNodes: (nodeIds: string[]) => void;
@@ -206,7 +213,7 @@ export function IntentGraphView({
 
   const finishConnection = useCallback((_: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
     if (connectionState.isValid === false && connectionState.fromNode && connectionState.toNode) {
-      onInvalidConnection(connectionState.fromNode.id, connectionState.toNode.id);
+      onInvalidConnection(connectionState.fromNode.id, connectionState.toNode.id, connectionState.toHandle?.id);
     }
   }, [onInvalidConnection]);
 
@@ -338,7 +345,16 @@ function reconcileEdges(currentEdges: Edge[], nextEdges: Edge[], resetGraphState
   });
 }
 
-const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, selected }: NodeProps<IntentFlowNode>) {
+const IntentGraphNode = memo(function IntentGraphNode({ data, id, isConnectable, selected }: NodeProps<IntentFlowNode>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const requirementHandleSignature = data.providerRequirements
+    .map((requirement) => `${requirement.handleId}:${requirement.connectedEdgeId ?? "open"}`)
+    .join("|");
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, requirementHandleSignature, updateNodeInternals]);
+
   return (
     <div
       className={cn(
@@ -359,12 +375,14 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
 
       {data.connectable ? (
         <>
-          <Handle
-            className="!size-3 !border-2 !border-background !bg-foreground"
-            isConnectable={isConnectable}
-            position={Position.Left}
-            type="target"
-          />
+          {data.providerRequirements.length === 0 ? (
+            <Handle
+              className="!size-3 !border-2 !border-background !bg-foreground"
+              isConnectable={isConnectable}
+              position={Position.Left}
+              type="target"
+            />
+          ) : null}
           <Handle
             className="!size-3 !border-2 !border-background !bg-foreground"
             isConnectable={isConnectable}
@@ -422,6 +440,37 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
           </div>
         ))}
       </div>
+      {data.providerRequirements.length > 0 ? (
+        <div className="mt-3 grid gap-1.5 border-t border-border pt-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Requirements</div>
+          {data.providerRequirements.map((requirement) => (
+            <div
+              className="relative flex min-h-7 items-center justify-between gap-2 rounded-sm bg-muted px-2 py-1 text-xs"
+              data-provider-requirement={requirement.port}
+              key={requirement.handleId}
+              title={`${requirement.label}: ${requirement.acceptedContracts.join(" or ")}`}
+            >
+              <Handle
+                aria-label={`Connect ${requirement.label}`}
+                className={cn(
+                  "!-left-[17px] !top-1/2 !size-3 !border-2",
+                  requirement.connectedEdgeId
+                    ? "!border-background !bg-chart-2"
+                    : "!border-foreground !bg-background"
+                )}
+                id={requirement.handleId}
+                isConnectable={isConnectable && !requirement.connectedEdgeId}
+                position={Position.Left}
+                type="target"
+              />
+              <span className="min-w-0 truncate font-medium">{requirement.label}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {requirement.connectedEdgeId ? "Connected" : requirement.optional ? "Optional" : "Required"}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -451,6 +500,9 @@ function buildFlowModel(
     ...pullupTargetIds,
     ...source5vNets.map((net) => net.endpoints.to.node)
   ]);
+  const providerRequirementsByNode = new Map(
+    source.nodes.map((node) => [node.id, providerRequirementHandlesForNode(source, node)])
+  );
 
   const nodes: IntentFlowNode[] = source.nodes.map((node, index) => {
     const tone =
@@ -468,6 +520,7 @@ function buildFlowModel(
         connectable: node.kind === "component" || node.kind === "intent.function",
         details: nodeDetails(node, source.edges, reservations.get(node.id) ?? []),
         generatedPowerTarget: generatedPowerTargetIds.has(node.id),
+        providerRequirements: providerRequirementsByNode.get(node.id) ?? [],
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
         tone
@@ -511,6 +564,10 @@ function buildFlowModel(
           strokeWidth: 2
         },
         target: edge.to.node,
+        targetHandle:
+          edge.kind === "intent.connection"
+            ? providerRequirementTargetHandle(source, edge)
+            : undefined,
         type: "smoothstep"
       }
     ];

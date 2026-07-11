@@ -243,6 +243,7 @@ export type ProviderModeRequirements = {
 
 export type ProviderPortRequirement = {
   contract: string | string[];
+  label?: string;
   optional?: boolean;
 };
 

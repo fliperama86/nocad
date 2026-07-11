@@ -38,6 +38,12 @@ import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
 import { PcbDesignerPanel, type BoardComponentPlacement } from "./pcb-designer-panel";
 import { bindingsForProviderMode } from "./provider-assignment";
+import {
+  filterConnectionOptionsForProviderRequirement,
+  providerRequirementForHandle,
+  providerRequirementHandlesForNode,
+  providerRequirementPortFromHandle
+} from "./provider-requirement-handles";
 import { ResolutionPanel } from "./resolution-panel";
 
 function createSource() {
@@ -364,17 +370,42 @@ export function I2cSliceApp() {
     }
 
     if (sourceNode.kind === "component" && targetNode.kind === "component") {
-      const options = componentConnectionOptionsForPair(sourceNode, targetNode, source.edges);
+      const activeRequirements = providerRequirementHandlesForNode(source, targetNode);
+      const requirement = providerRequirementForHandle(source, targetNode, connection.targetHandle);
+      const requestedRequirementPort = providerRequirementPortFromHandle(connection.targetHandle);
+
+      if (requestedRequirementPort && !requirement) {
+        setConnectionFeedback("The selected requirement is no longer available.");
+        setPendingConnection(undefined);
+        return;
+      }
+
+      if (requirement?.connectedEdgeId) {
+        setConnectionFeedback(`${requirement.label} is already connected.`);
+        setPendingConnection(undefined);
+        return;
+      }
+
+      const options = filterConnectionOptionsForProviderRequirement(
+        componentConnectionOptionsForPair(sourceNode, targetNode, source.edges),
+        targetNode.id,
+        requirement,
+        activeRequirements
+      );
 
       if (options.length === 0) {
-        setConnectionFeedback(incompatibleConnectionMessage(sourceNode, targetNode));
+        setConnectionFeedback(
+          requirement
+            ? `${nodeDisplayName(sourceNode)} cannot satisfy ${requirement.label}.`
+            : incompatibleConnectionMessage(sourceNode, targetNode)
+        );
         setPendingConnection(undefined);
         return;
       }
 
       setConnectionFeedback(undefined);
 
-      if (options.length === 1 && shouldAutoCreateConnection(options)) {
+      if (options.length === 1 && (requirement || shouldAutoCreateConnection(options))) {
         createConnectionFromIntent(options[0], options[0].params);
         return;
       }
@@ -737,13 +768,13 @@ export function I2cSliceApp() {
                   onCanvasPaneClick={() => setPropertiesCollapsed(true)}
                   onConnectNodes={connectNodes}
                   onDismissConnectionFeedback={() => setConnectionFeedback(undefined)}
-                  onInvalidConnection={(sourceNodeId, targetNodeId) => {
+                  onInvalidConnection={(sourceNodeId, targetNodeId, targetHandle) => {
                     const sourceNode = source.nodes.find((node) => node.id === sourceNodeId);
                     const targetNode = source.nodes.find((node) => node.id === targetNodeId);
 
                     setConnectionFeedback(
                       sourceNode && targetNode
-                        ? validateNodeConnection(sourceNode, targetNode, source.edges).message
+                        ? validateNodeConnection(sourceNode, targetNode, source.edges, targetHandle, source).message
                         : "These nodes do not expose a compatible connection."
                     );
                   }}
@@ -904,16 +935,40 @@ type NodeConnectionValidation =
 function validateNodeConnection(
   sourceNode: ProjectNode,
   targetNode: ProjectNode,
-  currentEdges: ProjectEdge[]
+  currentEdges: ProjectEdge[],
+  targetHandle?: string | null,
+  source?: ProjectSource
 ): NodeConnectionValidation {
   if (sourceNode.id === targetNode.id) {
     return { message: "A node cannot connect to itself.", valid: false };
   }
 
   if (sourceNode.kind === "component" && targetNode.kind === "component") {
-    return componentConnectionOptionsForPair(sourceNode, targetNode, currentEdges).length > 0
+    const activeRequirements = source ? providerRequirementHandlesForNode(source, targetNode) : [];
+    const requirement = source ? providerRequirementForHandle(source, targetNode, targetHandle) : undefined;
+    const options = filterConnectionOptionsForProviderRequirement(
+      componentConnectionOptionsForPair(sourceNode, targetNode, currentEdges),
+      targetNode.id,
+      requirement,
+      activeRequirements
+    );
+
+    if (providerRequirementPortFromHandle(targetHandle) && !requirement) {
+      return { message: "The selected requirement is no longer available.", valid: false };
+    }
+
+    if (requirement?.connectedEdgeId) {
+      return { message: `${requirement.label} is already connected.`, valid: false };
+    }
+
+    return options.length > 0
       ? { message: "", valid: true }
-      : { message: incompatibleConnectionMessage(sourceNode, targetNode), valid: false };
+      : {
+          message: requirement
+            ? `${nodeDisplayName(sourceNode)} cannot satisfy ${requirement.label}.`
+            : incompatibleConnectionMessage(sourceNode, targetNode),
+          valid: false
+        };
   }
 
   const functionNode = sourceNode.kind === "intent.function" ? sourceNode : targetNode;
@@ -953,12 +1008,20 @@ function validateNodeConnection(
 
 function isValidGraphConnection(
   source: ProjectSource,
-  connection: { source: string | null; target: string | null }
+  connection: {
+    source: string | null;
+    target: string | null;
+    targetHandle?: string | null;
+  }
 ) {
   const sourceNode = source.nodes.find((node) => node.id === connection.source);
   const targetNode = source.nodes.find((node) => node.id === connection.target);
 
-  return Boolean(sourceNode && targetNode && validateNodeConnection(sourceNode, targetNode, source.edges).valid);
+  return Boolean(
+    sourceNode &&
+      targetNode &&
+      validateNodeConnection(sourceNode, targetNode, source.edges, connection.targetHandle, source).valid
+  );
 }
 
 function incompatibleConnectionMessage(sourceNode: ProjectNode, targetNode: ProjectNode) {
