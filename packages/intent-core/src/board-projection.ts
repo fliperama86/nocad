@@ -9,9 +9,11 @@ export type BoardProjection = {
     heightMm: number;
   };
   components: BoardComponentProjection[];
+  drcViolations: BoardDrcViolation[];
   obligations: BoardObligation[];
   ratsnest: BoardRatsnestEdge[];
   stats: {
+    drcViolations: number;
     placedComponents: number;
     totalComponents: number;
     unroutedNets: number;
@@ -28,6 +30,7 @@ export type BoardComponentProjection = {
   refdesHint?: string;
   role?: string;
   rotationDeg: number;
+  violations: string[];
   widthMm: number;
   xMm: number;
   yMm: number;
@@ -51,12 +54,34 @@ export type BoardPoint = {
   yMm: number;
 };
 
+export type BoardComponentPlacement = {
+  rotationDeg: number;
+  xMm: number;
+  yMm: number;
+};
+
+export type BoardDrcViolation = {
+  componentIds: [string, string];
+  id: string;
+  kind: "courtyard_overlap";
+  message: string;
+  severity: "error";
+  target: {
+    id: string;
+    kind: "component";
+  };
+};
+
 export type BoardObligation = {
   id: string;
-  kind: "placement" | "routing";
+  kind: "drc" | "placement" | "routing";
   message: string;
-  severity: "info" | "warning";
+  severity: "error" | "info" | "warning";
   sourceId: string;
+  target: {
+    id: string;
+    kind: "component" | "ratsnest";
+  };
 };
 
 type PlacementHint = {
@@ -91,7 +116,59 @@ export function buildBoardProjection(source: ProjectSource, resolved: ResolvedPr
     return projected;
   });
   const ratsnest = resolved.nets.flatMap((net) => projectRatsnest(net, source, componentsById));
-  const placementObligations = projectedComponents.flatMap((component) =>
+
+  return completeBoardProjection(board, projectedComponents, ratsnest);
+}
+
+export function applyBoardComponentPlacement(
+  projection: BoardProjection,
+  componentId: string,
+  placement: BoardComponentPlacement
+): BoardProjection {
+  const components = projection.components.map((component) =>
+    component.id === componentId
+      ? {
+          ...component,
+          placed: true,
+          rotationDeg: normalizeRotation(placement.rotationDeg),
+          xMm: clampCenter(placement.xMm, component.widthMm, projection.board.widthMm),
+          yMm: clampCenter(placement.yMm, component.heightMm, projection.board.heightMm)
+        }
+      : component
+  );
+  const movedComponent = components.find((component) => component.id === componentId);
+  const ratsnest = projection.ratsnest.map((edge) => ({
+    ...edge,
+    from: edge.fromNode === componentId && movedComponent
+      ? { xMm: movedComponent.xMm, yMm: movedComponent.yMm }
+      : edge.from,
+    to: edge.toNode === componentId && movedComponent ? { xMm: movedComponent.xMm, yMm: movedComponent.yMm } : edge.to
+  }));
+
+  return completeBoardProjection(projection.board, components, ratsnest);
+}
+
+function completeBoardProjection(
+  board: BoardProjection["board"],
+  components: BoardComponentProjection[],
+  ratsnest: BoardRatsnestEdge[]
+): BoardProjection {
+  const drcViolations = findCourtyardOverlaps(components);
+  const violationsByComponent = new Map<string, string[]>();
+
+  for (const violation of drcViolations) {
+    for (const componentId of violation.componentIds) {
+      const violations = violationsByComponent.get(componentId) ?? [];
+      violations.push(violation.id);
+      violationsByComponent.set(componentId, violations);
+    }
+  }
+
+  const componentsWithViolations = components.map((component) => ({
+    ...component,
+    violations: violationsByComponent.get(component.id) ?? []
+  }));
+  const placementObligations = componentsWithViolations.flatMap((component) =>
     component.placed
       ? []
       : [
@@ -100,26 +177,44 @@ export function buildBoardProjection(source: ProjectSource, resolved: ResolvedPr
             kind: "placement" as const,
             message: `Place ${component.label}`,
             severity: "warning" as const,
-            sourceId: component.id
+            sourceId: component.id,
+            target: {
+              id: component.id,
+              kind: "component" as const
+            }
           }
         ]
   );
+  const drcObligations = drcViolations.map((violation) => ({
+    id: violation.id,
+    kind: "drc" as const,
+    message: violation.message,
+    severity: violation.severity,
+    sourceId: violation.componentIds.join("+"),
+    target: violation.target
+  }));
   const routingObligations = ratsnest.map((edge) => ({
     id: `route_${edge.id}`,
     kind: "routing" as const,
     message: `Route ${edge.name}`,
     severity: "warning" as const,
-    sourceId: edge.sourceEdge
+    sourceId: edge.sourceEdge,
+    target: {
+      id: edge.id,
+      kind: "ratsnest" as const
+    }
   }));
 
   return {
     board,
-    components: projectedComponents,
-    obligations: [...placementObligations, ...routingObligations],
+    components: componentsWithViolations,
+    drcViolations,
+    obligations: [...drcObligations, ...placementObligations, ...routingObligations],
     ratsnest,
     stats: {
-      placedComponents: projectedComponents.filter((component) => component.placed).length,
-      totalComponents: projectedComponents.length,
+      drcViolations: drcViolations.length,
+      placedComponents: componentsWithViolations.filter((component) => component.placed).length,
+      totalComponents: componentsWithViolations.length,
       unroutedNets: ratsnest.length
     }
   };
@@ -148,6 +243,7 @@ function projectComponent(
     refdesHint: node.refdesHint,
     role: node.role,
     rotationDeg: authored?.rotationDeg ?? hinted?.rotationDeg ?? 0,
+    violations: [],
     widthMm: footprint.widthMm,
     xMm,
     yMm
@@ -302,6 +398,62 @@ function footprintEnvelope(node: ProjectNode & { kind: "component" }) {
   return { widthMm: side, heightMm: side };
 }
 
+function findCourtyardOverlaps(components: BoardComponentProjection[]): BoardDrcViolation[] {
+  const placedComponents = components.filter((component) => component.placed);
+  const violations: BoardDrcViolation[] = [];
+
+  for (let leftIndex = 0; leftIndex < placedComponents.length; leftIndex += 1) {
+    const left = placedComponents[leftIndex];
+
+    if (!left) {
+      continue;
+    }
+
+    for (let rightIndex = leftIndex + 1; rightIndex < placedComponents.length; rightIndex += 1) {
+      const right = placedComponents[rightIndex];
+
+      if (!right || !componentBoundsOverlap(left, right)) {
+        continue;
+      }
+
+      violations.push({
+        componentIds: [left.id, right.id],
+        id: `drc_overlap_${left.id}_${right.id}`,
+        kind: "courtyard_overlap",
+        message: `Footprint overlap: ${left.label} intersects ${right.label}`,
+        severity: "error",
+        target: {
+          id: left.id,
+          kind: "component"
+        }
+      });
+    }
+  }
+
+  return violations;
+}
+
+function componentBoundsOverlap(left: BoardComponentProjection, right: BoardComponentProjection) {
+  const leftBounds = componentBounds(left);
+  const rightBounds = componentBounds(right);
+
+  return (
+    leftBounds.minX < rightBounds.maxX &&
+    leftBounds.maxX > rightBounds.minX &&
+    leftBounds.minY < rightBounds.maxY &&
+    leftBounds.maxY > rightBounds.minY
+  );
+}
+
+function componentBounds(component: BoardComponentProjection) {
+  return {
+    maxX: component.xMm + component.widthMm / 2,
+    maxY: component.yMm + component.heightMm / 2,
+    minX: component.xMm - component.widthMm / 2,
+    minY: component.yMm - component.heightMm / 2
+  };
+}
+
 function parseLengthMm(value: number | string | undefined) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -366,6 +518,10 @@ function clampCenter(value: number, size: number, boardSize: number) {
   }
 
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizeRotation(value: number) {
+  return ((value % 360) + 360) % 360;
 }
 
 function isPlacementHint(value: unknown): value is PlacementHint {

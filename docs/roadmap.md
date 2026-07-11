@@ -16,9 +16,11 @@ Reference documents:
 - `docs/research/product-vision.md` - why nocad exists, product principles.
 - `docs/research/intent-graph-spec.md` - source format, resolver model, lockfile, contracts, provider chains.
 - `docs/research/pcb-layout-approach.md` - board layout architecture (obligations model, board source file, engine layering).
+- `docs/research/autorouter-lessons.md` - external autorouting lessons, caveats, and implications for nocad.
+- `docs/research/pico-retrodigital-fixture-plan.md` - trusted board fixtures and their intended milestone coverage.
 - `docs/i2c-vertical-slice-plan.md` - the original vertical slice plan (largely delivered).
 
-## Current State (2026-07-02)
+## Current State (2026-07-10)
 
 What exists and works:
 
@@ -29,6 +31,8 @@ What exists and works:
   - Generic contract resolution (`intent.connection` works for any fixture contract). Pixel-stream bindings have authored params (`transport`, RGB bit widths, sync signals) that expand to the active signal set.
   - Regression coverage for provider-chain review issues: fixed-map override validation, authored-but-unresolved requirement cascade suppression, preferred-I2C fallback, and edge-order mitigation for the RP2350 TX-IC pressure case.
 - `apps/web`: intent graph slice UI (`@xyflow/react` graph canvas, inspectors for nodes/edges, resolution/diagnostics/JSON panels, component palette, direct-HDMI, FPGA-via-TX-IC, and RP2350-via-TX-IC samples). Connection params are edited from contract metadata, with pixel-stream presets as UI sugar. React is chrome only; no editor engine exists yet.
+- Board-placement prototype: Canvas2D board projection with footprint selection, drag/rotate placement, ratsnest updates, clickable obligations, and simple rectangular overlap diagnostics. It is exploratory and does not complete M4/M5: placement still mutates React source state directly, footprint envelopes and DRC are approximate, and geometry/hit testing have not moved into the portable editor core.
+- Curated fixture infrastructure: `fixtures/kicad/hdmi-breakout/` contains a content-pinned minimal KiCad 10 snapshot with a manifest. `pnpm verify:fixtures` checks file hashes and recorded structural facts, and runs as part of `pnpm test`. The PCB tab can open a lazy-loaded, read-only preview parsed directly from the pinned board source, including its actual outline, pads, tracks, layers, footprints, and net isolation. This does not complete M4 or constitute a supported KiCad importer. License and hardware qualification remain unresolved, so the fixture is not yet marked golden.
 - Shared config packages (eslint, tsconfig, vitest); pnpm + Turborepo workspace.
 
 Known architectural debts (tracked in M1/M2 below):
@@ -38,9 +42,9 @@ Known architectural debts (tracked in M1/M2 below):
 - UI mutates React state directly; there is no document API, no undo/redo, no persistence.
 - Resolution is not incremental.
 
-## In Progress (2026-07-02)
+## In Progress (2026-07-10)
 
-No active implementation thread. Next recommended work is M1, starting with generic topology-rule interpretation and package-data-driven HDMI function resolution.
+Stabilize the exploratory board-placement slice and fixture infrastructure without deepening the temporary React-owned architecture. The next architecture milestone remains M1, starting with generic topology-rule interpretation and package-data-driven HDMI function resolution, followed by the M2 document API before placement editing expands.
 
 ## Milestones
 
@@ -107,9 +111,24 @@ Constraint states (unplaced / unrouted / violating / satisfied) listed with clic
 
 `.kicad_pcb` (and schematic) export as the escape hatch: place in nocad, finish in KiCad. Export before import.
 
-### M9 - Declarative pours + assisted routing - todo
+### M9 - Declarative pours + deterministic routing assists - todo
 
-Pours as intent ("GND pour on L2 with these keepouts", geometry generated). Diff-pair assist, pattern replication, corridor routing. Full autorouting stays last, possibly forever.
+Pours as intent ("GND pour on L2 with these keepouts", geometry generated). Add user-directed operations that do not require a global router: diff-pair drawing assistance, pattern replication, fanout helpers, and corridor-constrained completion. Every result is an ordinary inspectable board patch and must pass the same DRC as manual geometry.
+
+### M10 - Selected-net routing experiment - todo
+
+Route one explicitly selected net at a time with fixed placement, existing copper, keepouts, allowed layers, width, and clearance supplied as inputs. This is a bounded local search experiment, not a commitment to whole-board autorouting or global optimality. The first acceptance fixture is a curated snapshot of the HDMI breakout described in `docs/research/pico-retrodigital-fixture-plan.md`.
+
+Done when:
+
+- Removing one simple management or control trace from the HDMI breakout fixture produces a well-defined unrouted obligation.
+- The router either proposes a DRC-clean route or reports failure without mutating the document.
+- A proposed route is deterministic for the same input and records its algorithm version, parameters, iteration count, elapsed time, and cost breakdown.
+- The route is applied only through an inspectable, undoable document patch.
+- The UI can overlay the proposal, existing geometry, explored region, and relevant cost or failure information in board coordinates.
+- Success is measured by legality, bounded interactive behavior, and reviewability. Matching the original human route or proving optimality is not required.
+
+Global multi-net autorouting is deliberately not a committed milestone. Evidence from M10 must justify any later experiment in net ordering, congestion pricing, local rip-up-and-reroute, partitioning, or learned ranking. A useful system may route only a selected region or subset and identify the remaining placement or constraint conflicts.
 
 ## Architecture Invariants
 
@@ -121,6 +140,7 @@ Short list; violating one is a design regression, not a style issue:
 4. EDA core stays portable: no React, no Electron imports; WASM-friendly data layouts on hot paths.
 5. Editor documents are never rendered as one React component per object.
 6. AI and tools edit through inspectable, undoable patches addressed by stable IDs; never silent mutation, never `R12`-style identity.
+7. Routing automation is progressive and fallible. Manual geometry, deterministic assists, and selected-net search share one patch and DRC path; no router bypasses validation or silently changes placement, constraints, or locked geometry.
 
 ## Open Decisions
 
@@ -131,6 +151,9 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
+- 2026-07-10 - Added an in-browser HDMI breakout fixture preview. It parses the pinned KiCad board source, renders actual outline/pad/track geometry, toggles copper layers, and isolates selected nets. Added parser regression coverage and kept the fixture payload in a lazy-loaded chunk.
+- 2026-07-10 - Existing board-placement prototype verified with focused and full tests, typecheck, lint, and production build. Added a content-pinned HDMI breakout fixture plus integrity and structural verification. The fixture remains non-golden until license and hardware qualification are explicit.
+- 2026-07-10 - Routing scope clarified: general routing contains NP-hard formulations, but nocad progresses through exact validation, manual routing, deterministic assists, and bounded selected-net search. Added M10 with the HDMI breakout as its first acceptance fixture; global multi-net autorouting remains uncommitted.
 - 2026-07-04 - PCB layout plan fleshed out in `docs/research/pcb-layout-approach.md`: rendering stack decision (custom thin WebGL2 renderer; three.js/PixiJS evaluated and rejected for the 2D surface, three.js reserved for a later 3D preview) and an MVP cutline (M1-M8 feature inventory by layer; pours/shove/autorouting/import/3D deferred).
 - 2026-07-02 - Provider-chain review fixes landed: constrained-first connection ordering, provider requirement cascade suppression, fixed-map override validation, preferred-I2C fallback, provider mode recording in lockfile-shaped output, UI provider modes derived from component metadata, and `optional` provider requirements.
 - 2026-07-02 - Added parametric connection contracts for pixel streams. RP2350-to-HDMI-TX now expresses RGB565 as connection params on `@nocad/video:pixel_stream.v1`; RGB presets are UI conveniences, not provider modes.

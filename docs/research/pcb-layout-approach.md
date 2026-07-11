@@ -22,6 +22,55 @@ The core framing: **layout is manual satisfaction of generated obligations.** Th
 - Do not let the board file become an independently authored world with its own truth. The first time "just store this in the board file because it's easier" wins an argument, the architecture quietly becomes KiCad with extra steps.
 - Do not render board objects as React components. The board surface is the custom canvas/WebGL engine; React is chrome only.
 
+## Routing Complexity And Product Strategy
+
+"PCB routing" is not one algorithmic problem. Its complexity depends on what is fixed, what may change, which constraints apply, and whether the goal is any legal solution or a globally optimal one.
+
+- Collision and clearance checks for fixed geometry are tractable validation problems.
+- A single two-pin net with fixed obstacles and an additive cost can be modeled as a shortest-path problem and solved with algorithms such as Dijkstra or A*.
+- Multi-pin optimal trees, vertex-disjoint paths, channel and switchbox variants, multi-net ordering, and joint placement plus routing contain NP-hard or NP-complete formulations.
+- Some restricted routing formulations are polynomial-time solvable. NP-hardness of the general problem does not imply that every useful board instance or local operation is difficult.
+
+Useful background:
+
+- [VLSI Routing in Polynomial Time](https://doi.org/10.1016/S1571-0653(05)80184-2) surveys both polynomially solvable restrictions and NP-complete routing variants.
+- [Efficient Detailed Routing on Optimized Tracks](https://hdl.handle.net/20.500.11811/9533) describes the theoretical hardness of detailed routing and the decomposition used for industrial-scale instances.
+
+nocad therefore does not define success as finding the globally optimal whole-board route. The product strategy is progressive automation over one authoritative geometry and validation path:
+
+```txt
+structured board model + connectivity + DRC
+  -> manual routing primitives
+  -> deterministic user-directed assists
+  -> bounded selected-net search
+  -> selected groups and local rip-up/retry, if justified
+  -> global coordination research, only if earlier evidence supports it
+```
+
+Each level may reuse lower-level operations. Each automated result is a proposed board patch. The router may fail cleanly, return alternatives, or identify placement and constraint conflicts. It may never silently relax rules, move components, modify locked geometry, or claim that completion alone establishes electrical quality.
+
+### Selected-Net Problem Contract
+
+The first search-based routing problem is intentionally narrow:
+
+```txt
+input:
+  fixed component placement
+  one selected net and its terminals
+  existing pads, copper, vias, zones, and keepouts
+  allowed layers
+  width, clearance, and via rules
+  optional user corridor or waypoints
+
+output:
+  one proposed legal route with metrics
+  or an explicit failure with diagnostics
+```
+
+The proposal must include enough replay data to reproduce and inspect it: algorithm version, parameters, iteration budget and count, elapsed time, decomposed cost, and any random seed. Exact DRC is authoritative even when the search uses a coarse grid, learned heuristic, or approximate congestion model.
+
+The first acceptance case is a simple management or control net removed from the curated HDMI breakout fixture. Differential pairs and multi-net coordination follow only after this contract is proven. See `pico-retrodigital-fixture-plan.md` and roadmap M10.
+
 ## Document Model
 
 The two-way source/lock split becomes three-way:
@@ -142,7 +191,8 @@ Milestone ordering, acceptance criteria, and current status live in `docs/roadma
 3. Read-only projections (schematic, then board placements + ratsnest) prove the engine before editing exists.
 4. Placement editing before routing; placement plus pin-assignment scoring delivers most of the early value.
 5. Obligations panel before routing tools; manual routing MVP (45-degree segments, vias, live clearance DRC, no shove) after.
-6. KiCad export once placement exists; declarative pours and assisted routing (diff-pair assist, pattern replication) after the data model proves out.
+6. KiCad export once placement exists; declarative pours and deterministic assists (diff-pair assist, pattern replication, corridor completion) after the data model proves out.
+7. Bounded selected-net search follows manual routing and deterministic assists. Global multi-net routing is not scheduled until selected-net evidence justifies it.
 
 ## MVP Cutline
 

@@ -35,7 +35,7 @@ import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
-import { PcbDesignerPanel } from "./pcb-designer-panel";
+import { PcbDesignerPanel, type BoardComponentPlacement } from "./pcb-designer-panel";
 import { ResolutionPanel } from "./resolution-panel";
 
 function createSource() {
@@ -633,6 +633,24 @@ export function I2cSliceApp() {
     }));
   }
 
+  function setBoardComponentPlacement(nodeId: string, placement: BoardComponentPlacement) {
+    setSource((current) => ({
+      ...current,
+      layout: {
+        board: current.layout?.board ?? current.board?.id ?? "main_board",
+        placements: {
+          ...(current.layout?.placements ?? {}),
+          [nodeId]: {
+            rotation: `${roundLayoutNumber(placement.rotationDeg)}deg`,
+            x: `${roundLayoutNumber(placement.xMm)}mm`,
+            y: `${roundLayoutNumber(placement.yMm)}mm`
+          }
+        },
+        routingIntent: current.layout?.routingIntent ?? []
+      }
+    }));
+  }
+
   return (
     <main className="h-svh overflow-hidden bg-background text-foreground">
       <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 overflow-hidden px-3 py-3 sm:px-4">
@@ -763,7 +781,11 @@ export function I2cSliceApp() {
 
             {activeTab === "pcb" ? (
               <div aria-labelledby="pcb-tab" className="h-full min-h-0" id="pcb-panel" role="tabpanel">
-                <PcbDesignerPanel resolved={resolved} source={source} />
+                <PcbDesignerPanel
+                  onSetComponentPlacement={setBoardComponentPlacement}
+                  resolved={resolved}
+                  source={source}
+                />
               </div>
             ) : null}
 
@@ -1161,4 +1183,8 @@ function connectorPort(node: ProjectNode) {
 
 function humanIdentifier(value: string) {
   return value.replaceAll(/[_-]/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function roundLayoutNumber(value: number) {
+  return Number(value.toFixed(3));
 }

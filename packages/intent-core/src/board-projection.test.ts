@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBoardProjection } from "./board-projection";
+import { applyBoardComponentPlacement, buildBoardProjection } from "./board-projection";
 import { resolveProject } from "./resolver";
 import { createHdmiTxSliceProject, hdmiTxSliceIds } from "./samples";
 
@@ -24,6 +24,7 @@ describe("buildBoardProjection", () => {
       ])
     );
     expect(projection.obligations.filter((obligation) => obligation.kind === "placement")).toHaveLength(3);
+    expect(projection.stats.drcViolations).toBe(0);
   });
 
   it("uses authored placement coordinates when present", () => {
@@ -48,5 +49,36 @@ describe("buildBoardProjection", () => {
 
     expect(tx).toMatchObject({ placed: true, rotationDeg: 90, xMm: 12, yMm: 13 });
     expect(projection.stats.placedComponents).toBe(1);
+  });
+
+  it("reports footprint overlap DRC for authored placement", () => {
+    const source = createHdmiTxSliceProject();
+    const projection = buildBoardProjection(source, resolveProject(source));
+    const withTxPlaced = applyBoardComponentPlacement(projection, hdmiTxSliceIds.tx, {
+      rotationDeg: 0,
+      xMm: 20,
+      yMm: 20
+    });
+    const withOverlap = applyBoardComponentPlacement(withTxPlaced, hdmiTxSliceIds.videoSource, {
+      rotationDeg: 0,
+      xMm: 20,
+      yMm: 20
+    });
+
+    expect(withOverlap.stats.drcViolations).toBe(1);
+    expect(withOverlap.drcViolations[0]).toMatchObject({
+      kind: "courtyard_overlap",
+      severity: "error",
+      componentIds: [hdmiTxSliceIds.videoSource, hdmiTxSliceIds.tx]
+    });
+    expect(withOverlap.obligations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "drc",
+          severity: "error"
+        })
+      ])
+    );
+    expect(withOverlap.components.find((component) => component.id === hdmiTxSliceIds.tx)?.violations).toHaveLength(1);
   });
 });
