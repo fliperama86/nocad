@@ -1,5 +1,9 @@
 # Project Memory
 
+## Git Workflow
+
+- Never include `codex` (case-insensitive) or Codex attribution in branch names or pull request titles. Use task-specific, product-oriented names instead.
+
 ## Visual Fidelity
 
 - Do not describe the KiCad fixture preview as perfect or complete. Treat it as a narrow research renderer and state its supported primitives.
