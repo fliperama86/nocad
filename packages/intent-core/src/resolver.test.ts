@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getComponentPinOptions, getI2cPinPairOptions } from "./assignment";
+import { components } from "./fixtures";
 import {
   createHdmiSliceProject,
   createHdmiTxSliceProject,
@@ -132,11 +133,102 @@ describe("resolveProject", () => {
     });
   });
 
+  it("preserves authored bindings when an edge keeps automatic strategy", () => {
+    const source: ProjectSource = {
+      schema: "nocad.project.v0",
+      id: "authored-auto-binding",
+      name: "Authored auto binding",
+      dependencies: {
+        "@nocad/io": "0.1.0",
+        "@nocad/rp2350": "0.1.0"
+      },
+      nodes: [
+        { id: "mcu", kind: "component", component: "@nocad/rp2350:RP2350A" },
+        { id: "indicator", kind: "component", component: "@nocad/io:LED" }
+      ],
+      edges: [
+        {
+          id: "biased-edge",
+          kind: "intent.connection",
+          from: { node: "mcu", port: "biased_out" },
+          to: { node: "indicator", port: "biased_input" },
+          contract: "@nocad/io:biased_signal.v1",
+          strategy: { pinAssignment: "auto" },
+          bindings: {
+            signal: { from: { node: "mcu", pin: "gpio11" } }
+          }
+        }
+      ]
+    };
+    const resolved = resolveProject(source);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.resolvedChoices[0]?.selected.bindings.signal).toEqual({
+      from: { node: "mcu", pin: "gpio11" },
+      to: { node: "indicator", pin: "anode" }
+    });
+  });
+
   it("exposes compatible I2C pin-pair options for an intent edge", () => {
     expect(getI2cPinPairOptions(createI2cSliceProject(), i2cSliceIds.sensorBus)).toEqual([
       { sda: "gpio4", scl: "gpio5" },
       { sda: "gpio8", scl: "gpio9" }
     ]);
+  });
+
+  it("does not leak preferred groups from another same-contract port into options or suggestions", () => {
+    const definition = components["@nocad/rp2350:RP2350A"];
+
+    if (!definition) {
+      throw new Error("Missing RP2350 fixture definition.");
+    }
+
+    const originalGroups = definition.preferredPinGroups;
+    definition.preferredPinGroups = [
+      ...(originalGroups ?? []),
+      {
+        contract: "builtin:i2c.v1",
+        pins: { sda: "gpio4", scl: "gpio5" },
+        port: "unrelated_i2c_port",
+        suggestion: { title: "Wrong-port suggestion" }
+      }
+    ];
+
+    try {
+      const source = createI2cSliceProject();
+
+      expect(getI2cPinPairOptions(source, i2cSliceIds.sensorBus)).toEqual([
+        { sda: "gpio4", scl: "gpio5" },
+        { sda: "gpio8", scl: "gpio9" }
+      ]);
+
+      const invalidSource: ProjectSource = {
+        ...source,
+        edges: source.edges.map((edge) =>
+          edge.id === i2cSliceIds.sensorBus && edge.kind === "intent.connection"
+            ? {
+                ...edge,
+                strategy: { pinAssignment: "manual" as const },
+                bindings: {
+                  sda: { from: { node: i2cSliceIds.mcu, pin: "gpio0" } },
+                  scl: { from: { node: i2cSliceIds.mcu, pin: "gpio1" } }
+                }
+              }
+            : edge
+        )
+      };
+      const suggestionTitles = resolveProject(invalidSource).diagnostics.flatMap(
+        (diagnostic) => diagnostic.suggestions?.map((suggestion) => suggestion.title) ?? []
+      );
+
+      expect(suggestionTitles).toEqual([
+        "Move I2C to GPIO4/GPIO5",
+        "Move I2C to GPIO8/GPIO9"
+      ]);
+      expect(suggestionTitles).not.toContain("Wrong-port suggestion");
+    } finally {
+      definition.preferredPinGroups = originalGroups;
+    }
   });
 
   it("exposes GPIO-capable component pins for custom provider binding", () => {
@@ -160,6 +252,145 @@ describe("resolveProject", () => {
       scl: {
         from: { node: i2cSliceIds.mcu, pin: "gpio9" }
       }
+    });
+  });
+
+  it("derives an actionable I2C pin suggestion from package preferred groups", () => {
+    const source = createI2cSliceProject();
+    const conflictingSource: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "edge_reserved_gpio4",
+          kind: "net.binding",
+          bindings: {
+            reserved: { from: { node: i2cSliceIds.mcu, pin: "gpio4" } }
+          }
+        },
+        ...source.edges.map((edge) =>
+          edge.id === i2cSliceIds.sensorBus && edge.kind === "intent.connection"
+            ? {
+                ...edge,
+                strategy: { pinAssignment: "manual" as const },
+                bindings: {
+                  sda: {
+                    from: { node: i2cSliceIds.mcu, pin: "gpio4" },
+                    to: { node: i2cSliceIds.sensor, pin: "sda" }
+                  },
+                  scl: {
+                    from: { node: i2cSliceIds.mcu, pin: "gpio5" },
+                    to: { node: i2cSliceIds.sensor, pin: "scl" }
+                  }
+                }
+              }
+            : edge
+        )
+      ]
+    };
+    const failed = resolveProject(conflictingSource);
+    const diagnostic = failed.diagnostics.find((candidate) => candidate.code === "PIN_CONFLICT");
+    const suggestion = diagnostic?.suggestions?.[0];
+
+    expect(diagnostic?.suggestions).toHaveLength(1);
+    expect(suggestion).toEqual({
+      title: "Move I2C to GPIO8/GPIO9",
+      patch: {
+        op: "setEdgeBindings",
+        edge: i2cSliceIds.sensorBus,
+        value: {
+          sda: {
+            from: { node: i2cSliceIds.mcu, pin: "gpio8" },
+            to: { node: i2cSliceIds.sensor, pin: "sda" }
+          },
+          scl: {
+            from: { node: i2cSliceIds.mcu, pin: "gpio9" },
+            to: { node: i2cSliceIds.sensor, pin: "scl" }
+          }
+        }
+      }
+    });
+
+    const repaired = resolveProject({
+      ...conflictingSource,
+      edges: conflictingSource.edges.map((edge) =>
+        edge.id === i2cSliceIds.sensorBus && edge.kind === "intent.connection" && suggestion
+          ? { ...edge, bindings: suggestion.patch.value }
+          : edge
+      )
+    });
+
+    expect(repaired.diagnostics).toEqual([]);
+    expect(repaired.resolvedChoices[0]?.selected.bindings).toMatchObject({
+      sda: { from: { node: i2cSliceIds.mcu, pin: "gpio8" } },
+      scl: { from: { node: i2cSliceIds.mcu, pin: "gpio9" } }
+    });
+  });
+
+  it("derives and round-trips a non-I2C pin suggestion from the same package metadata", () => {
+    const source: ProjectSource = {
+      schema: "nocad.project.v0",
+      id: "biased-suggestion",
+      name: "Biased signal suggestion",
+      dependencies: {
+        "@nocad/io": "0.1.0",
+        "@nocad/rp2350": "0.1.0"
+      },
+      nodes: [
+        { id: "mcu", kind: "component", component: "@nocad/rp2350:RP2350A" },
+        { id: "indicator", kind: "component", component: "@nocad/io:LED" }
+      ],
+      edges: [
+        {
+          id: "reserved-gpio0",
+          kind: "net.binding",
+          bindings: { reserved: { from: { node: "mcu", pin: "gpio0" } } }
+        },
+        {
+          id: "biased-edge",
+          kind: "intent.connection",
+          from: { node: "mcu", port: "biased_out" },
+          to: { node: "indicator", port: "biased_input" },
+          contract: "@nocad/io:biased_signal.v1",
+          strategy: { pinAssignment: "manual" },
+          bindings: {
+            signal: {
+              from: { node: "mcu", pin: "gpio0" },
+              to: { node: "indicator", pin: "anode" }
+            }
+          }
+        }
+      ]
+    };
+    const failed = resolveProject(source);
+    const suggestion = failed.diagnostics.find((diagnostic) => diagnostic.code === "PIN_CONFLICT")?.suggestions?.[0];
+
+    expect(suggestion).toEqual({
+      title: "Move biased signal to GPIO10",
+      patch: {
+        op: "setEdgeBindings",
+        edge: "biased-edge",
+        value: {
+          signal: {
+            from: { node: "mcu", pin: "gpio10" },
+            to: { node: "indicator", pin: "anode" }
+          }
+        }
+      }
+    });
+
+    const repaired = resolveProject({
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === "biased-edge" && edge.kind === "intent.connection" && suggestion
+          ? { ...edge, bindings: suggestion.patch.value }
+          : edge
+      )
+    });
+
+    expect(repaired.diagnostics).toEqual([]);
+    expect(repaired.resolvedChoices[0]?.selected.bindings.signal).toEqual({
+      from: { node: "mcu", pin: "gpio10" },
+      to: { node: "indicator", pin: "anode" }
     });
   });
 
@@ -219,6 +450,93 @@ describe("resolveProject", () => {
         `net_${secondEdgeId}_scl`
       ])
     );
+  });
+
+  it("keeps identical auto edges on stable pin pairs when source edge order changes", () => {
+    const source = createI2cSliceProject();
+    const secondSensorId = "node_second_sensor";
+    const firstEdgeId = "edge_a_sensor_bus";
+    const secondEdgeId = "edge_z_sensor_bus";
+    const nodes: ProjectSource["nodes"] = [
+      ...source.nodes,
+      {
+        id: secondSensorId,
+        kind: "component",
+        component: "@nocad/sensors:I2C_TEMP_SENSOR"
+      }
+    ];
+    const makeEdge = (id: string, sensor: string): ProjectSource["edges"][number] => ({
+      id,
+      kind: "intent.connection",
+      from: { node: i2cSliceIds.mcu, port: "i2c" },
+      to: { node: sensor, port: "i2c" },
+      contract: "builtin:i2c.v1",
+      strategy: { pinAssignment: "auto" },
+      include: { pullups: true }
+    });
+    const edges = [makeEdge(secondEdgeId, secondSensorId), makeEdge(firstEdgeId, i2cSliceIds.sensor)];
+    const forward = resolveProject({ ...source, nodes, edges });
+    const reversed = resolveProject({ ...source, nodes, edges: [...edges].reverse() });
+
+    expect(reversed).toEqual(forward);
+    expect(forward.diagnostics).toEqual([]);
+    expect(forward.resolvedChoices.find((choice) => choice.sourceEdge === firstEdgeId)?.selected.bindings).toMatchObject({
+      sda: { from: { node: i2cSliceIds.mcu, pin: "gpio4" } },
+      scl: { from: { node: i2cSliceIds.mcu, pin: "gpio5" } }
+    });
+    expect(forward.resolvedChoices.find((choice) => choice.sourceEdge === secondEdgeId)?.selected.bindings).toMatchObject({
+      sda: { from: { node: i2cSliceIds.mcu, pin: "gpio8" } },
+      scl: { from: { node: i2cSliceIds.mcu, pin: "gpio9" } }
+    });
+  });
+
+  it("allocates explicit bindings before auto preferences regardless of edge order", () => {
+    const source: ProjectSource = {
+      schema: "nocad.project.v0",
+      id: "manual-and-auto-biased-signals",
+      name: "Manual and auto biased signals",
+      dependencies: {
+        "@nocad/io": "0.1.0",
+        "@nocad/rp2350": "0.1.0"
+      },
+      nodes: [
+        { id: "mcu", kind: "component", component: "@nocad/rp2350:RP2350A" },
+        { id: "auto-led", kind: "component", component: "@nocad/io:LED" },
+        { id: "manual-led", kind: "component", component: "@nocad/io:LED" }
+      ],
+      edges: [
+        {
+          id: "edge_a_auto",
+          kind: "intent.connection",
+          from: { node: "mcu", port: "biased_out" },
+          to: { node: "auto-led", port: "biased_input" },
+          contract: "@nocad/io:biased_signal.v1",
+          strategy: { pinAssignment: "auto" }
+        },
+        {
+          id: "edge_z_manual",
+          kind: "intent.connection",
+          from: { node: "mcu", port: "biased_out" },
+          to: { node: "manual-led", port: "biased_input" },
+          contract: "@nocad/io:biased_signal.v1",
+          strategy: { pinAssignment: "manual" },
+          bindings: {
+            signal: { from: { node: "mcu", pin: "gpio10" } }
+          }
+        }
+      ]
+    };
+    const forward = resolveProject(source);
+    const reversed = resolveProject({ ...source, edges: [...source.edges].reverse() });
+
+    expect(reversed).toEqual(forward);
+    expect(forward.diagnostics).toEqual([]);
+    expect(forward.resolvedChoices.find((choice) => choice.sourceEdge === "edge_z_manual")?.selected.bindings.signal).toMatchObject({
+      from: { node: "mcu", pin: "gpio10" }
+    });
+    expect(forward.resolvedChoices.find((choice) => choice.sourceEdge === "edge_a_auto")?.selected.bindings.signal).toMatchObject({
+      from: { node: "mcu", pin: "gpio0" }
+    });
   });
 
   it("elaborates HDMI output features into provider bindings and 5V power", () => {
@@ -439,7 +757,7 @@ describe("resolveProject", () => {
 
     expect(resolved.diagnostics).toEqual([]);
     expect(dpiChoice?.selected.bindings.pclk).toMatchObject({
-      from: { node: hdmiTxSliceIds.videoSource, pin: "io0" },
+      from: { node: hdmiTxSliceIds.videoSource, pin: "io18" },
       to: { node: hdmiTxSliceIds.tx, pin: "pclk" }
     });
     expect(ctrlChoice?.selected.bindings).toMatchObject({
@@ -481,6 +799,8 @@ describe("resolveProject", () => {
     const dpiFirst = resolveProject(createRp2350HdmiTxProject("dpi-first"));
     const ctrlFirst = resolveProject(createRp2350HdmiTxProject("ctrl-first"));
 
+    expect(ctrlFirst).toEqual(dpiFirst);
+
     for (const resolved of [dpiFirst, ctrlFirst]) {
       const dpiChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.dpiConnection);
       const ctrlChoice = resolved.resolvedChoices.find((choice) => choice.sourceEdge === hdmiTxSliceIds.ctrlConnection);
@@ -511,7 +831,7 @@ describe("resolveProject", () => {
       blueBits: 5
     });
     expect(sourcePinsForChoice(dpiChoice)).toHaveLength(20);
-    expect(sourcePinsForChoice(dpiChoice)).not.toEqual(expect.arrayContaining(["gpio4", "gpio5"]));
+    expect(sourcePinsForChoice(dpiChoice)).not.toEqual(expect.arrayContaining(["gpio4", "gpio5", "gpio8", "gpio9"]));
     expect(hdmiChoice?.selected.bindings.tmds2_p).toMatchObject({
       from: { node: hdmiTxSliceIds.tx, pin: "tmds2_p" },
       to: { node: hdmiTxSliceIds.hdmiPort, pin: "tmds2_p" }

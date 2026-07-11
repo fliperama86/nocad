@@ -114,6 +114,10 @@ export type ComponentDefinition = {
 export type PreferredPinGroupDefinition = {
   contract: string;
   pins: Record<string, string>;
+  port?: string;
+  suggestion?: {
+    title: string;
+  };
 };
 
 export type FunctionDefinition = {

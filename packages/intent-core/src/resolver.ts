@@ -7,6 +7,7 @@ import type {
   ContractParams,
   ContractSignal,
   Diagnostic,
+  EndpointRole,
   EndpointRef,
   FunctionDefinition,
   IntentConnectionEdge,
@@ -221,12 +222,14 @@ function createConnectionTopologyComponent(
 
 function sortIntentConnectionEdges(edges: IntentConnectionEdge[], context: ResolutionContext): IntentConnectionEdge[] {
   return edges
-    .map((edge, index) => ({
+    .map((edge) => ({
       edge,
-      index,
       score: connectionPinFlexibilityScore(edge, context)
     }))
-    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .sort(
+      (left, right) =>
+        left.score - right.score || compareStableText(left.edge.id, right.edge.id)
+    )
     .map(({ edge }) => edge);
 }
 
@@ -244,27 +247,46 @@ function connectionPinFlexibilityScore(edge: IntentConnectionEdge, context: Reso
   const params = defaultContractParams(contract, edge.params);
   const signals = contractSignals(contract, params);
 
-  return Object.keys(signals).reduce(
-    (score, signal) =>
+  return Object.keys(signals).reduce((score, signal) => {
+    const fromOverride = edge.bindings?.[signal]?.from;
+    const toOverride = edge.bindings?.[signal]?.to;
+
+    return (
       score +
-      signalMapFlexibility(from.definition, fromMap.signalMap[signal]) +
-      signalMapFlexibility(to.definition, toMap.signalMap[signal]),
-    0
-  );
+      signalMapFlexibility(edge.from.node, from.definition, fromMap.signalMap[signal], fromOverride, context) +
+      signalMapFlexibility(edge.to.node, to.definition, toMap.signalMap[signal], toOverride, context)
+    );
+  }, 0);
 }
 
-function signalMapFlexibility(definition: ComponentDefinition, signalMap: SignalPinMap | undefined) {
+function signalMapFlexibility(
+  nodeId: string,
+  definition: ComponentDefinition,
+  signalMap: SignalPinMap | undefined,
+  override: EndpointRef | undefined,
+  context: ResolutionContext
+) {
   if (!signalMap) {
     return Number.MAX_SAFE_INTEGER / 4;
   }
 
-  if ("pin" in signalMap) {
-    return 0;
+  if (override?.pin) {
+    return 1;
   }
 
-  return Object.values(definition.pins).filter((pin) =>
-    signalMap.pinSelector.capabilities.every((capability) => pin.capabilities.includes(capability))
+  if ("pin" in signalMap) {
+    return pinAvailableForAllocation(nodeId, signalMap.pin, context) ? 1 : 0;
+  }
+
+  return Object.entries(definition.pins).filter(
+    ([pinId, pin]) =>
+      signalMap.pinSelector.capabilities.every((capability) => pin.capabilities.includes(capability)) &&
+      pinAvailableForAllocation(nodeId, pinId, context)
   ).length;
+}
+
+function pinAvailableForAllocation(nodeId: string, pin: string, context: ResolutionContext) {
+  return !context.reservedPins.has(`${nodeId}.${pin}`);
 }
 
 function resolveFunctions(
@@ -635,14 +657,80 @@ function chooseAvailablePin(
   context: ResolutionContext,
   localReservedPins: Set<string>
 ) {
-  const pin = Object.entries(definition.pins).find(
-    ([pinId, candidate]) =>
-      capabilities.every((capability) => candidate.capabilities.includes(capability)) &&
-      !context.reservedPins.has(`${nodeId}.${pinId}`) &&
-      !localReservedPins.has(`${nodeId}.${pinId}`)
-  );
+  const pin = Object.entries(definition.pins)
+    .filter(
+      ([pinId, candidate]) =>
+        capabilities.every((capability) => candidate.capabilities.includes(capability)) &&
+        !context.reservedPins.has(`${nodeId}.${pinId}`) &&
+        !localReservedPins.has(`${nodeId}.${pinId}`)
+    )
+    .map(([pinId, candidate]) => ({
+      id: pinId,
+      scarcityPenalty: pinScarcityPenalty(definition, candidate.capabilities, capabilities)
+    }))
+    .sort(
+      (left, right) =>
+        left.scarcityPenalty - right.scarcityPenalty || compareStableText(left.id, right.id)
+    )[0];
 
-  return pin?.[0];
+  return pin?.id;
+}
+
+function pinScarcityPenalty(
+  definition: ComponentDefinition,
+  candidateCapabilities: string[],
+  requiredCapabilities: string[]
+) {
+  const required = new Set(requiredCapabilities);
+
+  return [...new Set(candidateCapabilities)]
+    .filter((capability) => !required.has(capability))
+    .reduce((penalty, capability) => {
+      const compatiblePinCount = Object.values(definition.pins).filter((pin) =>
+        pin.capabilities.includes(capability)
+      ).length;
+
+      return penalty + Math.ceil(1_000_000 / Math.max(compatiblePinCount, 1));
+    }, 0);
+}
+
+function compareStableText(left: string, right: string) {
+  if (left === right) {
+    return 0;
+  }
+
+  const leftParts = left.match(/\d+|\D+/g) ?? [left];
+  const rightParts = right.match(/\d+|\D+/g) ?? [right];
+  const length = Math.min(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] ?? "";
+    const rightPart = rightParts[index] ?? "";
+
+    if (leftPart === rightPart) {
+      continue;
+    }
+
+    const leftIsNumber = /^\d+$/.test(leftPart);
+    const rightIsNumber = /^\d+$/.test(rightPart);
+
+    if (leftIsNumber && rightIsNumber) {
+      const leftNumber = leftPart.replace(/^0+(?=\d)/, "");
+      const rightNumber = rightPart.replace(/^0+(?=\d)/, "");
+
+      if (leftNumber.length !== rightNumber.length) {
+        return leftNumber.length - rightNumber.length;
+      }
+
+      if (leftNumber !== rightNumber) {
+        return leftNumber < rightNumber ? -1 : 1;
+      }
+    }
+
+    return leftPart < rightPart ? -1 : 1;
+  }
+
+  return leftParts.length - rightParts.length || (left < right ? -1 : 1);
 }
 
 function resolveMappedEndpoint(
@@ -653,7 +741,8 @@ function resolveMappedEndpoint(
   signalMap: SignalPinMap,
   override: EndpointRef | undefined,
   context: ResolutionContext,
-  localReservedPins: Set<string>
+  localReservedPins: Set<string>,
+  suggestions?: Diagnostic["suggestions"]
 ): EndpointRef | null {
   if (override?.node && override.node !== nodeId) {
     context.diagnostics.push({
@@ -690,7 +779,7 @@ function resolveMappedEndpoint(
       code: "NO_AVAILABLE_PIN",
       message: `No available pin could satisfy signal "${signal}" on edge "${edgeId}".`,
       targets: [{ kind: "edge", id: edgeId }],
-      suggestions: i2cPinSuggestion(edgeId, nodeId, definition, signal)
+      suggestions
     });
     return null;
   }
@@ -703,7 +792,8 @@ function resolveMappedEndpoint(
       targets: [
         { kind: "edge", id: edgeId },
         { kind: "pin", node: nodeId, pin: selectedPin }
-      ]
+      ],
+      suggestions
     });
     return null;
   }
@@ -716,7 +806,8 @@ function resolveMappedEndpoint(
       targets: [
         { kind: "edge", id: edgeId },
         { kind: "pin", node: nodeId, pin: selectedPin }
-      ]
+      ],
+      suggestions
     });
     return null;
   }
@@ -733,7 +824,8 @@ function resolveMappedEndpoint(
       targets: [
         { kind: "edge", id: edgeId },
         { kind: "pin", node: reserved.node, pin: reserved.pin }
-      ]
+      ],
+      suggestions
     });
     return null;
   }
@@ -746,7 +838,8 @@ function resolveMappedEndpoint(
       targets: [
         { kind: "edge", id: edgeId },
         { kind: "pin", node: endpoint.node, pin: endpoint.pin }
-      ]
+      ],
+      suggestions
     });
     return null;
   }
@@ -759,31 +852,6 @@ function pinSatisfiesCapabilities(definition: ComponentDefinition, pin: string, 
   const candidate = definition.pins[pin];
 
   return Boolean(candidate && capabilities.every((capability) => candidate.capabilities.includes(capability)));
-}
-
-function i2cPinSuggestion(
-  edgeId: string,
-  nodeId: string,
-  definition: ComponentDefinition,
-  signal: string
-): Diagnostic["suggestions"] {
-  if ((signal !== "sda" && signal !== "scl") || !definition.pins.gpio8 || !definition.pins.gpio9) {
-    return undefined;
-  }
-
-  return [
-    {
-      title: "Move I2C to GPIO8/GPIO9",
-      patch: {
-        op: "setEdgeBindings",
-        edge: edgeId,
-        value: {
-          sda: { from: { node: nodeId, pin: "gpio8" } },
-          scl: { from: { node: nodeId, pin: "gpio9" } }
-        }
-      }
-    }
-  ];
 }
 
 function createContractNet(contractId: string, signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
@@ -1029,10 +1097,50 @@ function resolveContractBindings(
     return preferredBindings;
   }
 
+  const fromSuggestions = createPreferredPinGroupSuggestions(
+    edge,
+    signals,
+    "from",
+    from,
+    fromMap,
+    context.reservedPins
+  );
+  const toSuggestions = createPreferredPinGroupSuggestions(
+    edge,
+    signals,
+    "to",
+    to,
+    toMap,
+    context.reservedPins
+  );
   const localReservedPins = new Set<string>();
-  const bindings: SignalBindings = {};
+  const allocatedBindings: SignalBindings = {};
+  const signalIds = Object.keys(signals);
+  const signalsByConstraint = signalIds
+    .map((signal) => ({
+      signal,
+      score:
+        signalMapFlexibility(
+          edge.from.node,
+          from.definition,
+          fromMap.signalMap[signal],
+          edge.bindings?.[signal]?.from,
+          context
+        ) +
+        signalMapFlexibility(
+          edge.to.node,
+          to.definition,
+          toMap.signalMap[signal],
+          edge.bindings?.[signal]?.to,
+          context
+        )
+    }))
+    .sort(
+      (left, right) =>
+        left.score - right.score || compareStableText(left.signal, right.signal)
+    );
 
-  for (const signal of Object.keys(signals)) {
+  for (const { signal } of signalsByConstraint) {
     const fromSignalMap = fromMap.signalMap[signal];
     const toSignalMap = toMap.signalMap[signal];
 
@@ -1054,7 +1162,8 @@ function resolveContractBindings(
       fromSignalMap,
       edge.bindings?.[signal]?.from,
       context,
-      localReservedPins
+      localReservedPins,
+      fromSuggestions
     );
     const toEndpoint = resolveMappedEndpoint(
       edge.id,
@@ -1064,20 +1173,21 @@ function resolveContractBindings(
       toSignalMap,
       edge.bindings?.[signal]?.to,
       context,
-      localReservedPins
+      localReservedPins,
+      toSuggestions
     );
 
     if (!fromEndpoint || !toEndpoint) {
       return null;
     }
 
-    bindings[signal] = {
+    allocatedBindings[signal] = {
       from: fromEndpoint,
       to: toEndpoint
     };
   }
 
-  return bindings;
+  return Object.fromEntries(signalIds.map((signal) => [signal, allocatedBindings[signal]]));
 }
 
 function resolvePreferredPinGroupBindings(
@@ -1089,9 +1199,9 @@ function resolvePreferredPinGroupBindings(
   toMap: PortContractMap,
   reservedPins: Map<string, ReservedPin>
 ): SignalBindings | undefined {
-  const groups = (from.definition.preferredPinGroups ?? []).filter((group) => group.contract === edge.contract);
+  const groups = matchingPreferredPinGroups(from.definition, edge.contract, edge.from.port);
 
-  if (edge.strategy?.pinAssignment === "manual" || groups.length === 0) {
+  if (edge.strategy?.pinAssignment === "manual" || edge.bindings || groups.length === 0) {
     return undefined;
   }
 
@@ -1108,6 +1218,74 @@ function resolvePreferredPinGroupBindings(
   }
 
   return undefined;
+}
+
+function createPreferredPinGroupSuggestions(
+  edge: IntentConnectionEdge,
+  signals: Record<string, ContractSignal>,
+  role: EndpointRole,
+  component: ComponentContext,
+  portMap: PortContractMap,
+  reservedPins: Map<string, ReservedPin>
+): Diagnostic["suggestions"] {
+  const endpoint = edge[role];
+  const groups = matchingPreferredPinGroups(component.definition, edge.contract, endpoint.port);
+  const suggestions = groups.flatMap((group) => {
+    if (!group.suggestion) {
+      return [];
+    }
+
+    const bindings: SignalBindings = Object.fromEntries(
+      Object.entries(edge.bindings ?? {}).map(([signal, binding]) => [signal, { ...binding }])
+    );
+
+    for (const signal of Object.keys(signals)) {
+      const pin = group.pins[signal];
+      const signalMap = portMap.signalMap[signal];
+
+      if (!pin || !signalMap || !pinSatisfiesSignalMap(component.definition, pin, signalMap)) {
+        return [];
+      }
+
+      bindings[signal] = {
+        ...bindings[signal],
+        [role]: { node: endpoint.node, pin }
+      };
+    }
+
+    if (!bindingPinsAvailable(bindings, reservedPins)) {
+      return [];
+    }
+
+    return [
+      {
+        title: group.suggestion.title,
+        patch: {
+          op: "setEdgeBindings" as const,
+          edge: edge.id,
+          value: bindings
+        }
+      }
+    ];
+  });
+
+  return suggestions.length > 0 ? suggestions : undefined;
+}
+
+function matchingPreferredPinGroups(
+  definition: ComponentDefinition,
+  contract: string,
+  port: string | undefined
+) {
+  return (definition.preferredPinGroups ?? []).filter(
+    (group) => group.contract === contract && (group.port === undefined || group.port === port)
+  );
+}
+
+function pinSatisfiesSignalMap(definition: ComponentDefinition, pin: string, signalMap: SignalPinMap) {
+  return "pin" in signalMap
+    ? definition.pins[pin] !== undefined && signalMap.pin === pin
+    : pinSatisfiesCapabilities(definition, pin, signalMap.pinSelector.capabilities);
 }
 
 function createPreferredPinGroupBindings(

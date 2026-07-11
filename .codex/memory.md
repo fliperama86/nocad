@@ -12,3 +12,5 @@
 
 - Do not let the graph UI appear to accept an electrically invalid connection and rely only on the Diagnostics tab to explain it later. Validate endpoint and contract compatibility before committing an edge, or make rejection immediate and visible at the interaction site.
 - The generic FPGA should connect directly to HDMI intent through a generic GPIO pin pool and function-level capability matching, not through a bespoke FPGA HDMI port. The external HDMI transmitter path remains a separate topology.
+- When changing repeated JSX controls, patch with component-specific context and inspect the exact occurrence. The provider mode grid may collapse to one column for a single generic mode, while the I2C auto/manual grid must remain two columns.
+- Provider inspector editability and mode-switch binding retention must come from the selected ProviderModeDefinition signal map. A `pinSelector` mapping is user-editable and preserves authored provider bindings; a fixed `pin` mapping is read-only and discards conflicting authored provider bindings.

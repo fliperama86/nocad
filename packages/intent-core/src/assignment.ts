@@ -28,7 +28,11 @@ export function getI2cPinPairOptions(source: ProjectSource, edgeId: string): I2c
   const definition = components[fromNode.component];
 
   return (definition?.preferredPinGroups ?? [])
-    .filter((group) => group.contract === edge.contract)
+    .filter(
+      (group) =>
+        group.contract === edge.contract &&
+        (group.port === undefined || group.port === edge.from.port)
+    )
     .flatMap((group) => {
       const sda = group.pins.sda;
       const scl = group.pins.scl;

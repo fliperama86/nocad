@@ -38,14 +38,14 @@ What exists and works:
 
 Known architectural debts (tracked in M1/M2 below):
 
-- Function provider/exposure resolution, connection shunt generation, and preferred pin groups are data-driven. Pin suggestions remain I2C-shaped, and allocation is still greedy first-fit with partial constrained-first ordering. The remaining suggestion, topology-rule, and scoring work stays in M1.
-- Pin allocation is still greedy first-fit with constrained-first edge ordering. The RP2350 TX-IC edge-order failure is fixed and test-covered, but this is not yet the spec's full candidate-scoring model.
+- Function provider/exposure resolution, connection shunt generation, preferred pin groups, and pin-assignment suggestions are data-driven. Suggested binding patches are package-authored, contract- and port-scoped, validated against current reservations, and exercised by I2C and non-I2C round-trip tests. The Diagnostics UI does not apply these patches yet; document patch application belongs to M2.
+- Connection allocation now uses deterministic candidate cardinality, constrained-first signal ordering, stable semantic tie-breaks, and pin-scarcity scoring. Reversing uniquely identified connection edges is regression-tested, including competing auto and explicit assignments. Allocation remains greedy rather than a global search, and function-provider pins are still allocated in a later sequential phase.
 - UI mutates React state directly; there is no document API, no undo/redo, no persistence.
 - Resolution is not incremental.
 
-## In Progress (2026-07-10)
+## In Progress (2026-07-11)
 
-M1 is active. Function resolution, generated supplementary nets, contract shunts such as pullups, and contract-scoped preferred pin groups now come from package data. A non-I2C biased-signal fixture exercises the same preference and shunt interpreter. Next, replace I2C-shaped pin suggestions and greedy first-fit allocation with deterministic candidate scoring, then complete edge-order invariance before starting M2.
+M1 is active. Function resolution, generated supplementary nets, contract shunts such as pullups, contract- and port-scoped preferred pin groups, and diagnostic pin suggestions now come from package data. Connection allocation has deterministic candidate scoring and improved edge-order invariance for unique edge IDs, while remaining a bounded greedy pass rather than Cartesian or global search. Next, decide whether function-provider allocation must join the same scoring pass, then close the remaining full-output edge-order cases before starting M2.
 
 ## Milestones
 
@@ -152,7 +152,8 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
-- 2026-07-11 - Added capability-derived direct TMDS output for the generic FPGA. The graph matches the HDMI function's `generic_gpio` provider rule to the FPGA's generic GPIO pin pool, without adding an FPGA-specific HDMI port, and retains the FPGA-via-TX-IC path as a separate topology.
+- 2026-07-11 - Replaced source-order allocation ties and first-matching selectable pins with deterministic candidate scoring. Connections use effective candidate cardinality after authored reservations, explicit bindings take priority, constrained signals and stable IDs break ties, and generic selectors preserve pins with scarce extra capabilities. Reversed-edge regressions cover competing auto and explicit assignments. Allocation remains greedy, and function providers remain sequential.
+- 2026-07-11 - Added capability-derived direct TMDS output for the generic FPGA. The graph matches the HDMI function's `generic_gpio` provider rule to the FPGA's 64-pin `io0` through `io63` pool, without adding an FPGA-specific HDMI port, and retains the FPGA-via-TX-IC path as a separate topology. The provider inspector derives this generic mode from package/function metadata and no longer leaks the RP2350 GPIO12-19 HSTX preset into FPGA mappings.
 - 2026-07-10 - Fixed graph connection UX so incompatible node pairs are rejected before source mutation. Function provider/exposure ports are now selected from package data instead of role-name heuristics, invalid drops show an inline explanation, and browser checks cover rejecting an I2C sensor as an HDMI provider while preserving valid I2C and HDMI connections.
 - 2026-07-10 - Continued M1 by moving I2C pullups into generic contract `shuntToPower` rules and replacing component-specific I2C pair fields with contract-scoped preferred pin groups. Added a non-I2C biased-signal fixture that uses the same interpreter, while preserving stable generated IDs and provenance.
 - 2026-07-10 - Started M1. Replaced HDMI-specific function dispatch with a generic function topology interpreter, moved HDMI source 5V generation and net-name prefixes into fixture data, added a second data-only digital-output function, and verified provider/exposure edge-order invariance for function resolution.

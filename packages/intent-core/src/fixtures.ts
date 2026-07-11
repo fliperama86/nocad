@@ -399,9 +399,24 @@ export const components: Record<string, ComponentDefinition> = {
       }
     },
     preferredPinGroups: [
-      { contract: "builtin:i2c.v1", pins: { sda: "gpio4", scl: "gpio5" } },
-      { contract: "builtin:i2c.v1", pins: { sda: "gpio8", scl: "gpio9" } },
-      { contract: BIASED_SIGNAL_CONTRACT, pins: { signal: "gpio10" } }
+      {
+        contract: "builtin:i2c.v1",
+        pins: { sda: "gpio4", scl: "gpio5" },
+        port: "i2c",
+        suggestion: { title: "Move I2C to GPIO4/GPIO5" }
+      },
+      {
+        contract: "builtin:i2c.v1",
+        pins: { sda: "gpio8", scl: "gpio9" },
+        port: "i2c",
+        suggestion: { title: "Move I2C to GPIO8/GPIO9" }
+      },
+      {
+        contract: BIASED_SIGNAL_CONTRACT,
+        pins: { signal: "gpio10" },
+        port: "biased_out",
+        suggestion: { title: "Move biased signal to GPIO10" }
+      }
     ]
   },
   "@nocad/fpga:GENERIC_FPGA": {
@@ -435,7 +450,12 @@ export const components: Record<string, ComponentDefinition> = {
       }
     },
     preferredPinGroups: [
-      { contract: "builtin:i2c.v1", pins: { sda: "io60", scl: "io61" } }
+      {
+        contract: "builtin:i2c.v1",
+        pins: { sda: "io60", scl: "io61" },
+        port: "i2c",
+        suggestion: { title: "Move I2C to IO60/IO61" }
+      }
     ]
   },
   "@nocad/hdmi-tx:IT66121": {

@@ -1,4 +1,4 @@
-import { components, contracts, functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
+import { contracts, functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
 import type {
   ComponentPinOption,
   ConnectionContract,
@@ -22,6 +22,13 @@ import type {
 
 import { cn } from "../../lib/utils";
 import { Panel } from "./panel";
+import {
+  fixedProviderPinsForEdge,
+  providerModeDefinitionForEdge,
+  providerModesForEdge,
+  providerSignalIsEditable
+} from "./provider-assignment";
+import type { ProviderModeOption } from "./provider-assignment";
 
 type PinPair = {
   sda: string;
@@ -29,17 +36,8 @@ type PinPair = {
 };
 
 type SelectableIntentEdge = IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge;
-type ProviderModeOption = {
-  label: string;
-  value: string;
-};
 type ProviderSignal = FunctionSignalDefinition;
 type MappingSource = "auto" | "mode" | "unassigned" | "user";
-
-const defaultProviderModes: ProviderModeOption[] = [
-  { label: "Auto", value: "auto" },
-  { label: "Custom GPIO", value: "custom_gpio" }
-];
 
 const gpio12To19Preset = {
   clock_n: "gpio19",
@@ -50,11 +48,6 @@ const gpio12To19Preset = {
   tmds1_p: "gpio14",
   tmds2_n: "gpio13",
   tmds2_p: "gpio12"
-};
-const derivedPinsByProviderMode: Record<string, Record<string, string>> = {
-  auto: gpio12To19Preset,
-  hstx: gpio12To19Preset,
-  pio_gpio: gpio12To19Preset
 };
 
 export function EdgeAssignmentPanel({
@@ -775,7 +768,12 @@ function ProviderEdgeProperties({
     <>
       <EdgeHeading edge={edge} labels={labels} />
 
-      <div className="grid grid-cols-2 rounded-md border border-border p-1">
+      <div
+        className={cn(
+          "grid rounded-md border border-border p-1",
+          modes.length === 1 ? "grid-cols-1" : "grid-cols-2"
+        )}
+      >
         {modes.map((providerMode) => (
           <button
             className={modeButtonClass(mode === providerMode.value)}
@@ -804,6 +802,7 @@ function ProviderEdgeProperties({
         pinOptions={pinOptions}
         resolvedChoice={resolvedChoice}
         signals={signals}
+        source={source}
       />
     </>
   );
@@ -926,7 +925,8 @@ function SignalMapping({
   onSetProviderPinPreset,
   pinOptions,
   resolvedChoice,
-  signals
+  signals,
+  source
 }: {
   edge: IntentProvidesEdge;
   mode: string;
@@ -935,8 +935,12 @@ function SignalMapping({
   pinOptions: ComponentPinOption[];
   resolvedChoice: ResolvedProject["resolvedChoices"][number] | undefined;
   signals: ProviderSignal[];
+  source: ProjectSource;
 }) {
-  const derivedPins = derivedPinsByProviderMode[mode] ?? {};
+  const derivedPins = fixedProviderPinsForEdge(source, edge, mode);
+  const presetSupported =
+    presetFitsOptions(gpio12To19Preset, pinOptions) &&
+    Object.keys(gpio12To19Preset).every((signal) => providerSignalIsEditable(source, edge, mode, signal));
   const selectedPins = new Set(
     [
       ...Object.values(derivedPins),
@@ -955,10 +959,9 @@ function SignalMapping({
     <div className="grid gap-3 rounded-md border border-border bg-background px-3 py-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">Signal mapping</span>
-        {mode === "custom_gpio" ? (
+        {presetSupported ? (
           <button
             className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!presetFitsOptions(gpio12To19Preset, pinOptions)}
             onClick={() => onSetProviderPinPreset(edge.id, gpio12To19Preset)}
             type="button"
           >
@@ -974,8 +977,8 @@ function SignalMapping({
           const resolvedPin = resolvedChoice?.selected.bindings[signal.id]?.from?.pin;
           const selectedPin = sourcePin ?? "";
           const visiblePin = sourcePin ?? derivedPin ?? resolvedPin;
-          const source = mappingSource({ derivedPin, mode, pinControl: signal.pinControl, resolvedPin, sourcePin });
-          const editable = mode === "custom_gpio" || signal.pinControl === "always";
+          const editable = providerSignalIsEditable(source, edge, mode, signal.id);
+          const mapping = mappingSource({ derivedPin, editable, resolvedPin, sourcePin });
 
           return (
             <label className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-2 text-sm" key={signal.id}>
@@ -1006,7 +1009,7 @@ function SignalMapping({
                     {visiblePin ? pinLabel(visiblePin) : "AUTO"}
                   </div>
                 )}
-                <span className={mappingSourceClassName(source)}>{mappingSourceLabel(source, mode)}</span>
+                <span className={mappingSourceClassName(mapping)}>{mappingSourceLabel(mapping, mode)}</span>
               </div>
             </label>
           );
@@ -1018,14 +1021,12 @@ function SignalMapping({
 
 function mappingSource({
   derivedPin,
-  mode,
-  pinControl,
+  editable,
   resolvedPin,
   sourcePin
 }: {
   derivedPin: string | undefined;
-  mode: string;
-  pinControl: ProviderSignal["pinControl"];
+  editable: boolean;
   resolvedPin: string | undefined;
   sourcePin: string | undefined;
 }): MappingSource {
@@ -1041,7 +1042,7 @@ function mappingSource({
     return "auto";
   }
 
-  return mode === "custom_gpio" || pinControl === "always" ? "unassigned" : "auto";
+  return editable ? "unassigned" : "auto";
 }
 
 function mappingSourceLabel(source: MappingSource, mode: string) {
@@ -1167,42 +1168,6 @@ function endpointLabel(endpoint: { node?: string; pin?: string; port?: string } 
   }
 
   return `${labels.get(endpoint.node) ?? endpoint.node}.${endpoint.pin ?? endpoint.port ?? "?"}`;
-}
-
-function providerModesForEdge(source: ProjectSource, edge: IntentProvidesEdge) {
-  const providerNode = source.nodes.find((node) => node.id === edge.from.node);
-
-  if (providerNode?.kind !== "component") {
-    return defaultProviderModes;
-  }
-
-  const modeDefinitions =
-    components[providerNode.component]?.ports[edge.from.port ?? ""]?.provides?.[edge.contract]?.modes;
-
-  if (!modeDefinitions) {
-    return defaultProviderModes;
-  }
-
-  return Object.entries(modeDefinitions).map(([value, definition]) => ({
-    label: definition.label ?? humanModeLabel(value),
-    value
-  }));
-}
-
-function providerModeDefinitionForEdge(source: ProjectSource, edge: IntentProvidesEdge, mode: string) {
-  const providerNode = source.nodes.find((node) => node.id === edge.from.node);
-
-  if (providerNode?.kind !== "component") {
-    return undefined;
-  }
-
-  const modeDefinitions = components[providerNode.component]?.ports[edge.from.port ?? ""]?.provides?.[edge.contract]?.modes;
-
-  return modeDefinitions?.[mode] ?? (mode === "auto" ? Object.values(modeDefinitions ?? {})[0] : undefined);
-}
-
-function humanModeLabel(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function providerSignalsForEdge(source: ProjectSource, edge: IntentProvidesEdge): ProviderSignal[] {

@@ -37,6 +37,7 @@ import { matchFunctionComponentConnection } from "./function-connection-intent";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
 import { PcbDesignerPanel, type BoardComponentPlacement } from "./pcb-designer-panel";
+import { bindingsForProviderMode } from "./provider-assignment";
 import { ResolutionPanel } from "./resolution-panel";
 
 function createSource() {
@@ -253,17 +254,6 @@ const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "diagnostics", label: "Diagnostics" },
   { id: "json", label: "JSON" }
 ];
-const providerDataSignalIds = new Set([
-  "clock_n",
-  "clock_p",
-  "tmds0_n",
-  "tmds0_p",
-  "tmds1_n",
-  "tmds1_p",
-  "tmds2_n",
-  "tmds2_p"
-]);
-
 export function I2cSliceApp() {
   const [jsonView, setJsonView] = useState<JsonView>("source");
   const [source, setSource] = useState<ProjectSource>(createBlankSource);
@@ -577,10 +567,7 @@ export function I2cSliceApp() {
         edge.id === edgeId && edge.kind === "intent.provides"
           ? {
               ...edge,
-              bindings:
-                providerMode === "custom_gpio"
-                  ? edge.bindings
-                  : removeProviderDataBindings(edge.bindings),
+              bindings: bindingsForProviderMode(current, edge, providerMode),
               strategy: {
                 ...edge.strategy,
                 providerMode
@@ -1202,18 +1189,6 @@ function manualBindings(edge: IntentConnectionEdge, pair: { sda: string; scl: st
       }
     }
   };
-}
-
-function removeProviderDataBindings(bindings: SignalBindings | undefined) {
-  if (!bindings) {
-    return undefined;
-  }
-
-  const sidebandBindings = Object.fromEntries(
-    Object.entries(bindings).filter(([signal]) => !providerDataSignalIds.has(signal))
-  );
-
-  return Object.keys(sidebandBindings).length > 0 ? sidebandBindings : undefined;
 }
 
 function uniqueId(base: string, usedIds: Set<string>) {
