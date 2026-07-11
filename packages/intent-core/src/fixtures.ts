@@ -1,12 +1,14 @@
 import type { ComponentDefinition, ConnectionContract, FunctionDefinition, PinDefinition, SignalPinMap } from "./types";
 
 const PIXEL_STREAM_CONTRACT = "@nocad/video:pixel_stream.v1";
+const DIGITAL_OUTPUT_CONTRACT = "@nocad/io:digital_output.v1";
 const pixelStreamSignals = createPixelStreamSignals();
 
 export const contracts: Record<string, ConnectionContract> = {
   "builtin:i2c.v1": {
     id: "builtin:i2c.v1",
     label: "I2C",
+    netNamePrefix: "I2C",
     signals: {
       sda: { direction: "bidirectional" },
       scl: { direction: "bidirectional" }
@@ -15,6 +17,7 @@ export const contracts: Record<string, ConnectionContract> = {
   "@nocad/video:hdmi_output.v1": {
     id: "@nocad/video:hdmi_output.v1",
     label: "HDMI output",
+    netNamePrefix: "HDMI",
     signals: {
       tmds2_p: { direction: "from_to_to" },
       tmds2_n: { direction: "from_to_to" },
@@ -33,6 +36,7 @@ export const contracts: Record<string, ConnectionContract> = {
   [PIXEL_STREAM_CONTRACT]: {
     id: PIXEL_STREAM_CONTRACT,
     label: "Pixel stream",
+    netNamePrefix: "PIXEL",
     params: {
       transport: {
         kind: "enum",
@@ -109,7 +113,16 @@ export const contracts: Record<string, ConnectionContract> = {
   "builtin:dpi.v1": {
     id: "builtin:dpi.v1",
     label: "DPI",
+    netNamePrefix: "PIXEL",
     signals: pixelStreamSignals
+  },
+  [DIGITAL_OUTPUT_CONTRACT]: {
+    id: DIGITAL_OUTPUT_CONTRACT,
+    label: "Digital output",
+    netNamePrefix: "DIGITAL",
+    signals: {
+      signal: { direction: "from_to_to" }
+    }
   }
 };
 
@@ -212,7 +225,44 @@ export const functions: Record<string, FunctionDefinition> = {
         label: "CEC",
         signals: [{ id: "cec", label: "CEC", pinControl: "always" }]
       }
-    ]
+    ],
+    topology: {
+      contract: "@nocad/video:hdmi_output.v1",
+      generatedNets: [
+        {
+          diagnostics: {
+            missingFrom: {
+              code: "MISSING_HDMI_5V_POWER",
+              message: "HDMI source power requires a 5V power domain."
+            },
+            missingTo: {
+              code: "PORT_CONTRACT_MISMATCH",
+              message: "The exposed HDMI component does not provide its configured +5V pin."
+            }
+          },
+          direction: "from_to_to",
+          from: { kind: "powerDomain", role: "power_5v", voltage: "5V" },
+          id: "source5v",
+          include: "source5v",
+          name: "HDMI_5V",
+          to: { kind: "exposedPin", pin: "source_5v" }
+        }
+      ]
+    }
+  },
+  [DIGITAL_OUTPUT_CONTRACT]: {
+    id: DIGITAL_OUTPUT_CONTRACT,
+    include: {},
+    signalGroups: [
+      {
+        id: "digital",
+        label: "Digital output",
+        signals: [{ id: "signal", label: "Signal", pinControl: "always" }]
+      }
+    ],
+    topology: {
+      contract: DIGITAL_OUTPUT_CONTRACT
+    }
   }
 };
 
@@ -263,6 +313,22 @@ export const components: Record<string, ComponentDefinition> = {
               custom_gpio: {
                 label: "Custom GPIO",
                 signalMap: createRp2350HdmiCustomSignalMap()
+              }
+            }
+          }
+        }
+      },
+      digital_out: {
+        kind: "derived_port",
+        provides: {
+          [DIGITAL_OUTPUT_CONTRACT]: {
+            role: "provider",
+            modes: {
+              auto: {
+                label: "Auto",
+                signalMap: {
+                  signal: { pinSelector: { capabilities: ["gpio"] } }
+                }
               }
             }
           }
@@ -536,6 +602,32 @@ export const components: Record<string, ComponentDefinition> = {
       }
     },
     ports: {}
+  },
+  "@nocad/io:LED": {
+    id: "@nocad/io:LED",
+    pins: {
+      anode: {
+        name: "Anode",
+        capabilities: ["digital.input"]
+      },
+      cathode: {
+        name: "Cathode",
+        capabilities: ["power.ground"]
+      }
+    },
+    ports: {
+      input: {
+        kind: "fixed_port",
+        contractMaps: {
+          [DIGITAL_OUTPUT_CONTRACT]: {
+            role: "to",
+            signalMap: {
+              signal: { pin: "anode" }
+            }
+          }
+        }
+      }
+    }
   }
 };
 
@@ -543,6 +635,7 @@ export const packageVersions: Record<string, string> = {
   "@nocad/connectors": "0.1.0",
   "@nocad/fpga": "0.1.0",
   "@nocad/hdmi-tx": "0.1.0",
+  "@nocad/io": "0.1.0",
   "@nocad/video": "0.1.0",
   "@nocad/rp2350": "0.1.0",
   "@nocad/sensors": "0.1.0",

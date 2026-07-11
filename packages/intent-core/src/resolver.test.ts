@@ -176,6 +176,84 @@ describe("resolveProject", () => {
     ]);
   });
 
+  it("resolves function topology independently of provider and exposes edge order", () => {
+    const source = createHdmiSliceProject();
+    const forward = resolveProject(source);
+    const reversed = resolveProject({ ...source, edges: [...source.edges].reverse() });
+
+    expect(reversed).toEqual(forward);
+  });
+
+  it("resolves a second function type entirely from contract and package data", () => {
+    const source: ProjectSource = {
+      schema: "nocad.project.v0",
+      id: "digital-output-slice",
+      name: "Digital output slice",
+      dependencies: {
+        "@nocad/io": "0.1.0",
+        "@nocad/rp2350": "0.1.0"
+      },
+      nodes: [
+        {
+          id: "mcu",
+          kind: "component",
+          component: "@nocad/rp2350:RP2350A"
+        },
+        {
+          id: "status-output",
+          kind: "intent.function",
+          function: "@nocad/io:digital_output.v1"
+        },
+        {
+          id: "status-led",
+          kind: "component",
+          component: "@nocad/io:LED"
+        }
+      ],
+      edges: [
+        {
+          id: "mcu-provides-status",
+          kind: "intent.provides",
+          from: { node: "mcu", port: "digital_out" },
+          to: { node: "status-output" },
+          contract: "@nocad/io:digital_output.v1"
+        },
+        {
+          id: "status-exposes-led",
+          kind: "intent.exposes",
+          from: { node: "status-output" },
+          to: { node: "status-led", port: "input" },
+          contract: "@nocad/io:digital_output.v1"
+        }
+      ]
+    };
+
+    const resolved = resolveProject(source);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.resolvedChoices).toEqual([
+      expect.objectContaining({
+        sourceEdge: "mcu-provides-status",
+        selected: expect.objectContaining({
+          bindings: {
+            signal: {
+              from: { node: "mcu", pin: "gpio0" },
+              to: { node: "status-led", pin: "anode" }
+            }
+          },
+          providerMode: "auto"
+        })
+      })
+    ]);
+    expect(resolved.nets).toEqual([
+      expect.objectContaining({
+        id: "net_mcu-provides-status_signal",
+        name: "DIGITAL_SIGNAL",
+        direction: "from_to_to"
+      })
+    ]);
+  });
+
   it("reports a missing 5V rail when HDMI source power is enabled", () => {
     const source = createHdmiSliceProject();
     const sourceWithout5v: ProjectSource = {

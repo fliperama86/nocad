@@ -7,6 +7,8 @@ import type {
   ContractSignal,
   Diagnostic,
   EndpointRef,
+  FunctionDefinition,
+  FunctionGeneratedNetDefinition,
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
@@ -26,7 +28,6 @@ import type {
 } from "./types";
 
 const RESOLVER_VERSION = "0.1.0";
-const HDMI_OUTPUT_CONTRACT = "@nocad/video:hdmi_output.v1";
 
 type ComponentContext = {
   node: ComponentNode;
@@ -149,7 +150,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     }
   }
 
-  const resolvedFunctions = resolveHdmiFunctions({ ...source, edges: validEdges }, context);
+  const resolvedFunctions = resolveFunctions({ ...source, edges: validEdges }, context);
   resolvedChoices.push(...resolvedFunctions.choices);
   nets.push(...resolvedFunctions.nets);
 
@@ -250,7 +251,7 @@ function signalMapFlexibility(definition: ComponentDefinition, signalMap: Signal
   ).length;
 }
 
-function resolveHdmiFunctions(
+function resolveFunctions(
   source: ProjectSource,
   context: ResolutionContext
 ): { choices: ResolvedProject["resolvedChoices"]; nets: ResolvedNet[] } {
@@ -258,24 +259,32 @@ function resolveHdmiFunctions(
   const nets: ResolvedNet[] = [];
 
   for (const node of source.nodes) {
-    if (node.kind !== "intent.function" || node.function !== HDMI_OUTPUT_CONTRACT) {
+    if (node.kind !== "intent.function") {
       continue;
     }
 
+    const definition = functions[node.function];
+
+    if (!definition) {
+      continue;
+    }
+
+    const contractId = definition.topology.contract;
+
     const providerEdge = source.edges.find(
       (edge): edge is IntentProvidesEdge =>
-        edge.kind === "intent.provides" && edge.to.node === node.id && edge.contract === HDMI_OUTPUT_CONTRACT
+        edge.kind === "intent.provides" && edge.to.node === node.id && edge.contract === contractId
     );
     const connectorEdge = source.edges.find(
       (edge): edge is IntentExposesEdge =>
-        edge.kind === "intent.exposes" && edge.from.node === node.id && edge.contract === HDMI_OUTPUT_CONTRACT
+        edge.kind === "intent.exposes" && edge.from.node === node.id && edge.contract === contractId
     );
 
     if (!providerEdge || !connectorEdge) {
       continue;
     }
 
-    const resolvedProvider = resolveHdmiProvider(node, providerEdge, connectorEdge, context);
+    const resolvedProvider = resolveFunctionProvider(node, definition, providerEdge, connectorEdge, context);
 
     if (resolvedProvider) {
       choices.push(resolvedProvider.choice);
@@ -283,18 +292,15 @@ function resolveHdmiFunctions(
       reserveBindings(providerEdge.id, resolvedProvider.choice.selected.bindings, context.reservedPins);
     }
 
-    const source5vNet = resolveHdmiSource5v(node, connectorEdge, source.nodes, context);
-
-    if (source5vNet) {
-      nets.push(source5vNet);
-    }
+    nets.push(...resolveFunctionGeneratedNets(node, definition, connectorEdge, source.nodes, context));
   }
 
   return { choices, nets };
 }
 
-function resolveHdmiProvider(
+function resolveFunctionProvider(
   functionNode: FunctionNode,
+  definition: FunctionDefinition,
   providerEdge: IntentProvidesEdge,
   connectorEdge: IntentExposesEdge,
   context: ResolutionContext
@@ -306,7 +312,8 @@ function resolveHdmiProvider(
     return null;
   }
 
-  const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[HDMI_OUTPUT_CONTRACT];
+  const contractId = definition.topology.contract;
+  const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[contractId];
   const providerModeChoice = resolveProviderMode(providerEdge, provider, context);
 
   if (!providerModeChoice) {
@@ -317,7 +324,7 @@ function resolveHdmiProvider(
     context.diagnostics.push({
       severity: "error",
       code: "PORT_CONTRACT_MISMATCH",
-      message: `${connectorEdge.to.node}.${connectorEdge.to.port ?? ""} does not support ${HDMI_OUTPUT_CONTRACT} as the connector endpoint.`,
+      message: `${connectorEdge.to.node}.${connectorEdge.to.port ?? ""} does not support ${contractId} as the exposed endpoint.`,
       targets: [{ kind: "edge", id: connectorEdge.id }]
     });
     return null;
@@ -327,7 +334,7 @@ function resolveHdmiProvider(
     return null;
   }
 
-  const signals = hdmiSignalsForFunction(functionNode);
+  const signals = functionSignalsForDefinition(functionNode, definition);
   const localReservedPins = new Set<string>();
   const bindings: SignalBindings = {};
 
@@ -339,7 +346,7 @@ function resolveHdmiProvider(
       context.diagnostics.push({
         severity: "error",
         code: "PORT_CONTRACT_MISMATCH",
-        message: `${HDMI_OUTPUT_CONTRACT} signal "${signal}" is not mapped by the selected provider or connector port.`,
+        message: `${contractId} signal "${signal}" is not mapped by the selected provider or exposed port.`,
         targets: [{ kind: "edge", id: providerEdge.id }]
       });
       return null;
@@ -385,9 +392,9 @@ function resolveHdmiProvider(
         bindings,
         providerMode: providerModeChoice.id
       },
-      reason: `Resolved enabled HDMI output features using provider mode "${providerModeChoice.id}" and connector pins.`
+      reason: `Resolved enabled ${definition.id} signals using provider mode "${providerModeChoice.id}" and exposed pins.`
     },
-    nets: Object.keys(bindings).map((signal) => createHdmiNet(signal, bindings, providerEdge.id))
+    nets: Object.keys(bindings).map((signal) => createContractNet(contractId, signal, bindings, providerEdge.id))
   };
 }
 
@@ -471,73 +478,83 @@ function checkProviderModeRequirements(
   return true;
 }
 
-function resolveHdmiSource5v(
+function resolveFunctionGeneratedNets(
   functionNode: FunctionNode,
+  definition: FunctionDefinition,
   connectorEdge: IntentExposesEdge,
   nodes: ProjectNode[],
   context: ResolutionContext
-): ResolvedNet | null {
-  if (!functionNode.include?.source5v) {
-    return null;
-  }
+): ResolvedNet[] {
+  const nets: ResolvedNet[] = [];
 
-  const rail = findSource5vRail(nodes);
-
-  if (!rail) {
-    context.diagnostics.push({
-      severity: "error",
-      code: "MISSING_HDMI_5V_POWER",
-      message: "HDMI source power requires a 5V power domain.",
-      targets: [{ kind: "node", id: functionNode.id }]
-    });
-    return null;
-  }
-
-  const connector = context.componentByNodeId.get(connectorEdge.to.node);
-  const source5vPin = connector?.definition.pins.source_5v ? "source_5v" : undefined;
-
-  if (!source5vPin) {
-    context.diagnostics.push({
-      severity: "error",
-      code: "PORT_CONTRACT_MISMATCH",
-      message: `${connectorEdge.to.node} does not expose an HDMI +5V pin.`,
-      targets: [{ kind: "edge", id: connectorEdge.id }]
-    });
-    return null;
-  }
-
-  return {
-    id: `net_${functionNode.id}_source5v`,
-    name: "HDMI_5V",
-    endpoints: {
-      from: { node: rail.id },
-      to: { node: connectorEdge.to.node, pin: source5vPin }
-    },
-    direction: "from_to_to",
-    sourceEdge: connectorEdge.id,
-    sourceMap: {
-      edge: connectorEdge.id,
-      signal: "source5v"
+  for (const generatedNet of definition.topology.generatedNets ?? []) {
+    if (
+      generatedNet.include &&
+      !functionSignalGroupEnabled(functionNode, generatedNet.include, definition.include[generatedNet.include])
+    ) {
+      continue;
     }
-  };
+
+    const from = findGeneratedNetPowerDomain(nodes, generatedNet);
+
+    if (!from) {
+      context.diagnostics.push({
+        severity: "error",
+        code: generatedNet.diagnostics.missingFrom.code,
+        message: generatedNet.diagnostics.missingFrom.message,
+        targets: [{ kind: "node", id: functionNode.id }]
+      });
+      continue;
+    }
+
+    const exposedComponent = context.componentByNodeId.get(connectorEdge.to.node);
+
+    if (!exposedComponent?.definition.pins[generatedNet.to.pin]) {
+      context.diagnostics.push({
+        severity: "error",
+        code: generatedNet.diagnostics.missingTo.code,
+        message: generatedNet.diagnostics.missingTo.message,
+        targets: [{ kind: "edge", id: connectorEdge.id }]
+      });
+      continue;
+    }
+
+    nets.push({
+      id: `net_${functionNode.id}_${generatedNet.id}`,
+      name: generatedNet.name,
+      endpoints: {
+        from: { node: from.id },
+        to: { node: connectorEdge.to.node, pin: generatedNet.to.pin }
+      },
+      direction: generatedNet.direction,
+      sourceEdge: connectorEdge.id,
+      sourceMap: {
+        edge: connectorEdge.id,
+        signal: generatedNet.id
+      }
+    });
+  }
+
+  return nets;
 }
 
-function findSource5vRail(nodes: ProjectNode[]): PowerDomainNode | null {
+function findGeneratedNetPowerDomain(
+  nodes: ProjectNode[],
+  generatedNet: FunctionGeneratedNetDefinition
+): PowerDomainNode | null {
   return (
     nodes.find(
       (node): node is PowerDomainNode =>
-        node.kind === "powerDomain" && (node.role === "power_5v" || node.voltage === "5V")
+        node.kind === "powerDomain" &&
+        Boolean(
+          (generatedNet.from.role && node.role === generatedNet.from.role) ||
+          (generatedNet.from.voltage && node.voltage === generatedNet.from.voltage)
+        )
     ) ?? null
   );
 }
 
-function hdmiSignalsForFunction(functionNode: FunctionNode) {
-  const definition = functions[functionNode.function];
-
-  if (!definition) {
-    return [];
-  }
-
+function functionSignalsForDefinition(functionNode: FunctionNode, definition: FunctionDefinition) {
   return definition.signalGroups.flatMap((group) =>
     functionSignalGroupEnabled(functionNode, group.include, group.include ? definition.include[group.include] : undefined)
       ? group.signals.map((signal) => signal.id)
@@ -725,32 +742,6 @@ function i2cPinSuggestion(
   ];
 }
 
-function createHdmiNet(signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
-  const binding = bindings[signal];
-  const from = binding?.from;
-  const to = binding?.to;
-  const contractSignal = contracts[HDMI_OUTPUT_CONTRACT]?.signals[signal] as ContractSignal | undefined;
-
-  if (!from?.pin || !to?.pin || !contractSignal) {
-    throw new Error(`Resolved HDMI ${signal} binding is incomplete.`);
-  }
-
-  return {
-    id: `net_${edgeId}_${signal}`,
-    name: `HDMI_${signal.toUpperCase()}`,
-    endpoints: {
-      from,
-      to
-    },
-    direction: contractSignal.direction,
-    sourceEdge: edgeId,
-    sourceMap: {
-      edge: edgeId,
-      signal
-    }
-  };
-}
-
 function createContractNet(contractId: string, signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
   const binding = bindings[signal];
   const from = binding?.from;
@@ -778,15 +769,9 @@ function createContractNet(contractId: string, signal: string, bindings: SignalB
 }
 
 function formatNetName(contractId: string, signal: string): string {
-  if (contractId === "builtin:i2c.v1") {
-    return `I2C_${signal.toUpperCase()}`;
-  }
+  const prefix = contracts[contractId]?.netNamePrefix;
 
-  if (contractId === "@nocad/video:pixel_stream.v1" || contractId === "builtin:dpi.v1") {
-    return `PIXEL_${signal.toUpperCase()}`;
-  }
-
-  return `${contractId.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
+  return `${prefix ?? contractId.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
 }
 
 function normalizeContractParams(

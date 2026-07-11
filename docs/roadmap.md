@@ -27,6 +27,7 @@ What exists and works:
 - `packages/intent-core`: in-memory project source model (`nocad.project.v0` shaped), resolver, component/contract fixtures, sample projects, tests.
   - I2C connections: port/contract matching, auto and manual pin assignment, preferred pin pairs, generated pullups, conflict and reference diagnostics.
   - HDMI output function: feature-driven signal elaboration (TMDS, DDC, HPD, CEC), source 5V power, sideband resolution.
+  - Generic function topology interpretation: function definitions select their contract, active signal groups, and supplementary generated nets. HDMI and a data-only digital-output fixture both resolve through the same path; net-name prefixes are contract metadata.
   - Provider modes and provider chains: function nodes stay implementation-agnostic; providers declare modes with signal maps; provider modes can declare cross-port requirements (`requires.ports`), proven with HDMI TX IC samples driven by either a generic FPGA or RP2350 over pixel-stream + I2C upstream contracts. Resolved choices record selected provider modes.
   - Generic contract resolution (`intent.connection` works for any fixture contract). Pixel-stream bindings have authored params (`transport`, RGB bit widths, sync signals) that expand to the active signal set.
   - Regression coverage for provider-chain review issues: fixed-map override validation, authored-but-unresolved requirement cascade suppression, preferred-I2C fallback, and edge-order mitigation for the RP2350 TX-IC pressure case.
@@ -37,20 +38,20 @@ What exists and works:
 
 Known architectural debts (tracked in M1/M2 below):
 
-- The resolver is still code-per-function: `resolveHdmiFunctions` is HDMI-shaped code, preferred-pair logic is I2C-shaped code. The spec calls for a generic interpreter over package data.
+- Function provider/exposure resolution is data-driven, but preferred-pair selection and pullup generation are still I2C-shaped code. The remaining topology-rule and scoring work stays in M1.
 - Pin allocation is still greedy first-fit with constrained-first edge ordering. The RP2350 TX-IC edge-order failure is fixed and test-covered, but this is not yet the spec's full candidate-scoring model.
 - UI mutates React state directly; there is no document API, no undo/redo, no persistence.
 - Resolution is not incremental.
 
 ## In Progress (2026-07-10)
 
-Stabilize the exploratory board-placement slice and fixture infrastructure without deepening the temporary React-owned architecture. The next architecture milestone remains M1, starting with generic topology-rule interpretation and package-data-driven HDMI function resolution, followed by the M2 document API before placement editing expands.
+M1 is now active. The first slice replaced HDMI-specific function resolution with package-data-driven contract, signal-group, provider-mode, exposure, generated-net, and net-naming interpretation. Next, move I2C pullups and preferred-pair behavior into generic topology and candidate-scoring data, then complete edge-order invariance before starting M2.
 
 ## Milestones
 
 Ordering rationale lives in `docs/research/pcb-layout-approach.md` (Sequencing section). Statuses: `todo`, `in progress`, `done` (with date).
 
-### M1 - Data-driven resolver - todo
+### M1 - Data-driven resolver - in progress
 
 Replace function-specific resolver code with a generic interpreter over function definitions, feature elaboration, and topology rules. Replace greedy first-fit allocation with deterministic, order-independent candidate selection (constrained-first ordering or scoring).
 
@@ -151,6 +152,7 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
+- 2026-07-10 - Started M1. Replaced HDMI-specific function dispatch with a generic function topology interpreter, moved HDMI source 5V generation and net-name prefixes into fixture data, added a second data-only digital-output function, and verified provider/exposure edge-order invariance for function resolution.
 - 2026-07-10 - Added an in-browser HDMI breakout fixture preview. It parses the pinned KiCad board source, renders actual outline, pad, track, via, filled-zone, and source drawing geometry, toggles layers, and isolates selected nets. A temporary local test successfully rendered the denser Pico RetroDigital main PCB; only generic rectangular-outline and via support was retained. Added parser regression coverage and kept the fixture payload in a lazy-loaded chunk.
 - 2026-07-10 - Existing board-placement prototype verified with focused and full tests, typecheck, lint, and production build. Added a content-pinned HDMI breakout fixture plus integrity and structural verification. The fixture remains non-golden until license and hardware qualification are explicit.
 - 2026-07-10 - Routing scope clarified: general routing contains NP-hard formulations, but nocad progresses through exact validation, manual routing, deterministic assists, and bounded selected-net search. Added M10 with the HDMI breakout as its first acceptance fixture; global multi-net autorouting remains uncommitted.

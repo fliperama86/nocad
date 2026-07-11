@@ -117,6 +117,32 @@ export type FunctionDefinition = {
   id: string;
   include: Record<string, FunctionIncludeDefinition>;
   signalGroups: FunctionSignalGroup[];
+  topology: FunctionTopologyDefinition;
+};
+
+export type FunctionTopologyDefinition = {
+  contract: string;
+  generatedNets?: FunctionGeneratedNetDefinition[];
+};
+
+export type FunctionGeneratedNetDefinition = {
+  diagnostics: {
+    missingFrom: { code: string; message: string };
+    missingTo: { code: string; message: string };
+  };
+  direction: ContractSignal["direction"];
+  from: {
+    kind: "powerDomain";
+    role?: string;
+    voltage?: string;
+  };
+  id: string;
+  include?: string;
+  name: string;
+  to: {
+    kind: "exposedPin";
+    pin: string;
+  };
 };
 
 export type FunctionIncludeDefinition =
@@ -218,6 +244,7 @@ export type SignalPinMap =
 export type ConnectionContract = {
   id: string;
   label?: string;
+  netNamePrefix?: string;
   params?: Record<string, ContractParamDefinition>;
   presets?: ContractParamPreset[];
   signalPlan?: ContractSignalPlanItem[];

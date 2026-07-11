@@ -867,6 +867,8 @@ Packages may attach rules to functions, contracts, features, provider modes, or 
 - preserve source maps and reasons
 - validate hard rules and score soft recommendations
 
+The current TypeScript prototype implements a deliberately narrow first subset of this model. A function definition declares `topology.contract`, and may declare supplementary `topology.generatedNets` that connect a matching power domain to a named pin on the exposed component. Signal groups, provider modes, exposed-port mappings, generated-net provenance, and contract net-name prefixes are interpreted without function-specific resolver dispatch. HDMI source 5V uses this path, and a second digital-output fixture verifies that adding a basic function type requires package data rather than resolver code. Inline and shunt components, interposers, signal selectors, and recommendation scoring remain future topology-rule operations.
+
 Example rule:
 
 ```json
