@@ -2,6 +2,7 @@ import type { ComponentDefinition, ConnectionContract, FunctionDefinition, PinDe
 
 const PIXEL_STREAM_CONTRACT = "@nocad/video:pixel_stream.v1";
 const DIGITAL_OUTPUT_CONTRACT = "@nocad/io:digital_output.v1";
+const BIASED_SIGNAL_CONTRACT = "@nocad/io:biased_signal.v1";
 const pixelStreamSignals = createPixelStreamSignals();
 
 export const contracts: Record<string, ConnectionContract> = {
@@ -12,7 +13,26 @@ export const contracts: Record<string, ConnectionContract> = {
     signals: {
       sda: { direction: "bidirectional" },
       scl: { direction: "bidirectional" }
-    }
+    },
+    topologyRules: [
+      {
+        component: "@nocad/passives:RESISTOR",
+        dependency: "@nocad/passives",
+        diagnostics: {
+          missingRail: {
+            code: "MISSING_POWER_DOMAIN",
+            message: "I2C pullups require a 3.3V power domain."
+          }
+        },
+        generatedIdPrefix: "pullup",
+        id: "pullups",
+        include: "pullups",
+        kind: "shuntToPower",
+        rail: { role: "power_3v3", voltage: "3.3V" },
+        signals: ["sda", "scl"],
+        value: "4.7k"
+      }
+    ]
   },
   "@nocad/video:hdmi_output.v1": {
     id: "@nocad/video:hdmi_output.v1",
@@ -123,6 +143,33 @@ export const contracts: Record<string, ConnectionContract> = {
     signals: {
       signal: { direction: "from_to_to" }
     }
+  },
+  [BIASED_SIGNAL_CONTRACT]: {
+    id: BIASED_SIGNAL_CONTRACT,
+    label: "Biased signal",
+    netNamePrefix: "BIASED",
+    signals: {
+      signal: { direction: "from_to_to" }
+    },
+    topologyRules: [
+      {
+        component: "@nocad/passives:RESISTOR",
+        dependency: "@nocad/passives",
+        diagnostics: {
+          missingRail: {
+            code: "MISSING_BIAS_POWER_DOMAIN",
+            message: "The biased signal requires a 3.3V power domain."
+          }
+        },
+        generatedIdPrefix: "bias",
+        id: "bias",
+        include: "bias",
+        kind: "shuntToPower",
+        rail: { role: "power_3v3", voltage: "3.3V" },
+        signals: ["signal"],
+        value: "10k"
+      }
+    ]
   }
 };
 
@@ -333,11 +380,23 @@ export const components: Record<string, ComponentDefinition> = {
             }
           }
         }
+      },
+      biased_out: {
+        kind: "derived_port",
+        contractMaps: {
+          [BIASED_SIGNAL_CONTRACT]: {
+            role: "from",
+            signalMap: {
+              signal: { pinSelector: { capabilities: ["gpio"] } }
+            }
+          }
+        }
       }
     },
-    preferredI2cPairs: [
-      { sda: "gpio4", scl: "gpio5" },
-      { sda: "gpio8", scl: "gpio9" }
+    preferredPinGroups: [
+      { contract: "builtin:i2c.v1", pins: { sda: "gpio4", scl: "gpio5" } },
+      { contract: "builtin:i2c.v1", pins: { sda: "gpio8", scl: "gpio9" } },
+      { contract: BIASED_SIGNAL_CONTRACT, pins: { signal: "gpio10" } }
     ]
   },
   "@nocad/fpga:GENERIC_FPGA": {
@@ -366,7 +425,9 @@ export const components: Record<string, ComponentDefinition> = {
         }
       }
     },
-    preferredI2cPairs: [{ sda: "io60", scl: "io61" }]
+    preferredPinGroups: [
+      { contract: "builtin:i2c.v1", pins: { sda: "io60", scl: "io61" } }
+    ]
   },
   "@nocad/hdmi-tx:IT66121": {
     id: "@nocad/hdmi-tx:IT66121",
@@ -620,6 +681,17 @@ export const components: Record<string, ComponentDefinition> = {
         kind: "fixed_port",
         contractMaps: {
           [DIGITAL_OUTPUT_CONTRACT]: {
+            role: "to",
+            signalMap: {
+              signal: { pin: "anode" }
+            }
+          }
+        }
+      },
+      biased_input: {
+        kind: "fixed_port",
+        contractMaps: {
+          [BIASED_SIGNAL_CONTRACT]: {
             role: "to",
             signalMap: {
               signal: { pin: "anode" }

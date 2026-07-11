@@ -27,11 +27,19 @@ export function getI2cPinPairOptions(source: ProjectSource, edgeId: string): I2c
 
   const definition = components[fromNode.component];
 
-  return (definition?.preferredI2cPairs ?? []).filter(
-    (pair) =>
-      definition.pins[pair.sda]?.capabilities.includes("i2c.sda") === true &&
-      definition.pins[pair.scl]?.capabilities.includes("i2c.scl") === true
-  );
+  return (definition?.preferredPinGroups ?? [])
+    .filter((group) => group.contract === edge.contract)
+    .flatMap((group) => {
+      const sda = group.pins.sda;
+      const scl = group.pins.scl;
+
+      return sda &&
+        scl &&
+        definition.pins[sda]?.capabilities.includes("i2c.sda") === true &&
+        definition.pins[scl]?.capabilities.includes("i2c.scl") === true
+        ? [{ sda, scl }]
+        : [];
+    });
 }
 
 export function getComponentPinOptions(

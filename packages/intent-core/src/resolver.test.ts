@@ -51,6 +51,87 @@ describe("resolveProject", () => {
     });
   });
 
+  it("reports a contract-defined diagnostic when a shunt power domain is missing", () => {
+    const source = createI2cSliceProject();
+    const withoutRail: ProjectSource = {
+      ...source,
+      nodes: source.nodes.filter((node) => node.id !== i2cSliceIds.rail3v3)
+    };
+
+    const resolved = resolveProject(withoutRail);
+
+    expect(resolved.generated).toEqual([]);
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MISSING_POWER_DOMAIN",
+          targets: [{ kind: "edge", id: i2cSliceIds.sensorBus }]
+        })
+      ])
+    );
+  });
+
+  it("applies preferred pin groups and shunt rules to a non-I2C contract", () => {
+    const source: ProjectSource = {
+      schema: "nocad.project.v0",
+      id: "biased-signal-slice",
+      name: "Biased signal slice",
+      dependencies: {
+        "@nocad/io": "0.1.0",
+        "@nocad/rp2350": "0.1.0"
+      },
+      nodes: [
+        {
+          id: "mcu",
+          kind: "component",
+          component: "@nocad/rp2350:RP2350A"
+        },
+        {
+          id: "indicator",
+          kind: "component",
+          component: "@nocad/io:LED"
+        },
+        {
+          id: "rail-3v3",
+          kind: "powerDomain",
+          role: "power_3v3",
+          voltage: "3.3V"
+        }
+      ],
+      edges: [
+        {
+          id: "biased-edge",
+          kind: "intent.connection",
+          from: { node: "mcu", port: "biased_out" },
+          to: { node: "indicator", port: "biased_input" },
+          contract: "@nocad/io:biased_signal.v1",
+          include: { bias: true }
+        }
+      ]
+    };
+
+    const resolved = resolveProject(source);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.resolvedChoices[0]?.selected.bindings.signal).toEqual({
+      from: { node: "mcu", pin: "gpio10" },
+      to: { node: "indicator", pin: "anode" }
+    });
+    expect(resolved.generated).toEqual([
+      expect.objectContaining({
+        id: "bias_biased-edge_signal",
+        component: "@nocad/passives:RESISTOR",
+        value: "10k",
+        connects: ["net_biased-edge_signal", "rail-3v3"],
+        sourceMap: { edge: "biased-edge", feature: "bias", signal: "signal" }
+      })
+    ]);
+    expect(resolved.dependencies["@nocad/passives"]?.introducedBy).toEqual({
+      edge: "biased-edge",
+      feature: "bias"
+    });
+  });
+
   it("exposes compatible I2C pin-pair options for an intent edge", () => {
     expect(getI2cPinPairOptions(createI2cSliceProject(), i2cSliceIds.sensorBus)).toEqual([
       { sda: "gpio4", scl: "gpio5" },

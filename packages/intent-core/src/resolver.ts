@@ -3,17 +3,18 @@ import type {
   ComponentDefinition,
   ComponentNode,
   ConnectionContract,
+  ConnectionTopologyRuleDefinition,
   ContractParams,
   ContractSignal,
   Diagnostic,
   EndpointRef,
   FunctionDefinition,
-  FunctionGeneratedNetDefinition,
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
   FunctionIncludeDefinition,
   FunctionNode,
+  PreferredPinGroupDefinition,
   PortContractMap,
   ProviderModeDefinition,
   ProjectEdge,
@@ -122,32 +123,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     recordBoundPort(edge.from, edge.contract, edge.id, context.boundPorts);
     recordBoundPort(edge.to, edge.contract, edge.id, context.boundPorts);
 
-    if (edge.include?.pullups) {
-      dependencies["@nocad/passives"] = {
-        version: packageVersions["@nocad/passives"],
-        hash: stablePackageHash("@nocad/passives", packageVersions["@nocad/passives"]),
-        introducedBy: {
-          edge: edge.id,
-          feature: "pullups"
-        }
-      };
-
-      const pullupRail = findPullupRail(source.nodes);
-
-      if (!pullupRail) {
-        diagnostics.push({
-          severity: "error",
-          code: "MISSING_POWER_DOMAIN",
-          message: "I2C pullups require a 3.3V power domain.",
-          targets: [{ kind: "edge", id: edge.id }]
-        });
-      } else {
-        generated.push(
-          createPullup("sda", edge.id, pullupRail.id),
-          createPullup("scl", edge.id, pullupRail.id)
-        );
-      }
-    }
+    applyConnectionTopologyRules(edge, resolved, source.nodes, dependencies, generated, context);
   }
 
   const resolvedFunctions = resolveFunctions({ ...source, edges: validEdges }, context);
@@ -178,29 +154,69 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
   };
 }
 
-function createPullup(signal: "sda" | "scl", edgeId: string, railId: string): ResolvedProject["generated"][number] {
+function applyConnectionTopologyRules(
+  edge: IntentConnectionEdge,
+  resolved: ResolvedConnection,
+  nodes: ProjectNode[],
+  dependencies: Record<string, ResolvedDependency>,
+  generated: ResolvedProject["generated"],
+  context: ResolutionContext
+) {
+  const contract = contracts[edge.contract];
+  const activeSignals = new Set(resolved.nets.map((net) => net.sourceMap.signal));
+
+  for (const rule of contract?.topologyRules ?? []) {
+    if (!edge.include?.[rule.include]) {
+      continue;
+    }
+
+    const dependencyVersion = packageVersions[rule.dependency];
+    dependencies[rule.dependency] = {
+      version: dependencyVersion,
+      hash: stablePackageHash(rule.dependency, dependencyVersion),
+      introducedBy: {
+        edge: edge.id,
+        feature: rule.id
+      }
+    };
+
+    const rail = findPowerDomain(nodes, rule.rail);
+
+    if (!rail) {
+      context.diagnostics.push({
+        severity: "error",
+        code: rule.diagnostics.missingRail.code,
+        message: rule.diagnostics.missingRail.message,
+        targets: [{ kind: "edge", id: edge.id }]
+      });
+      continue;
+    }
+
+    for (const signal of rule.signals.filter((candidate) => activeSignals.has(candidate))) {
+      generated.push(createConnectionTopologyComponent(edge.id, signal, rail.id, rule));
+    }
+  }
+}
+
+function createConnectionTopologyComponent(
+  edgeId: string,
+  signal: string,
+  railId: string,
+  rule: ConnectionTopologyRuleDefinition
+): ResolvedProject["generated"][number] {
   return {
-    id: `pullup_${edgeId}_${signal}`,
+    id: `${rule.generatedIdPrefix}_${edgeId}_${signal}`,
     kind: "component",
-    component: "@nocad/passives:RESISTOR",
-    value: "4.7k",
+    component: rule.component,
+    value: rule.value,
     connects: [createNetId(edgeId, signal), railId],
     sourceEdge: edgeId,
     sourceMap: {
       edge: edgeId,
-      feature: "pullups",
+      feature: rule.id,
       signal
     }
   };
-}
-
-function findPullupRail(nodes: ProjectNode[]): PowerDomainNode | null {
-  return (
-    nodes.find(
-      (node): node is PowerDomainNode =>
-        node.kind === "powerDomain" && (node.role === "power_3v3" || node.voltage === "3.3V")
-    ) ?? null
-  );
 }
 
 function sortIntentConnectionEdges(edges: IntentConnectionEdge[], context: ResolutionContext): IntentConnectionEdge[] {
@@ -495,7 +511,7 @@ function resolveFunctionGeneratedNets(
       continue;
     }
 
-    const from = findGeneratedNetPowerDomain(nodes, generatedNet);
+    const from = findPowerDomain(nodes, generatedNet.from);
 
     if (!from) {
       context.diagnostics.push({
@@ -538,17 +554,17 @@ function resolveFunctionGeneratedNets(
   return nets;
 }
 
-function findGeneratedNetPowerDomain(
+function findPowerDomain(
   nodes: ProjectNode[],
-  generatedNet: FunctionGeneratedNetDefinition
+  selector: { role?: string; voltage?: string }
 ): PowerDomainNode | null {
   return (
     nodes.find(
       (node): node is PowerDomainNode =>
         node.kind === "powerDomain" &&
         Boolean(
-          (generatedNet.from.role && node.role === generatedNet.from.role) ||
-          (generatedNet.from.voltage && node.voltage === generatedNet.from.voltage)
+          (selector.role && node.role === selector.role) ||
+          (selector.voltage && node.voltage === selector.voltage)
         )
     ) ?? null
   );
@@ -971,8 +987,9 @@ function resolveContractBindings(
   toMap: PortContractMap,
   context: ResolutionContext
 ): SignalBindings | null {
-  const preferredI2cBindings = resolvePreferredI2cPairBindings(
+  const preferredBindings = resolvePreferredPinGroupBindings(
     edge,
+    signals,
     from,
     to,
     fromMap,
@@ -980,8 +997,8 @@ function resolveContractBindings(
     context.reservedPins
   );
 
-  if (preferredI2cBindings !== undefined) {
-    return preferredI2cBindings;
+  if (preferredBindings !== undefined) {
+    return preferredBindings;
   }
 
   const localReservedPins = new Set<string>();
@@ -1035,32 +1052,27 @@ function resolveContractBindings(
   return bindings;
 }
 
-function resolvePreferredI2cPairBindings(
+function resolvePreferredPinGroupBindings(
   edge: IntentConnectionEdge,
+  signals: Record<string, ContractSignal>,
   from: ComponentContext,
   to: ComponentContext,
   fromMap: PortContractMap,
   toMap: PortContractMap,
   reservedPins: Map<string, ReservedPin>
 ): SignalBindings | undefined {
-  const pairs = from.definition.preferredI2cPairs ?? [];
+  const groups = (from.definition.preferredPinGroups ?? []).filter((group) => group.contract === edge.contract);
 
-  if (edge.contract !== "builtin:i2c.v1" || edge.strategy?.pinAssignment === "manual" || pairs.length === 0) {
+  if (edge.strategy?.pinAssignment === "manual" || groups.length === 0) {
     return undefined;
   }
 
-  for (const pair of pairs) {
-    const sda = createPreferredI2cEndpoint(edge, "sda", pair.sda, from, to, fromMap, toMap);
-    const scl = createPreferredI2cEndpoint(edge, "scl", pair.scl, from, to, fromMap, toMap);
+  for (const group of groups) {
+    const bindings = createPreferredPinGroupBindings(edge, signals, group, from, to, fromMap, toMap);
 
-    if (!sda || !scl) {
+    if (!bindings) {
       continue;
     }
-
-    const bindings: SignalBindings = {
-      sda,
-      scl
-    };
 
     if (bindingPinsAvailable(bindings, reservedPins)) {
       return bindings;
@@ -1070,34 +1082,42 @@ function resolvePreferredI2cPairBindings(
   return undefined;
 }
 
-function createPreferredI2cEndpoint(
+function createPreferredPinGroupBindings(
   edge: IntentConnectionEdge,
-  signal: "sda" | "scl",
-  fromPin: string,
+  signals: Record<string, ContractSignal>,
+  group: PreferredPinGroupDefinition,
   from: ComponentContext,
   to: ComponentContext,
   fromMap: PortContractMap,
   toMap: PortContractMap
-): Partial<Record<"from" | "to", EndpointRef>> | null {
-  const fromSignalMap = fromMap.signalMap[signal];
-  const toSignalMap = toMap.signalMap[signal];
-  const toPin = toSignalMap && "pin" in toSignalMap ? toSignalMap.pin : undefined;
+): SignalBindings | null {
+  const bindings: SignalBindings = {};
 
-  if (
-    !toPin ||
-    !from.definition.pins[fromPin] ||
-    !to.definition.pins[toPin] ||
-    !fromSignalMap ||
-    !("pinSelector" in fromSignalMap) ||
-    !pinSatisfiesCapabilities(from.definition, fromPin, fromSignalMap.pinSelector.capabilities)
-  ) {
-    return null;
+  for (const signal of Object.keys(signals)) {
+    const fromPin = group.pins[signal];
+    const fromSignalMap = fromMap.signalMap[signal];
+    const toSignalMap = toMap.signalMap[signal];
+    const toPin = toSignalMap && "pin" in toSignalMap ? toSignalMap.pin : undefined;
+
+    if (
+      !fromPin ||
+      !toPin ||
+      !from.definition.pins[fromPin] ||
+      !to.definition.pins[toPin] ||
+      !fromSignalMap ||
+      !("pinSelector" in fromSignalMap) ||
+      !pinSatisfiesCapabilities(from.definition, fromPin, fromSignalMap.pinSelector.capabilities)
+    ) {
+      return null;
+    }
+
+    bindings[signal] = {
+      from: { node: edge.from.node, pin: fromPin },
+      to: { node: edge.to.node, pin: toPin }
+    };
   }
 
-  return {
-    from: { node: edge.from.node, pin: fromPin },
-    to: { node: edge.to.node, pin: toPin }
-  };
+  return bindings;
 }
 
 function bindingPinsAvailable(bindings: SignalBindings, reservedPins: Map<string, ReservedPin>): boolean {

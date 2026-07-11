@@ -76,9 +76,7 @@ export type IntentConnectionEdge = GraphObjectMetadata & {
   contract: string;
   params?: ContractParams;
   strategy?: IntentStrategy;
-  include?: {
-    pullups?: boolean;
-  };
+  include?: Record<string, boolean>;
   bindings?: SignalBindings;
 };
 
@@ -110,7 +108,12 @@ export type ComponentDefinition = {
   id: string;
   pins: Record<string, PinDefinition>;
   ports: Record<string, PortDefinition>;
-  preferredI2cPairs?: Array<{ sda: string; scl: string }>;
+  preferredPinGroups?: PreferredPinGroupDefinition[];
+};
+
+export type PreferredPinGroupDefinition = {
+  contract: string;
+  pins: Record<string, string>;
 };
 
 export type FunctionDefinition = {
@@ -249,6 +252,25 @@ export type ConnectionContract = {
   presets?: ContractParamPreset[];
   signalPlan?: ContractSignalPlanItem[];
   signals: Record<string, ContractSignal>;
+  topologyRules?: ConnectionTopologyRuleDefinition[];
+};
+
+export type ConnectionTopologyRuleDefinition = {
+  component: string;
+  dependency: string;
+  diagnostics: {
+    missingRail: { code: string; message: string };
+  };
+  generatedIdPrefix: string;
+  id: string;
+  include: string;
+  kind: "shuntToPower";
+  rail: {
+    role?: string;
+    voltage?: string;
+  };
+  signals: string[];
+  value: string;
 };
 
 export type ContractParamDefinition =
