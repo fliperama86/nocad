@@ -57,6 +57,7 @@ export function HdmiBreakoutFixturePanel({ onShowIntentBoard }: { onShowIntentBo
             <Badge>{formatMm(hdmiBreakoutPreview.bounds.widthMm)} x {formatMm(hdmiBreakoutPreview.bounds.heightMm)}</Badge>
             <Badge>{hdmiBreakoutPreview.footprints.length} footprints</Badge>
             <Badge>{hdmiBreakoutPreview.tracks.length} tracks</Badge>
+            <Badge>{hdmiBreakoutPreview.vias.length} vias</Badge>
             <Badge>{hdmiBreakoutPreview.zones.length} fills</Badge>
             <button
               className="h-7 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-muted"
@@ -308,6 +309,31 @@ function drawKiCadFixture(
     context.moveTo(start.x, start.y);
     context.lineTo(end.x, end.y);
     context.stroke();
+    context.restore();
+  }
+
+  for (const via of preview.vias) {
+    if (!via.layers.some((layer) => visibleLayers.has(layer))) {
+      continue;
+    }
+
+    const center = fixturePoint(transform, via);
+    const highlighted = selectedNet === via.net;
+    const dimmed = Boolean(selectedNet && !highlighted);
+
+    context.save();
+    context.globalAlpha = dimmed ? 0.16 : 1;
+    context.fillStyle = highlighted ? "#fbbf24" : "#f87171";
+    context.strokeStyle = highlighted ? "#f59e0b" : color("--foreground");
+    context.lineWidth = highlighted ? 2 : 0.7;
+    context.beginPath();
+    context.arc(center.x, center.y, Math.max(2, via.sizeMm * transform.scale / 2), 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = color("--card");
+    context.beginPath();
+    context.arc(center.x, center.y, Math.max(1, via.drillMm * transform.scale / 2), 0, Math.PI * 2);
+    context.fill();
     context.restore();
   }
 

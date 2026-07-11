@@ -11,6 +11,7 @@ export type KiCadBoardPreview = {
   outline: KiCadPoint[];
   pads: KiCadPadPreview[];
   tracks: KiCadTrackPreview[];
+  vias: KiCadViaPreview[];
   zones: KiCadZonePreview[];
 };
 
@@ -69,6 +70,14 @@ export type KiCadZonePreview = {
   points: KiCadPoint[];
 };
 
+export type KiCadViaPreview = KiCadPoint & {
+  drillMm: number;
+  id: string;
+  layers: string[];
+  net: string;
+  sizeMm: number;
+};
+
 type SExpression = Array<string | SExpression>;
 
 export function parseKiCadBoardPreview(source: string): KiCadBoardPreview {
@@ -78,13 +87,22 @@ export function parseKiCadBoardPreview(source: string): KiCadBoardPreview {
     throw new Error("Expected a kicad_pcb document.");
   }
 
-  const outline = directChildren(board, "gr_poly")
+  const polygonOutline = directChildren(board, "gr_poly")
     .filter((polygon) => childValue(polygon, "layer") === "Edge.Cuts")
     .flatMap((polygon) => directChildren(directChildren(polygon, "pts")[0] ?? [], "xy"))
     .map(pointFromExpression);
+  const rectangleOutline = directChildren(board, "gr_rect")
+    .filter((rectangle) => childValue(rectangle, "layer") === "Edge.Cuts")
+    .flatMap((rectangle) => {
+      const start = pointFromExpression(directChildren(rectangle, "start")[0]);
+      const end = pointFromExpression(directChildren(rectangle, "end")[0]);
+
+      return [start, { xMm: end.xMm, yMm: start.yMm }, end, { xMm: start.xMm, yMm: end.yMm }];
+    });
+  const outline = polygonOutline.length >= 3 ? polygonOutline : rectangleOutline;
 
   if (outline.length < 3) {
-    throw new Error("The fixture preview requires a polygonal Edge.Cuts outline.");
+    throw new Error("The fixture preview requires a polygonal or rectangular Edge.Cuts outline.");
   }
 
   const minX = Math.min(...outline.map((point) => point.xMm));
@@ -173,7 +191,19 @@ export function parseKiCadBoardPreview(source: string): KiCadBoardPreview {
     start: normalize(pointFromExpression(directChildren(segment, "start")[0])),
     widthMm: Number(childValue(segment, "width") ?? 0.2)
   }));
-  const nets = [...new Set([...tracks.map((track) => track.net), ...pads.map((pad) => pad.net ?? "")])]
+  const vias = directChildren(board, "via").map((via, index): KiCadViaPreview => ({
+    ...normalize(pointFromExpression(directChildren(via, "at")[0])),
+    drillMm: Number(childValue(via, "drill") ?? 0.3),
+    id: childValue(via, "uuid") ?? `via-${index}`,
+    layers: (directChildren(via, "layers")[0] ?? []).slice(1).filter(isString),
+    net: childValue(via, "net") ?? "",
+    sizeMm: Number(childValue(via, "size") ?? 0.6)
+  }));
+  const nets = [...new Set([
+    ...tracks.map((track) => track.net),
+    ...pads.map((pad) => pad.net ?? ""),
+    ...vias.map((via) => via.net)
+  ])]
     .filter(Boolean)
     .sort();
   const zones = directChildren(board, "zone").flatMap((zone, zoneIndex) => {
@@ -189,6 +219,7 @@ export function parseKiCadBoardPreview(source: string): KiCadBoardPreview {
   }).filter((zone) => zone.points.length >= 3);
   const layers = [...new Set([
     ...tracks.map((track) => track.layer),
+    ...vias.flatMap((via) => via.layers),
     ...zones.map((zone) => zone.layer),
     ...graphics.map((graphic) => graphic.layer)
   ])];
@@ -206,6 +237,7 @@ export function parseKiCadBoardPreview(source: string): KiCadBoardPreview {
     outline: outline.map(normalize),
     pads,
     tracks,
+    vias,
     zones
   };
 }

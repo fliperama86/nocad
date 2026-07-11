@@ -19,4 +19,4 @@ pnpm verify:fixtures
 
 Tests and conversion tools must never rewrite these files in place. Write derived or exported files to a temporary directory.
 
-The browser research preview currently reads the board outline, footprints, pad and drill geometry, routed segments, serialized filled copper polygons, and footprint line, rectangle, and circle graphics. Copper, front silkscreen, front fabrication, front courtyard, user drawing, and user comment layers can be toggled independently. This is still a bounded fixture renderer, not a complete KiCad importer.
+The browser research preview currently reads polygonal or rectangular board outlines, footprints, pad and drill geometry, routed segments, through vias, serialized filled copper polygons, and footprint line, rectangle, and circle graphics. Copper, front silkscreen, front fabrication, front courtyard, user drawing, and user comment layers can be toggled independently. This is still a bounded fixture renderer, not a complete KiCad importer.

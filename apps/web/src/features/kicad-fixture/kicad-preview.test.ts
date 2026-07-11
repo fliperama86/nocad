@@ -13,6 +13,7 @@ describe("parseKiCadBoardPreview", () => {
     expect(preview.footprints).toHaveLength(4);
     expect(preview.pads).toHaveLength(41);
     expect(preview.tracks).toHaveLength(52);
+    expect(preview.vias).toHaveLength(0);
     expect(preview.zones).toHaveLength(2);
     expect(preview.graphics).toHaveLength(55);
     expect(preview.layers).toEqual(
@@ -41,6 +42,49 @@ describe("parseKiCadBoardPreview", () => {
     expect(silk).toHaveLength(14);
     expect(fabrication).toHaveLength(14);
     expect(courtyard).toHaveLength(23);
+  });
+
+  it("supports rectangular outlines and through vias used by larger boards", () => {
+    const preview = parseKiCadBoardPreview(`
+      (kicad_pcb
+        (generator_version "10.0")
+        (gr_rect
+          (start 10 20)
+          (end 40 50)
+          (stroke (width 0.1) (type solid))
+          (fill no)
+          (layer "Edge.Cuts")
+          (uuid "outline")
+        )
+        (via
+          (at 20 30)
+          (size 0.8)
+          (drill 0.4)
+          (layers "F.Cu" "B.Cu")
+          (net "GND")
+          (uuid "via-1")
+        )
+      )
+    `);
+
+    expect(preview.bounds).toEqual({ widthMm: 30, heightMm: 30 });
+    expect(preview.outline).toEqual([
+      { xMm: 0, yMm: 0 },
+      { xMm: 30, yMm: 0 },
+      { xMm: 30, yMm: 30 },
+      { xMm: 0, yMm: 30 }
+    ]);
+    expect(preview.vias).toEqual([
+      {
+        drillMm: 0.4,
+        id: "via-1",
+        layers: ["F.Cu", "B.Cu"],
+        net: "GND",
+        sizeMm: 0.8,
+        xMm: 10,
+        yMm: 10
+      }
+    ]);
   });
 
   it("applies KiCad footprint rotation to J2 pads without mirroring them", () => {
