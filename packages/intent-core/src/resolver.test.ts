@@ -257,6 +257,55 @@ describe("resolveProject", () => {
     ]);
   });
 
+  it("resolves direct TMDS output from a generic FPGA GPIO pin pool", () => {
+    const hdmiSource = createHdmiSliceProject();
+    const source: ProjectSource = {
+      ...hdmiSource,
+      dependencies: {
+        ...hdmiSource.dependencies,
+        "@nocad/fpga": "0.1.0"
+      },
+      nodes: hdmiSource.nodes.map((node) =>
+        node.id === hdmiSliceIds.mcu && node.kind === "component"
+          ? {
+              ...node,
+              component: "@nocad/fpga:GENERIC_FPGA",
+              role: "video_source"
+            }
+          : node
+      ),
+      edges: hdmiSource.edges.map((edge) =>
+        edge.id === hdmiSliceIds.videoProvider && edge.kind === "intent.provides"
+          ? {
+              ...edge,
+              from: { node: hdmiSliceIds.mcu, port: "gpio" },
+              strategy: { pinAssignment: "auto", providerMode: "generic_gpio" }
+            }
+          : edge
+      )
+    };
+
+    const resolved = resolveProject(source);
+    const choice = resolved.resolvedChoices.find((candidate) => candidate.sourceEdge === hdmiSliceIds.videoProvider);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(choice?.selected.providerMode).toBe("generic_gpio");
+    expect(choice?.selected.bindings).toMatchObject({
+      tmds2_p: {
+        from: { node: hdmiSliceIds.mcu, pin: "io0" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+      },
+      ddc_sda: {
+        from: { node: hdmiSliceIds.mcu, pin: "io8" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "ddc_sda" }
+      },
+      hpd: {
+        from: { node: hdmiSliceIds.mcu, pin: "io10" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "hpd" }
+      }
+    });
+  });
+
   it("resolves function topology independently of provider and exposes edge order", () => {
     const source = createHdmiSliceProject();
     const forward = resolveProject(source);

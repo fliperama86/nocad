@@ -5,6 +5,7 @@ export type FunctionComponentConnectionIntent = {
   componentPort: string;
   contract: string;
   kind: "exposes" | "provides";
+  providerMode?: string;
 };
 
 export type FunctionComponentConnectionMatch =
@@ -37,7 +38,10 @@ export function matchFunctionComponentConnection(
     const matches: FunctionComponentConnectionIntent[] = [];
 
     if (port.provides?.[contract]?.role === "provider") {
-      matches.push({ componentPort, contract, kind: "provides" });
+      const modeIds = Object.keys(port.provides[contract].modes);
+      const providerMode = modeIds.includes("auto") ? "auto" : modeIds.length === 1 ? modeIds[0] : "auto";
+
+      matches.push({ componentPort, contract, kind: "provides", providerMode });
     }
 
     if (port.contractMaps?.[contract]?.role === "to") {
@@ -46,6 +50,23 @@ export function matchFunctionComponentConnection(
 
     return matches;
   });
+  const genericProvider = functionDefinition.topology.genericProvider;
+
+  if (candidates.length === 0 && genericProvider) {
+    for (const [componentPort, port] of Object.entries(componentDefinition.ports)) {
+      if (
+        port.kind === "pin_pool" &&
+        genericProvider.pinCapabilities.every((capability) => port.pinCapabilities?.includes(capability))
+      ) {
+        candidates.push({
+          componentPort,
+          contract,
+          kind: "provides",
+          providerMode: genericProvider.modeId
+        });
+      }
+    }
+  }
 
   if (candidates.length === 1 && candidates[0]) {
     return { intent: candidates[0] };

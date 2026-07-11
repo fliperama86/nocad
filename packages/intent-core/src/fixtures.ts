@@ -275,6 +275,11 @@ export const functions: Record<string, FunctionDefinition> = {
     ],
     topology: {
       contract: "@nocad/video:hdmi_output.v1",
+      genericProvider: {
+        label: "Generic GPIO",
+        modeId: "generic_gpio",
+        pinCapabilities: ["gpio"]
+      },
       generatedNets: [
         {
           diagnostics: {
@@ -423,6 +428,10 @@ export const components: Record<string, ComponentDefinition> = {
             signalMap: createSelectableSignalMap(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals), ["gpio"])
           }
         }
+      },
+      gpio: {
+        kind: "pin_pool",
+        pinCapabilities: ["gpio"]
       }
     },
     preferredPinGroups: [

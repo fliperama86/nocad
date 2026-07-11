@@ -11,3 +11,4 @@
 ## Interaction Validation
 
 - Do not let the graph UI appear to accept an electrically invalid connection and rely only on the Diagnostics tab to explain it later. Validate endpoint and contract compatibility before committing an edge, or make rejection immediate and visible at the interaction site.
+- The generic FPGA should connect directly to HDMI intent through a generic GPIO pin pool and function-level capability matching, not through a bespoke FPGA HDMI port. The external HDMI transmitter path remains a separate topology.

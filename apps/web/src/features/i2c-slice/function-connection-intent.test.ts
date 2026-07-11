@@ -9,6 +9,11 @@ describe("matchFunctionComponentConnection", () => {
   const source = createHdmiSliceProject();
   const hdmiFunction = requiredNode(source.nodes, "intent.function");
   const mcu = requiredComponent(source.nodes, "@nocad/rp2350:RP2350A");
+  const fpga: ProjectNode = {
+    id: "fpga",
+    kind: "component",
+    component: "@nocad/fpga:GENERIC_FPGA"
+  };
   const connector = requiredComponent(source.nodes, "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE");
 
   it("finds package-declared provider and exposure ports", () => {
@@ -16,7 +21,8 @@ describe("matchFunctionComponentConnection", () => {
       intent: {
         componentPort: "video_out",
         contract: "@nocad/video:hdmi_output.v1",
-        kind: "provides"
+        kind: "provides",
+        providerMode: "auto"
       }
     });
     expect(matchFunctionComponentConnection(connector, hdmiFunction)).toEqual({
@@ -24,6 +30,14 @@ describe("matchFunctionComponentConnection", () => {
         componentPort: "hdmi",
         contract: "@nocad/video:hdmi_output.v1",
         kind: "exposes"
+      }
+    });
+    expect(matchFunctionComponentConnection(fpga, hdmiFunction)).toEqual({
+      intent: {
+        componentPort: "gpio",
+        contract: "@nocad/video:hdmi_output.v1",
+        kind: "provides",
+        providerMode: "generic_gpio"
       }
     });
   });

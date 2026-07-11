@@ -126,6 +126,13 @@ export type FunctionDefinition = {
 export type FunctionTopologyDefinition = {
   contract: string;
   generatedNets?: FunctionGeneratedNetDefinition[];
+  genericProvider?: GenericFunctionProviderDefinition;
+};
+
+export type GenericFunctionProviderDefinition = {
+  label?: string;
+  modeId: string;
+  pinCapabilities: string[];
 };
 
 export type FunctionGeneratedNetDefinition = {
@@ -206,6 +213,7 @@ export type PinDefinition = {
 export type PortDefinition = {
   kind: "fixed_port" | "derived_port" | "pin_pool";
   contractMaps?: Record<string, PortContractMap>;
+  pinCapabilities?: string[];
   provides?: Record<string, PortProvidesDefinition>;
 };
 

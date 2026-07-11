@@ -330,7 +330,7 @@ function resolveFunctionProvider(
 
   const contractId = definition.topology.contract;
   const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[contractId];
-  const providerModeChoice = resolveProviderMode(providerEdge, provider, context);
+  const providerModeChoice = resolveProviderMode(providerEdge, provider, definition, context);
 
   if (!providerModeChoice) {
     return null;
@@ -417,10 +417,39 @@ function resolveFunctionProvider(
 function resolveProviderMode(
   providerEdge: IntentProvidesEdge,
   provider: ComponentContext,
+  functionDefinition: FunctionDefinition,
   context: ResolutionContext
 ): ResolvedProviderMode | null {
   const port = provider.definition.ports[providerEdge.from.port ?? ""];
   const provides = port?.provides?.[providerEdge.contract];
+  const genericProvider = functionDefinition.topology.genericProvider;
+  const requestedMode = providerEdge.strategy?.providerMode ?? "auto";
+
+  if (
+    !provides &&
+    port?.kind === "pin_pool" &&
+    providerEdge.contract === functionDefinition.topology.contract &&
+    genericProvider &&
+    genericProvider.pinCapabilities.every((capability) => port.pinCapabilities?.includes(capability)) &&
+    (requestedMode === "auto" || requestedMode === genericProvider.modeId)
+  ) {
+    const signalMap = Object.fromEntries(
+      functionDefinition.signalGroups.flatMap((group) =>
+        group.signals.map((signal) => [
+          signal.id,
+          { pinSelector: { capabilities: genericProvider.pinCapabilities } }
+        ])
+      )
+    );
+
+    return {
+      id: genericProvider.modeId,
+      mode: {
+        label: genericProvider.label,
+        signalMap
+      }
+    };
+  }
 
   if (!provides || provides.role !== "provider") {
     context.diagnostics.push({
@@ -432,7 +461,6 @@ function resolveProviderMode(
     return null;
   }
 
-  const requestedMode = providerEdge.strategy?.providerMode ?? "auto";
   const fallbackMode = requestedMode === "auto" ? Object.entries(provides.modes)[0] : undefined;
   const modeEntry = provides.modes[requestedMode]
     ? ([requestedMode, provides.modes[requestedMode]] as const)

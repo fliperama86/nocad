@@ -899,7 +899,14 @@ function createIntentEdge(
   }
 
   return match.intent.kind === "provides"
-    ? createProvidesEdge(componentNode, functionNode, match.intent.componentPort, match.intent.contract, edgeIds)
+    ? createProvidesEdge(
+        componentNode,
+        functionNode,
+        match.intent.componentPort,
+        match.intent.contract,
+        match.intent.providerMode,
+        edgeIds
+      )
     : createExposesEdge(functionNode, componentNode, match.intent.componentPort, match.intent.contract, edgeIds);
 }
 
@@ -1132,6 +1139,7 @@ function createProvidesEdge(
   functionNode: ProjectNode,
   componentPort: string,
   contract: string,
+  providerMode: string | undefined,
   edgeIds: Set<string>
 ): IntentProvidesEdge {
   return {
@@ -1150,7 +1158,7 @@ function createProvidesEdge(
     contract,
     strategy: {
       pinAssignment: "auto",
-      providerMode: "auto"
+      providerMode: providerMode ?? "auto"
     }
   };
 }
