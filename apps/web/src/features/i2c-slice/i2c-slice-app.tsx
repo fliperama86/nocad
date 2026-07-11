@@ -6,6 +6,9 @@ import {
   createRp2350HdmiTxSliceProject,
   hdmiSliceIds,
   hdmiTxSliceIds,
+  parseProjectSourceJson,
+  ProjectDocument,
+  ProjectDocumentError,
   resolveProject
 } from "@nocad/intent-core";
 import type {
@@ -17,12 +20,14 @@ import type {
   IntentProvidesEdge,
   ProjectEdge,
   ProjectNode,
+  ProjectPatch,
   ProjectSource,
   SignalBindings
 } from "@nocad/intent-core";
 import type { Connection, XYPosition } from "@xyflow/react";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { cn } from "../../lib/utils";
 import { BindingsPanel } from "./bindings-panel";
@@ -261,8 +266,13 @@ const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "json", label: "JSON" }
 ];
 export function I2cSliceApp() {
+  const [projectDocument] = useState(() => new ProjectDocument(createBlankSource()));
+  const source = useSyncExternalStore(
+    projectDocument.subscribe,
+    projectDocument.getSnapshot,
+    projectDocument.getSnapshot
+  );
   const [jsonView, setJsonView] = useState<JsonView>("source");
-  const [source, setSource] = useState<ProjectSource>(createBlankSource);
   const [positions, setPositions] = useState<NodePositions>({});
   const [graphRevision, setGraphRevision] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
@@ -271,8 +281,14 @@ export function I2cSliceApp() {
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingConnectionIntent>();
   const [connectionFeedback, setConnectionFeedback] = useState<string>();
+  const [projectFeedback, setProjectFeedback] = useState<{ kind: "error" | "success"; message: string }>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const resolved = useMemo(() => resolveProject(source), [source]);
+  const resolutionSnapshot = useMemo(
+    () => ({ resolved: resolveProject(source), revision: projectDocument.revision }),
+    [projectDocument, source]
+  );
+  const resolved = resolutionSnapshot.resolved;
   const selectedChoice = selectedEdgeId
     ? (resolved.resolvedChoices.find((choice) => choice.sourceEdge === selectedEdgeId) ?? resolved.resolvedChoices[0])
     : resolved.resolvedChoices[0];
@@ -293,13 +309,28 @@ export function I2cSliceApp() {
     setSelectedNodeId((currentNodeId) => (currentNodeId === nodeId ? currentNodeId : nodeId));
   }, []);
 
+  function dispatchProjectPatch(patch: ProjectPatch, expectedRevision?: number) {
+    try {
+      const record = projectDocument.apply(
+        patch,
+        expectedRevision === undefined ? undefined : { expectedRevision }
+      );
+      setProjectFeedback(undefined);
+      return Boolean(record);
+    } catch (error) {
+      setProjectFeedback({ kind: "error", message: projectDocumentErrorMessage(error) });
+      return false;
+    }
+  }
+
   function loadSource(nextSource: ProjectSource, nextPositions: NodePositions) {
-    setSource(nextSource);
+    projectDocument.replace(nextSource);
     setPositions(nextPositions);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setPendingConnection(undefined);
     setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -316,13 +347,69 @@ export function I2cSliceApp() {
   }
 
   function clearCanvas() {
-    setSource(createBlankSource());
-    setPositions({});
+    loadSource(createBlankSource(), {});
+  }
+
+  function undoProjectEdit() {
+    projectDocument.undo();
+    setGraphRevision((revision) => revision + 1);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setPendingConnection(undefined);
     setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
+  }
+
+  function redoProjectEdit() {
+    projectDocument.redo();
     setGraphRevision((revision) => revision + 1);
+    setSelectedEdgeId(undefined);
+    setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
+  }
+
+  function saveProjectFile() {
+    const blob = new Blob([projectDocument.save()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = "project.nocad.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setProjectFeedback({ kind: "success", message: "Saved project.nocad.json." });
+  }
+
+  async function loadProjectFile(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const expectedRevision = projectDocument.revision;
+
+    try {
+      const nextSource = parseProjectSourceJson(await file.text());
+      projectDocument.replace(nextSource, { expectedRevision });
+      setPositions({});
+      setSelectedEdgeId(undefined);
+      setSelectedNodeId(undefined);
+      setPendingConnection(undefined);
+      setConnectionFeedback(undefined);
+      setGraphRevision((revision) => revision + 1);
+      setProjectFeedback({ kind: "success", message: `Loaded ${file.name}.` });
+    } catch (error) {
+      setProjectFeedback({
+        kind: "error",
+        message: `Could not load ${file.name}: ${projectDocumentErrorMessage(error)}`
+      });
+    } finally {
+      input.value = "";
+    }
   }
 
   function addComponent(template: string) {
@@ -333,22 +420,32 @@ export function I2cSliceApp() {
     const component = componentTemplates[template];
     const id = createGraphId(component.idPrefix);
 
-    setSource({
-      ...source,
-      dependencies: component.dependency
-        ? {
-            ...source.dependencies,
-            [component.dependency.name]: component.dependency.version
-          }
-        : source.dependencies,
-      nodes: [
-        ...source.nodes,
+    const added = dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        ...(component.dependency
+          ? ([
+              {
+                op: "setDependency",
+                dependency: component.dependency.name,
+                version: component.dependency.version
+              }
+            ] satisfies ProjectPatch[])
+          : []),
         {
-          ...component.node,
-          id
-        } as ProjectNode
+          op: "addNode",
+          node: {
+            ...component.node,
+            id
+          } as ProjectNode
+        }
       ]
     });
+
+    if (!added) {
+      return;
+    }
+
     setPositions((currentPositions) => ({
       ...currentPositions,
       [id]: currentPositions[id] ?? nextPosition(source.nodes.length)
@@ -412,6 +509,7 @@ export function I2cSliceApp() {
 
       setPendingConnection({
         options,
+        revision: projectDocument.revision,
         sourceNode: sourceNode.id,
         targetNode: targetNode.id
       });
@@ -430,124 +528,98 @@ export function I2cSliceApp() {
 
     setConnectionFeedback(undefined);
     setPendingConnection(undefined);
-    setSource((current) => {
-      const edgeIds = new Set(current.edges.map((edge) => edge.id));
-      const currentSourceNode = current.nodes.find((node) => node.id === connection.source);
-      const currentTargetNode = current.nodes.find((node) => node.id === connection.target);
+    const edge = createIntentEdge(sourceNode, targetNode, new Set(source.edges.map((currentEdge) => currentEdge.id)));
 
-      if (!currentSourceNode || !currentTargetNode) {
-        return current;
-      }
-
-      const edge = createIntentEdge(currentSourceNode, currentTargetNode, edgeIds);
-
-      if (!edge) {
-        return current;
-      }
-
-      return {
-        ...current,
-        edges: [...current.edges, edge]
-      };
-    });
+    if (edge) {
+      dispatchProjectPatch({ op: "addEdge", edge });
+    }
   }
 
-  function removeNodes(nodeIds: string[]) {
-    const nodeIdSet = new Set(nodeIds);
-
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.filter((edge) => !edgeReferencesAnyNode(edge, nodeIdSet)),
-      dependencies: dependenciesForNodes(current.nodes.filter((node) => !nodeIdSet.has(node.id)), current.dependencies),
-      nodes: current.nodes.filter((node) => !nodeIdSet.has(node.id))
-    }));
-    setPositions((currentPositions) =>
-      Object.fromEntries(Object.entries(currentPositions).filter(([nodeId]) => !nodeIdSet.has(nodeId)))
+  function removeSelection({ edgeIds, nodeIds }: { edgeIds: string[]; nodeIds: string[] }) {
+    const requestedNodeIds = new Set(nodeIds);
+    const edgeIdSet = new Set(edgeIds);
+    const existingNodeIds = source.nodes.filter((node) => requestedNodeIds.has(node.id)).map((node) => node.id);
+    const existingNodeIdSet = new Set(existingNodeIds);
+    const explicitEdgeIds = source.edges
+      .filter((edge) => edgeIdSet.has(edge.id) && !edgeReferencesAnyNode(edge, existingNodeIdSet))
+      .map((edge) => edge.id);
+    const nextDependencies = dependenciesForNodes(
+      source.nodes.filter((node) => !existingNodeIdSet.has(node.id)),
+      source.dependencies
     );
+    const dependencyPatches: ProjectPatch[] =
+      existingNodeIds.length > 0
+        ? Object.keys(source.dependencies)
+            .filter((dependency) => !(dependency in nextDependencies))
+            .map((dependency) => ({ op: "setDependency", dependency, version: null }))
+        : [];
+
+    if (existingNodeIds.length > 0 || explicitEdgeIds.length > 0) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          ...explicitEdgeIds.map((edge) => ({ op: "removeEdge", edge }) satisfies ProjectPatch),
+          ...existingNodeIds.map((node) => ({ op: "removeNode", node }) satisfies ProjectPatch),
+          ...dependencyPatches
+        ]
+      });
+    }
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setPendingConnection(undefined);
   }
 
-  function removeEdges(edgeIds: string[]) {
-    const edgeIdSet = new Set(edgeIds);
-
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.filter((edge) => !edgeIdSet.has(edge.id))
-    }));
-    setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
-    setPendingConnection(undefined);
-  }
-
   function setFunctionInclude(nodeId: string, feature: string, value: unknown) {
-    setSource((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) =>
-        node.id === nodeId && node.kind === "intent.function"
-          ? {
-              ...node,
-              include: {
-                ...node.include,
-                [feature]: value
-              }
-            }
-          : node
-      )
-    }));
+    dispatchProjectPatch({ op: "setFunctionInclude", node: nodeId, feature, value });
   }
 
   function setEdgeAuto(edgeId: string) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => (edge.id === edgeId && edge.kind === "intent.connection" ? autoEdge(edge) : edge))
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (!edge) {
+      return;
+    }
+
+    const automatic = autoEdge(edge);
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        { op: "setEdgeBindings", edge: edgeId, value: null },
+        { op: "setEdgeStrategy", edge: edgeId, value: automatic.strategy ?? null }
+      ]
+    });
   }
 
   function setConnectionParam(edgeId: string, param: string, value: ContractParamValue) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              params: {
-                ...edge.params,
-                [param]: value
-              }
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({ op: "setEdgeParams", edge: edgeId, value: { ...edge.params, [param]: value } });
+    }
   }
 
   function applyConnectionPreset(edgeId: string, params: ContractParams) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              params: {
-                ...edge.params,
-                ...params
-              }
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({ op: "setEdgeParams", edge: edgeId, value: { ...edge.params, ...params } });
+    }
   }
 
-  function createConnectionFromIntent(option: ConnectionIntentOption, params: ContractParams | undefined) {
-    setSource((current) => {
-      const edgeIds = new Set(current.edges.map((edge) => edge.id));
-      const edge = createComponentConnectionEdge(option, edgeIds, params);
+  function createConnectionFromIntent(
+    option: ConnectionIntentOption,
+    params: ContractParams | undefined,
+    expectedRevision?: number
+  ) {
+    const edge = createComponentConnectionEdge(option, new Set(source.edges.map((currentEdge) => currentEdge.id)), params);
 
-      return {
-        ...current,
-        edges: [...current.edges, edge]
-      };
-    });
+    dispatchProjectPatch({ op: "addEdge", edge }, expectedRevision);
     setPendingConnection(undefined);
   }
 
@@ -558,138 +630,138 @@ export function I2cSliceApp() {
       return;
     }
 
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              strategy: {
-                pinAssignment: "manual"
-              },
-              bindings: choice.selected.bindings
-            }
-          : edge
-      )
-    }));
+    dispatchProjectPatch(
+      {
+        op: "batch",
+        patches: [
+          { op: "setEdgeStrategy", edge: edgeId, value: { pinAssignment: "manual" } },
+          { op: "setEdgeBindings", edge: edgeId, value: choice.selected.bindings }
+        ]
+      },
+      resolutionSnapshot.revision
+    );
   }
 
   function setManualPinPair(edgeId: string, pair: { sda: string; scl: string }) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              strategy: {
-                pinAssignment: "manual"
-              },
-              bindings: manualBindings(edge, pair)
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          { op: "setEdgeStrategy", edge: edgeId, value: { pinAssignment: "manual" } },
+          { op: "setEdgeBindings", edge: edgeId, value: manualBindings(edge, pair) }
+        ]
+      });
+    }
   }
 
   function setProviderMode(edgeId: string, providerMode: string) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.provides"
-          ? {
-              ...edge,
-              bindings: bindingsForProviderMode(current, edge, providerMode),
-              strategy: {
-                ...edge.strategy,
-                providerMode
-              }
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          {
+            op: "setEdgeBindings",
+            edge: edgeId,
+            value: bindingsForProviderMode(source, edge, providerMode) ?? null
+          },
+          {
+            op: "setEdgeStrategy",
+            edge: edgeId,
+            value: { ...edge.strategy, providerMode }
+          }
+        ]
+      });
+    }
   }
 
   function setProviderPin(edgeId: string, signal: string, pin: string | undefined) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => {
-        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
-          return edge;
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
+
+    if (!edge) {
+      return;
+    }
+
+    const bindings = { ...(edge.bindings ?? {}) };
+
+    if (pin) {
+      bindings[signal] = {
+        ...bindings[signal],
+        from: {
+          node: edge.from.node,
+          pin
         }
+      };
+    } else {
+      delete bindings[signal];
+    }
 
-        const bindings = { ...(edge.bindings ?? {}) };
-
-        if (pin) {
-          bindings[signal] = {
-            ...bindings[signal],
-            from: {
-              node: edge.from.node,
-              pin
-            }
-          };
-        } else {
-          delete bindings[signal];
-        }
-
-        return {
-          ...edge,
-          bindings: Object.keys(bindings).length > 0 ? bindings : undefined,
-          strategy: {
-            ...edge.strategy
-          }
-        };
-      })
-    }));
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        {
+          op: "setEdgeBindings",
+          edge: edgeId,
+          value: Object.keys(bindings).length > 0 ? bindings : null
+        },
+        { op: "setEdgeStrategy", edge: edgeId, value: { ...edge.strategy } }
+      ]
+    });
   }
 
   function applyProviderPinPreset(edgeId: string, pinsBySignal: Record<string, string>) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => {
-        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
-          return edge;
-        }
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
 
-        const bindings: SignalBindings = Object.fromEntries(
-          Object.entries(pinsBySignal).map(([signal, pin]) => [
-            signal,
-            {
-              from: {
-                node: edge.from.node,
-                pin
-              }
-            }
-          ])
-        );
+    if (!edge) {
+      return;
+    }
 
-        return {
-          ...edge,
-          bindings,
-          strategy: {
-            ...edge.strategy,
-            providerMode: "custom_gpio"
+    const bindings: SignalBindings = Object.fromEntries(
+      Object.entries(pinsBySignal).map(([signal, pin]) => [
+        signal,
+        {
+          from: {
+            node: edge.from.node,
+            pin
           }
-        };
-      })
-    }));
+        }
+      ])
+    );
+
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        { op: "setEdgeBindings", edge: edgeId, value: bindings },
+        {
+          op: "setEdgeStrategy",
+          edge: edgeId,
+          value: { ...edge.strategy, providerMode: "custom_gpio" }
+        }
+      ]
+    });
   }
 
   function setBoardComponentPlacement(nodeId: string, placement: BoardComponentPlacement) {
-    setSource((current) => ({
-      ...current,
-      layout: {
-        board: current.layout?.board ?? current.board?.id ?? "main_board",
-        placements: {
-          ...(current.layout?.placements ?? {}),
-          [nodeId]: {
-            rotation: `${roundLayoutNumber(placement.rotationDeg)}deg`,
-            x: `${roundLayoutNumber(placement.xMm)}mm`,
-            y: `${roundLayoutNumber(placement.yMm)}mm`
-          }
-        },
-        routingIntent: current.layout?.routingIntent ?? []
+    dispatchProjectPatch({
+      op: "setBoardPlacement",
+      object: nodeId,
+      value: {
+        rotation: `${roundLayoutNumber(placement.rotationDeg)}deg`,
+        x: `${roundLayoutNumber(placement.xMm)}mm`,
+        y: `${roundLayoutNumber(placement.yMm)}mm`
       }
-    }));
+    });
   }
 
   return (
@@ -714,6 +786,43 @@ export function I2cSliceApp() {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!projectDocument.canUndo}
+                onClick={undoProjectEdit}
+                type="button"
+              >
+                Undo
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!projectDocument.canRedo}
+                onClick={redoProjectEdit}
+                type="button"
+              >
+                Redo
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                Load project
+              </button>
+              <input
+                accept=".json,application/json"
+                className="sr-only"
+                onChange={loadProjectFile}
+                ref={fileInputRef}
+                type="file"
+              />
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={saveProjectFile}
+                type="button"
+              >
+                Save project
+              </button>
               <button
                 className="h-8 rounded-md border border-border px-3 text-xs font-medium"
                 onClick={clearCanvas}
@@ -744,6 +853,20 @@ export function I2cSliceApp() {
               </button>
             </div>
           </div>
+          {projectFeedback ? (
+            <div
+              aria-live="polite"
+              className={cn(
+                "mt-2 shrink-0 rounded-md border px-3 py-2 text-xs",
+                projectFeedback.kind === "error"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              )}
+              role={projectFeedback.kind === "error" ? "alert" : "status"}
+            >
+              {projectFeedback.message}
+            </div>
+          ) : null}
 
           <div className="min-h-0 flex-1 overflow-hidden pt-2">
             {activeTab === "graph" ? (
@@ -778,8 +901,7 @@ export function I2cSliceApp() {
                         : "These nodes do not expose a compatible connection."
                     );
                   }}
-                  onRemoveEdges={removeEdges}
-                  onRemoveNodes={removeNodes}
+                  onRemoveSelection={removeSelection}
                   onPositionsChange={setPositions}
                   onSelectedEdgeChange={setSelectedGraphEdge}
                   onSelectedNodeChange={setSelectedGraphNode}
@@ -854,7 +976,13 @@ export function I2cSliceApp() {
 
             {activeTab === "diagnostics" ? (
               <div aria-labelledby="diagnostics-tab" className="h-full overflow-auto" id="diagnostics-panel" role="tabpanel">
-                <DiagnosticsPanel diagnostics={resolved.diagnostics} source={source} />
+                <DiagnosticsPanel
+                  diagnostics={resolved.diagnostics}
+                  onApplySuggestion={(suggestion) =>
+                    dispatchProjectPatch(suggestion.patch, resolutionSnapshot.revision)
+                  }
+                  source={source}
+                />
               </div>
             ) : null}
 
@@ -874,7 +1002,7 @@ export function I2cSliceApp() {
       </div>
       <ConnectionIntentDialog
         onCancel={() => setPendingConnection(undefined)}
-        onCreate={createConnectionFromIntent}
+        onCreate={(option, params) => createConnectionFromIntent(option, params, pendingConnection?.revision)}
         pendingConnection={pendingConnection}
         source={source}
       />
@@ -886,6 +1014,14 @@ function workspaceTabClassName(active: boolean) {
   return active
     ? "h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
     : "h-8 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground";
+}
+
+function projectDocumentErrorMessage(error: unknown) {
+  if (error instanceof ProjectDocumentError) {
+    return `${error.message} (${error.code})`;
+  }
+
+  return error instanceof Error ? error.message : "An unknown project document error occurred.";
 }
 
 function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {
@@ -1284,8 +1420,12 @@ function isComponentTemplate(value: string): value is ComponentTemplate {
 }
 
 function edgeReferencesAnyNode(edge: ProjectEdge, nodeIds: Set<string>) {
-  if (edge.kind === "intent.connection" || edge.kind === "intent.exposes" || edge.kind === "intent.provides") {
-    return nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node);
+  if ("from" in edge && "to" in edge && (nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node))) {
+    return true;
+  }
+
+  if (!("bindings" in edge) || !edge.bindings) {
+    return false;
   }
 
   return Object.values(edge.bindings).some((binding) =>

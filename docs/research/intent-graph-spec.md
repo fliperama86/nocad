@@ -333,7 +333,7 @@ Every successful edit records the requested semantic patch and its exact inverse
 
 `getSnapshot()` returns a frozen identity-stable snapshot until the document changes, and `subscribe()` supports external-store adapters without moving document objects into React component state. Returned mutable source copies and patch records are deep clones, so callers cannot mutate stored state or history out of band.
 
-Save/load uses JSON validation without reconstructing known fields, preserving unknown future keys. Ingress rejects duplicate IDs, missing edge-node references, unsupported schemas, and values JSON cannot preserve exactly. A loaded document starts with clean undo, redo, and patch history. This core API exists in intent-core; migration of the current React slice to use it is tracked separately in M2.
+Save/load uses JSON validation without reconstructing known fields, preserving unknown future keys. Ingress rejects duplicate IDs, missing edge-node references, unsupported schemas, and values JSON cannot preserve exactly. A loaded document starts with clean undo, redo, and patch history. The current React slice owns one `ProjectDocument`, subscribes through `useSyncExternalStore`, dispatches all source edits through semantic patches, and keeps only graph positions and transient selection outside the document.
 
 ### Reference Designators And Labels
 

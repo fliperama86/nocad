@@ -28,6 +28,7 @@ export type ConnectionIntentOption = {
 
 export type PendingConnectionIntent = {
   options: ConnectionIntentOption[];
+  revision: number;
   sourceNode: string;
   targetNode: string;
 };
@@ -368,7 +369,7 @@ function connectionOptionLabel(option: ConnectionIntentOption, labels: Map<strin
 }
 
 function pendingConnectionKey(pendingConnection: PendingConnectionIntent) {
-  return `${pendingConnection.sourceNode}->${pendingConnection.targetNode}:${pendingConnection.options
+  return `${pendingConnection.revision}:${pendingConnection.sourceNode}->${pendingConnection.targetNode}:${pendingConnection.options
     .map((option) => option.id)
     .join("|")}`;
 }

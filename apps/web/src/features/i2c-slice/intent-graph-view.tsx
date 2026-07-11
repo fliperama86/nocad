@@ -73,8 +73,7 @@ export function IntentGraphView({
   onDismissConnectionFeedback,
   onInvalidConnection,
   onPositionsChange,
-  onRemoveEdges,
-  onRemoveNodes,
+  onRemoveSelection,
   onSelectedEdgeChange,
   onSelectedNodeChange,
   positions,
@@ -92,8 +91,7 @@ export function IntentGraphView({
   onDismissConnectionFeedback: () => void;
   onInvalidConnection: (sourceNodeId: string, targetNodeId: string, targetHandle?: string | null) => void;
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
-  onRemoveEdges: (edgeIds: string[]) => void;
-  onRemoveNodes: (nodeIds: string[]) => void;
+  onRemoveSelection: (selection: { edgeIds: string[]; nodeIds: string[] }) => void;
   onSelectedEdgeChange: (edgeId: string | undefined) => void;
   onSelectedNodeChange: (nodeId: string | undefined) => void;
   positions: NodePositions;
@@ -112,10 +110,20 @@ export function IntentGraphView({
 
   useEffect(() => {
     const shouldResetGraphState = previousGraphRevisionRef.current !== graphRevision;
+    const nextNodeIds = new Set(flowModel.nodes.map((node) => node.id));
+    const nextEdgeIds = new Set(flowModel.edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id));
 
     previousGraphRevisionRef.current = graphRevision;
     setFlowNodes((currentNodes) => reconcileNodes(currentNodes, flowModel.nodes, shouldResetGraphState));
     setFlowEdges((currentEdges) => reconcileEdges(currentEdges, flowModel.edges, shouldResetGraphState));
+    setSelectedNodeIds((currentIds) => {
+      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextNodeIds.has(id));
+      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
+    });
+    setSelectedEdgeIds((currentIds) => {
+      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextEdgeIds.has(id));
+      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
+    });
   }, [flowModel.edges, flowModel.nodes, graphRevision]);
 
   useEffect(() => {
@@ -180,36 +188,23 @@ export function IntentGraphView({
       return;
     }
 
-    if (selectedEdgeIds.length > 0) {
-      onRemoveEdges(selectedEdgeIds);
-    }
-    if (selectedNodeIds.length > 0) {
-      onRemoveNodes(selectedNodeIds);
-    }
+    onRemoveSelection({ edgeIds: selectedEdgeIds, nodeIds: selectedNodeIds });
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [hasSelection, onRemoveEdges, onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
+  }, [hasSelection, onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
 
-  const removeDeletedEdges = useCallback((deletedEdges: Edge[]) => {
-    const deletableEdgeIds = deletedEdges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
-
-    if (deletableEdgeIds.length > 0) {
-      onRemoveEdges(deletableEdgeIds);
-    }
-    onSelectedEdgeChange(undefined);
-    onSelectedNodeChange(undefined);
-    setSelectedEdgeIds([]);
-  }, [onRemoveEdges, onSelectedEdgeChange, onSelectedNodeChange]);
-
-  const removeDeletedNodes = useCallback((deletedNodes: IntentFlowNode[]) => {
-    onRemoveNodes(deletedNodes.map((node) => node.id));
+  const removeDeletedSelection = useCallback(({ edges, nodes }: { edges: Edge[]; nodes: IntentFlowNode[] }) => {
+    onRemoveSelection({
+      edgeIds: edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id),
+      nodeIds: nodes.map((node) => node.id)
+    });
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange]);
+  }, [onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange]);
 
   const finishConnection = useCallback((_: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
     if (connectionState.isValid === false && connectionState.fromNode && connectionState.toNode) {
@@ -278,11 +273,10 @@ export function IntentGraphView({
             nodeDragThreshold={pointerIntentThreshold}
             onConnect={onConnectNodes}
             onConnectEnd={finishConnection}
+            onDelete={removeDeletedSelection}
             onEdgesChange={updateEdges}
-            onEdgesDelete={removeDeletedEdges}
             onNodeDragStop={(_, node) => commitNodePosition(node)}
             onNodesChange={updateNodes}
-            onNodesDelete={removeDeletedNodes}
             onPaneClick={clearSelection}
             onSelectionChange={updateSelection}
             paneClickDistance={pointerIntentThreshold}

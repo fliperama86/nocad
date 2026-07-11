@@ -1,8 +1,16 @@
-import type { Diagnostic, DiagnosticTarget, ProjectSource } from "@nocad/intent-core";
+import type { Diagnostic, DiagnosticTarget, ProjectSource, Suggestion } from "@nocad/intent-core";
 
 import { Panel, PanelHeader } from "./panel";
 
-export function DiagnosticsPanel({ diagnostics, source }: { diagnostics: Diagnostic[]; source: ProjectSource }) {
+export function DiagnosticsPanel({
+  diagnostics,
+  onApplySuggestion,
+  source
+}: {
+  diagnostics: Diagnostic[];
+  onApplySuggestion: (suggestion: Suggestion) => void;
+  source: ProjectSource;
+}) {
   const labels = objectLabels(source);
 
   return (
@@ -29,6 +37,20 @@ export function DiagnosticsPanel({ diagnostics, source }: { diagnostics: Diagnos
               <div className="mt-2 text-xs text-muted-foreground">
                 {diagnostic.targets.map((target) => targetLabel(target, labels)).join(", ")}
               </div>
+              {diagnostic.suggestions?.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {diagnostic.suggestions.map((suggestion) => (
+                    <button
+                      className="h-7 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground"
+                      key={`${suggestion.title}-${suggestion.patch.edge}`}
+                      onClick={() => onApplySuggestion(suggestion)}
+                      type="button"
+                    >
+                      {suggestion.title}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ))
         )}
