@@ -28,3 +28,9 @@
 - Inline topology must be function/package data-driven. For a series interposer, replace the selected logical net with stable provider and connector segments around a generated component, keep authored endpoint bindings unchanged, and project the generated component so neither ratsnest segment disappears.
 - Object-valued include fields use their declared defaults when the include object is absent. Off must preserve the original net and dependency state; invalid selectors and multiple active interposers must diagnose rather than silently no-op or implicitly chain.
 - Before an inline rule creates authoritative net endpoints, validate that its generated component exists and that the provider/connector terminals both exist and are distinct. Invalid package data leaves the logical net unsplit.
+
+## Project Documents
+
+- Public document patches target stable node/edge IDs. Array indices belong only to generated inverse operations used to restore exact ordering.
+- Keep `getSnapshot()` frozen and identity-stable until a real document change so external-store consumers are safe. Reject no-ops without history changes, make batches atomic, deep-clone exposed records/copies, and restore absent optional containers exactly during undo.
+- Validate JSON-only data at source and patch ingress without reconstructing known fields, so unknown future keys survive save/load while undefined, non-finite and negative-zero numbers, BigInt, functions, symbols, cycles, sparse/noncanonical arrays, accessors, and hidden data are rejected.

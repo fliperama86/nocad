@@ -325,6 +325,16 @@ Physical package pads, semantic roles, user-visible pin names, net labels, and r
 
 Patch operations should prefer semantic targets such as `{ "op": "setEdgeBindings", "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65" }` over raw JSON Pointer paths into ordered arrays. Raw JSON Patch can still be an interchange format, but it should be generated after resolving stable IDs to current document paths.
 
+### Project Document API
+
+The intent-core `ProjectDocument` is the persistent mutation boundary for `nocad.project.v0`. Public patches address stable IDs and cover node/edge addition and removal, dependencies, function include fields, edge bindings/params/strategy, board placements, and atomic batches. Array indices appear only in generated inverse patches so undo can restore exact source ordering; callers do not address graph objects by index.
+
+Every successful edit records the requested semantic patch and its exact inverse. Undo and redo use those inverses, preserve node/edge order and absent optional containers, and expose an inspectable revision history. Failed batches are atomic, no-op patches do not create history, and a new edit invalidates the redo branch. Resolver-derived suggestions may pass `expectedRevision` so stale patches are rejected instead of applying to a newer document.
+
+`getSnapshot()` returns a frozen identity-stable snapshot until the document changes, and `subscribe()` supports external-store adapters without moving document objects into React component state. Returned mutable source copies and patch records are deep clones, so callers cannot mutate stored state or history out of band.
+
+Save/load uses JSON validation without reconstructing known fields, preserving unknown future keys. Ingress rejects duplicate IDs, missing edge-node references, unsupported schemas, and values JSON cannot preserve exactly. A loaded document starts with clean undo, redo, and patch history. This core API exists in intent-core; migration of the current React slice to use it is tracked separately in M2.
+
 ### Reference Designators And Labels
 
 Reference designators such as `R12`, `U3`, and `C7` are labels, not identity. Net names and user-facing names follow the same rule. They may be regenerated, renumbered, imported, or exported without changing the underlying graph object.

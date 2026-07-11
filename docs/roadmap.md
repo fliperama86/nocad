@@ -35,6 +35,7 @@ What exists and works:
 - Board-placement prototype: Canvas2D board projection with footprint selection, drag/rotate placement, ratsnest updates, clickable obligations, and simple rectangular overlap diagnostics. Generated inline components appear as placement obligations, use their near-endpoint hint for an approximate anchor, and preserve both split ratsnest segments. It is exploratory and does not complete M4/M5: placement still mutates React source state directly, footprint envelopes and DRC are approximate, and geometry/hit testing have not moved into the portable editor core.
 - Curated fixture infrastructure: `fixtures/kicad/hdmi-breakout/` contains a content-pinned minimal KiCad 10 snapshot with a manifest. `pnpm verify:fixtures` checks file hashes and recorded structural facts, and runs as part of `pnpm test`. The PCB tab can open a lazy-loaded, read-only preview parsed directly from the pinned board source, including its actual outline, pads, tracks, vias, filled zones, source drawing layers, footprints, and net isolation. A temporary local test also rendered the 50 mm x 38 mm Pico RetroDigital main PCB with 70 footprints, 611 tracks, 58 vias, and 20 filled polygons without retaining that board in the repository. This does not complete M4 or constitute a supported KiCad importer. License and hardware qualification remain unresolved, so the fixture is not yet marked golden.
 - Shared config packages (eslint, tsconfig, vitest); pnpm + Turborepo workspace.
+- `ProjectDocument` core: JSON-validated, lossless `nocad.project.v0` save/load; stable-ID semantic patches for current graph/inspector edits; atomic batches; exact inverse patches; undo/redo; stale-revision guards; immutable stable snapshots and subscriptions. Core tests cover rejected/no-op edits, redo branching, exact array/container restoration, caller isolation, and unknown future-key preservation.
 
 Known architectural debts (tracked in M1/M2 below):
 
@@ -42,12 +43,12 @@ Known architectural debts (tracked in M1/M2 below):
 - Allocation uses deterministic candidate cardinality, constrained-first signal and edge ordering, stable semantic tie-breaks, and pin-scarcity scoring. Valid explicit and fixed provider claims are protected before connection allocation, then function providers run in a deterministic constrained-first phase after their upstream connection requirements resolve. This bounded two-phase allocator is deliberately not a global search, so a legal assignment can still require user guidance even though results no longer depend on source edge-array order.
 - Generated dependency provenance currently records one canonical introducer. This is deterministic but lossy when multiple topology edges introduce the same package; plural provenance remains document-schema debt.
 - Inline topology currently supports one series interposer per selected signal group. Multiple matching rules are diagnosed rather than implicitly chained; general interposer chains and additional selector/operation kinds remain future schema work.
-- UI mutates React state directly; there is no document API, no undo/redo, no persistence.
+- The document API, undo/redo engine, and JSON persistence exist in intent-core, but the slice UI still mutates React source state directly and does not expose save/load or undo/redo controls. React migration is the remaining M2 integration work.
 - Resolution is not incremental.
 
 ## In Progress (2026-07-11)
 
-Shared-foundation milestone M1 is complete. Function resolution, supplementary nets, inline series interposers, contract shunts such as pullups, contract- and port-scoped preferred pin groups, and diagnostic pin suggestions come from package data. The bounded two-phase allocator has deterministic scoring and exact full-output edge-array invariance tests, including provider chains, hard reservations, split nets, generated topology, diagnostics, suggestions, ambiguous topology, and malformed duplicate IDs. M2 is next: introduce the document API, inspectable patches, persistence, and undo/redo without moving resolution policy back into React.
+Shared-foundation milestone M2 is active. Intent-core now has the persistent `ProjectDocument`, semantic patches and exact inverses, atomic undo/redo, revision guards, stable snapshots/subscriptions, and lossless validated JSON save/load. Next, migrate every source mutation in the graph and inspectors to this API, expose undo/redo and persistence in the slice, and verify complete edit round-trips without moving document policy into React.
 
 The Pico RetroDigital main board is the product north star. Work after the shared foundation advances in two cooperating tracks rather than completing one in isolation: the semantic graph grows subsystem by subsystem toward full design representation, while the editor/PCB track consumes those increasingly realistic resolved outputs. The integration gates below decide when a capability works end to end.
 
@@ -86,7 +87,7 @@ Done when:
 - Resolution output is identical regardless of source edge array order (test-enforced).
 - Generated pullups/termination come from generic topology rules, not hardcoded paths.
 
-### M2 - Document model, patches, undo/redo - todo
+### M2 - Document model, patches, undo/redo - in progress
 
 A real document API between UI/AI and the source graph: semantic patch operations (`setEdgeBindings`, `addNode`, ...), undo/redo, save/load of `project.nocad.json`.
 
@@ -274,6 +275,7 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
+- 2026-07-11 - Started M2 with the intent-core `ProjectDocument`. Stable-ID patches cover current source edits and atomic batches, successful edits retain inspectable inverses, undo/redo restores exact ordering and optional containers, stale revisions are rejected, snapshots are immutable and subscription-safe, and validated JSON save/load preserves unknown future keys. The React slice still needs migration before M2 is complete.
 - 2026-07-11 - Completed M1 with generic inline series interposers. Function package data now selects signal groups, enable/value fields, component terminals, dependencies, IDs, and near-endpoint placement hints. Active HDMI termination splits each TMDS conductor into provider and connector nets around one generated resistor; off mode preserves the original net, invalid/duplicate rules diagnose without implicit chains, and a non-HDMI fixture exercises the same resolver path. Generated components and both split segments survive board projection.
 - 2026-07-11 - Completed the M1 resolver-determinism slice. Canonical edge processing now invalidates every duplicate-ID occurrence, diagnoses conflicting hard reservations and ambiguous function topology, preserves canonical generated-dependency provenance, protects only validated explicit/fixed provider claims, and uses stable constrained-first provider allocation. Full `ResolvedProject` equality is tested across all edge permutations for mixed success, pressure, diagnostic, suggestion, provider-requirement, and malformed cases. The allocator remains bounded and two-phase rather than globally optimal; generic inline series termination still blocks M1 completion.
 - 2026-07-11 - Adopted the Pico RetroDigital main board as the product north star and reorganized delivery into shared M1-M2 foundations, cooperating semantic-graph and editor/PCB tracks, explicit cross-track integration gates, required M9 zones, and nonblocking board-assist and M10 selected-net routing research.
