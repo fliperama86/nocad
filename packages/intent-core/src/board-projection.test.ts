@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyBoardComponentPlacement, buildBoardProjection } from "./board-projection";
 import { resolveProject } from "./resolver";
-import { createHdmiTxSliceProject, hdmiTxSliceIds } from "./samples";
+import { createHdmiSliceProject, createHdmiTxSliceProject, hdmiSliceIds, hdmiTxSliceIds } from "./samples";
 
 
 describe("buildBoardProjection", () => {
@@ -11,7 +11,7 @@ describe("buildBoardProjection", () => {
     const projection = buildBoardProjection(source, resolveProject(source));
 
     expect(projection.board).toMatchObject({ widthMm: 60, heightMm: 40, layers: 4 });
-    expect(projection.components.map((component) => component.id)).toEqual([
+    expect(projection.components.slice(0, 3).map((component) => component.id)).toEqual([
       hdmiTxSliceIds.videoSource,
       hdmiTxSliceIds.tx,
       hdmiTxSliceIds.hdmiPort
@@ -23,8 +23,48 @@ describe("buildBoardProjection", () => {
         expect.objectContaining({ kind: "signal", signal: "sda" })
       ])
     );
-    expect(projection.obligations.filter((obligation) => obligation.kind === "placement")).toHaveLength(3);
+    expect(projection.obligations.filter((obligation) => obligation.kind === "placement")).toHaveLength(11);
     expect(projection.stats.drcViolations).toBe(0);
+  });
+
+  it("projects generated inline components and both split ratsnest segments", () => {
+    const source = createHdmiSliceProject();
+    const projection = buildBoardProjection(source, resolveProject(source));
+    const componentId = `series_${hdmiSliceIds.videoProvider}_tmds2_p`;
+    const generatedComponents = projection.components.filter((component) =>
+      component.id.startsWith(`series_${hdmiSliceIds.videoProvider}_`)
+    );
+    const generated = projection.components.find((component) => component.id === componentId);
+    const splitSegments = projection.ratsnest.filter(
+      (edge) => edge.signal === "tmds2_p" && edge.sourceEdge === hdmiSliceIds.videoProvider
+    );
+    const provider = projection.components.find((component) => component.id === hdmiSliceIds.mcu);
+
+    expect(generatedComponents).toHaveLength(8);
+    expect(generated).toMatchObject({
+      component: "@nocad/passives:RESISTOR",
+      placementHint: { edge: hdmiSliceIds.videoProvider, near: "provider" },
+      placed: false
+    });
+    expect(generated?.xMm).toBeGreaterThan(provider?.xMm ?? Number.POSITIVE_INFINITY);
+    expect(splitSegments).toEqual([
+      expect.objectContaining({
+        id: `net_${hdmiSliceIds.videoProvider}_tmds2_p_provider`,
+        fromNode: hdmiSliceIds.mcu,
+        toNode: componentId
+      }),
+      expect.objectContaining({
+        id: `net_${hdmiSliceIds.videoProvider}_tmds2_p_connector`,
+        fromNode: componentId,
+        toNode: hdmiSliceIds.hdmiPort
+      })
+    ]);
+    expect(
+      projection.obligations.filter(
+        (obligation) =>
+          obligation.kind === "routing" && splitSegments.some((edge) => edge.id === obligation.target.id)
+      )
+    ).toHaveLength(2);
   });
 
   it("uses authored placement coordinates when present", () => {

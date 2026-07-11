@@ -131,6 +131,34 @@ export type FunctionTopologyDefinition = {
   contract: string;
   generatedNets?: FunctionGeneratedNetDefinition[];
   genericProvider?: GenericFunctionProviderDefinition;
+  inlineRules?: FunctionInlineRuleDefinition[];
+};
+
+export type FunctionInlineRuleDefinition = {
+  component: string;
+  dependency: string;
+  enabledWhen: {
+    field: string;
+    values: Array<string | number | boolean>;
+  };
+  generatedIdPrefix: string;
+  id: string;
+  include: string;
+  kind: "seriesInterposer";
+  pins: {
+    connector: string;
+    provider: string;
+  };
+  placement?: {
+    near: "connector" | "provider";
+  };
+  signals: {
+    group: string;
+  };
+  value: {
+    default: string;
+    includeField?: string;
+  };
 };
 
 export type GenericFunctionProviderDefinition = {
@@ -423,6 +451,8 @@ export type ResolvedNet = {
   sourceEdge: string;
   sourceMap: {
     edge: string;
+    feature?: string;
+    segment?: "connector" | "provider";
     signal: string;
   };
 };
@@ -434,6 +464,10 @@ export type GeneratedObject = {
   value?: string;
   connects: string[];
   sourceEdge: string;
+  placementHint?: {
+    edge: string;
+    near: "connector" | "provider";
+  };
   sourceMap: {
     edge: string;
     feature: string;

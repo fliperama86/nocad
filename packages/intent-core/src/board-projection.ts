@@ -1,5 +1,5 @@
 import { components } from "./fixtures";
-import type { ProjectNode, ProjectSource, ResolvedNet, ResolvedProject } from "./types";
+import type { GeneratedObject, ProjectNode, ProjectSource, ResolvedNet, ResolvedProject } from "./types";
 
 export type BoardProjection = {
   board: {
@@ -27,6 +27,7 @@ export type BoardComponentProjection = {
   label: string;
   package?: string;
   placed: boolean;
+  placementHint?: GeneratedObject["placementHint"];
   refdesHint?: string;
   role?: string;
   rotationDeg: number;
@@ -115,9 +116,22 @@ export function buildBoardProjection(source: ProjectSource, resolved: ResolvedPr
     componentsById.set(node.id, projected);
     return projected;
   });
+  const projectedGeneratedComponents = resolved.generated.map((generated, index) => {
+    const projected = projectGeneratedComponent(
+      generated,
+      index,
+      board,
+      source,
+      componentsById,
+      source.layout?.placements[generated.id]
+    );
+
+    componentsById.set(generated.id, projected);
+    return projected;
+  });
   const ratsnest = resolved.nets.flatMap((net) => projectRatsnest(net, source, componentsById));
 
-  return completeBoardProjection(board, projectedComponents, ratsnest);
+  return completeBoardProjection(board, [...projectedComponents, ...projectedGeneratedComponents], ratsnest);
 }
 
 export function applyBoardComponentPlacement(
@@ -248,6 +262,84 @@ function projectComponent(
     xMm,
     yMm
   };
+}
+
+function projectGeneratedComponent(
+  generated: GeneratedObject,
+  index: number,
+  board: BoardProjection["board"],
+  source: ProjectSource,
+  componentsById: Map<string, BoardComponentProjection>,
+  placement: unknown
+): BoardComponentProjection {
+  const node: ProjectNode & { kind: "component" } = {
+    id: generated.id,
+    kind: "component",
+    component: generated.component,
+    label: generated.value ? `${componentLabel(generated.component)} ${generated.value}` : componentLabel(generated.component),
+    role: "generated"
+  };
+  const footprint = footprintEnvelope(node);
+  const authored = authoredPlacement(placement);
+  const anchorId = generatedPlacementAnchor(generated, source);
+  const anchor = anchorId ? componentsById.get(anchorId) : undefined;
+  const offset = 2.5 + (index % 4) * 1.5;
+  const xMm = clampCenter(
+    authored?.xMm ?? (anchor ? anchor.xMm + offset : board.widthMm / 2),
+    footprint.widthMm,
+    board.widthMm
+  );
+  const yMm = clampCenter(
+    authored?.yMm ?? (anchor ? anchor.yMm + ((index % 3) - 1) * 1.5 : board.heightMm / 2),
+    footprint.heightMm,
+    board.heightMm
+  );
+
+  return {
+    id: generated.id,
+    component: generated.component,
+    heightMm: footprint.heightMm,
+    label: node.label ?? componentLabel(generated.component),
+    placed: Boolean(authored),
+    placementHint: generated.placementHint,
+    role: node.role,
+    rotationDeg: authored?.rotationDeg ?? 0,
+    violations: [],
+    widthMm: footprint.widthMm,
+    xMm,
+    yMm
+  };
+}
+
+function generatedPlacementAnchor(generated: GeneratedObject, source: ProjectSource) {
+  const hint = generated.placementHint;
+
+  if (!hint) {
+    return undefined;
+  }
+
+  const edge = source.edges.find((candidate) => candidate.id === hint.edge);
+
+  if (!edge || edge.kind === "net.binding") {
+    return undefined;
+  }
+
+  if (hint.near === "provider") {
+    return edge.from.node;
+  }
+
+  if (edge.kind !== "intent.provides") {
+    return edge.to.node;
+  }
+
+  const exposure = source.edges.find(
+    (candidate): candidate is Extract<ProjectSource["edges"][number], { kind: "intent.exposes" }> =>
+      candidate.kind === "intent.exposes" &&
+      candidate.from.node === edge.to.node &&
+      candidate.contract === edge.contract
+  );
+
+  return exposure?.to.node;
 }
 
 function authoredPlacement(placement: unknown) {

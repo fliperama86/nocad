@@ -280,6 +280,21 @@ export const functions: Record<string, FunctionDefinition> = {
         modeId: "generic_gpio",
         pinCapabilities: ["gpio"]
       },
+      inlineRules: [
+        {
+          component: "@nocad/passives:RESISTOR",
+          dependency: "@nocad/passives",
+          enabledWhen: { field: "mode", values: ["auto", "required"] },
+          generatedIdPrefix: "series",
+          id: "seriesTermination",
+          include: "seriesTermination",
+          kind: "seriesInterposer",
+          pins: { provider: "1", connector: "2" },
+          placement: { near: "provider" },
+          signals: { group: "tmds" },
+          value: { default: "270ohm", includeField: "value" }
+        }
+      ],
       generatedNets: [
         {
           diagnostics: {
@@ -304,7 +319,29 @@ export const functions: Record<string, FunctionDefinition> = {
   },
   [DIGITAL_OUTPUT_CONTRACT]: {
     id: DIGITAL_OUTPUT_CONTRACT,
-    include: {},
+    include: {
+      seriesProtection: {
+        kind: "object",
+        label: "Series protection",
+        fields: {
+          mode: {
+            kind: "enum",
+            label: "Mode",
+            default: "off",
+            options: [
+              { label: "Off", value: "off" },
+              { label: "Auto", value: "auto" },
+              { label: "Required", value: "required" }
+            ]
+          },
+          value: {
+            kind: "resistance",
+            label: "Value",
+            default: "33ohm"
+          }
+        }
+      }
+    },
     signalGroups: [
       {
         id: "digital",
@@ -313,7 +350,22 @@ export const functions: Record<string, FunctionDefinition> = {
       }
     ],
     topology: {
-      contract: DIGITAL_OUTPUT_CONTRACT
+      contract: DIGITAL_OUTPUT_CONTRACT,
+      inlineRules: [
+        {
+          component: "@nocad/passives:RESISTOR",
+          dependency: "@nocad/passives",
+          enabledWhen: { field: "mode", values: ["auto", "required"] },
+          generatedIdPrefix: "series",
+          id: "seriesProtection",
+          include: "seriesProtection",
+          kind: "seriesInterposer",
+          pins: { provider: "1", connector: "2" },
+          placement: { near: "provider" },
+          signals: { group: "digital" },
+          value: { default: "33ohm", includeField: "value" }
+        }
+      ]
     }
   }
 };

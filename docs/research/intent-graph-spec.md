@@ -867,7 +867,27 @@ Packages may attach rules to functions, contracts, features, provider modes, or 
 - preserve source maps and reasons
 - validate hard rules and score soft recommendations
 
-The current TypeScript prototype implements a deliberately narrow first subset of this model. A function definition declares `topology.contract`, may declare a `topology.genericProvider` that maps required pin capabilities onto a component pin pool, and may declare supplementary `topology.generatedNets` that connect a matching power domain to a named pin on the exposed component. Connection contracts may declare `shuntToPower` rules gated by authored include flags, and component definitions may declare contract-scoped preferred pin groups. Signal groups, explicit and capability-derived provider modes, exposed-port mappings, generated-net provenance, shunt components, and contract net-name prefixes are interpreted without function-specific or I2C-specific dispatch. Direct FPGA TMDS through a generic GPIO pin pool, HDMI source 5V, I2C pullups, a digital-output fixture, and a non-I2C biased-signal fixture exercise these paths. Inline components, interposers, signal selectors, and recommendation scoring remain future topology-rule operations.
+The current TypeScript prototype implements a deliberately narrow first subset of this model. A function definition declares `topology.contract`, may declare a `topology.genericProvider` that maps required pin capabilities onto a component pin pool, may declare supplementary `topology.generatedNets` that connect a matching power domain to a named pin on the exposed component, and may declare `topology.inlineRules` that select a signal group and insert one series component per active conductor. Connection contracts may declare `shuntToPower` rules gated by authored include flags, and component definitions may declare contract-scoped preferred pin groups. Signal groups, explicit and capability-derived provider modes, exposed-port mappings, generated-net provenance, shunt components, series interposers, and contract net-name prefixes are interpreted without function-specific, HDMI-specific, or I2C-specific dispatch. Direct FPGA TMDS through a generic GPIO pin pool, HDMI source 5V, HDMI series termination, I2C pullups, a digital-output series-protection fixture, and a non-I2C biased-signal fixture exercise these paths. More general interposer chains, endpoint/provider-mode selectors, shunt variants, and recommendation scoring remain future topology-rule operations.
+
+The implemented inline-rule subset is represented directly on function topology:
+
+```json
+{
+  "id": "seriesTermination",
+  "kind": "seriesInterposer",
+  "include": "seriesTermination",
+  "enabledWhen": { "field": "mode", "values": ["auto", "required"] },
+  "signals": { "group": "tmds" },
+  "component": "@nocad/passives:RESISTOR",
+  "dependency": "@nocad/passives",
+  "value": { "default": "270ohm", "includeField": "value" },
+  "pins": { "provider": "1", "connector": "2" },
+  "generatedIdPrefix": "series",
+  "placement": { "near": "provider" }
+}
+```
+
+Object-field defaults participate when the include object is absent. An authored `mode: "off"` disables the rule and preserves the original net and dependency state. An active rule that names an unknown signal group is a deterministic package-data diagnostic, not a silent no-op.
 
 Example rule:
 
@@ -899,7 +919,7 @@ The lockfile should show the generated topology explicitly:
 
 ```json
 {
-  "id": "gen_mcu_provides_hdmi_tmds2_p_series",
+  "id": "series_mcu_provides_hdmi_tmds2_p",
   "kind": "component",
   "component": "@nocad/passives:RESISTOR",
   "value": "270ohm",
@@ -907,14 +927,21 @@ The lockfile should show the generated topology explicitly:
     "net_mcu_provides_hdmi_tmds2_p_provider",
     "net_mcu_provides_hdmi_tmds2_p_connector"
   ],
+  "placementHint": {
+    "edge": "mcu_provides_hdmi",
+    "near": "provider"
+  },
   "sourceMap": {
-    "node": "hdmi_output",
     "edge": "mcu_provides_hdmi",
     "feature": "seriesTermination",
-    "signal": "tmds2.p"
+    "signal": "tmds2_p"
   }
 }
 ```
+
+The selected logical net is replaced by two resolved nets. The provider segment terminates at generated pin `1`; the connector segment begins at generated pin `2`. Their stable IDs and names use `_provider` / `_connector` and `_PROVIDER` / `_CONNECTOR` suffixes. The generated component's `connects` array is always ordered provider segment first, connector segment second. Both net source maps retain the provider edge, feature, and signal and add a matching `segment`. The resolved pin-assignment choice remains the original provider-to-connector binding so authored intent does not acquire generated IDs.
+
+An active signal may match at most one inline rule. Multiple active interposers for the same signal are diagnosed and the original net remains unsplit; the resolver never creates an implicit chain. The selected component and its provider/connector terminals must exist and be distinct, otherwise package data is diagnosed and the net remains unsplit. Inline components are created only after provider binding and provider requirements resolve successfully. Supplementary function nets such as source 5V retain their independent behavior. The board projection treats generated components as stable placement obligations and preserves both split ratsnest segments; `placementHint.near` supplies an approximate initial anchor, not authored placement.
 
 ## Example: Local Custom Protocol
 

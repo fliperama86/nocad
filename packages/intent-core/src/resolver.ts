@@ -10,6 +10,7 @@ import type {
   EndpointRole,
   EndpointRef,
   FunctionDefinition,
+  FunctionInlineRuleDefinition,
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
@@ -29,7 +30,7 @@ import type {
   SignalBindings
 } from "./types";
 
-const RESOLVER_VERSION = "0.2.0";
+const RESOLVER_VERSION = "0.3.0";
 
 type ComponentContext = {
   node: ComponentNode;
@@ -117,7 +118,13 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     applyConnectionTopologyRules(edge, resolved, source.nodes, dependencies, generated, context);
   }
 
-  const resolvedFunctions = resolveFunctions(canonicalSource, functionRequests, context);
+  const resolvedFunctions = resolveFunctions(
+    canonicalSource,
+    functionRequests,
+    dependencies,
+    generated,
+    context
+  );
   resolvedChoices.push(...resolvedFunctions.choices);
   nets.push(...resolvedFunctions.nets);
 
@@ -161,20 +168,7 @@ function applyConnectionTopologyRules(
       continue;
     }
 
-    const dependencyVersion = packageVersions[rule.dependency];
-    const introducedBy = {
-      edge: edge.id,
-      feature: rule.id
-    };
-    const previousIntroduction = dependencies[rule.dependency]?.introducedBy;
-    dependencies[rule.dependency] = {
-      version: dependencyVersion,
-      hash: stablePackageHash(rule.dependency, dependencyVersion),
-      introducedBy:
-        !previousIntroduction || compareDependencyIntroduction(introducedBy, previousIntroduction) < 0
-          ? introducedBy
-          : previousIntroduction
-    };
+    recordGeneratedDependency(dependencies, rule.dependency, edge.id, rule.id);
 
     const rail = findPowerDomain(nodes, rule.rail);
 
@@ -192,6 +186,26 @@ function applyConnectionTopologyRules(
       generated.push(createConnectionTopologyComponent(edge.id, signal, rail.id, rule));
     }
   }
+}
+
+function recordGeneratedDependency(
+  dependencies: Record<string, ResolvedDependency>,
+  dependency: string,
+  edge: string,
+  feature: string
+) {
+  const dependencyVersion = packageVersions[dependency];
+  const introducedBy = { edge, feature };
+  const previousIntroduction = dependencies[dependency]?.introducedBy;
+
+  dependencies[dependency] = {
+    version: dependencyVersion,
+    hash: stablePackageHash(dependency, dependencyVersion),
+    introducedBy:
+      !previousIntroduction || compareDependencyIntroduction(introducedBy, previousIntroduction) < 0
+        ? introducedBy
+        : previousIntroduction
+  };
 }
 
 function compareDependencyIntroduction(
@@ -294,6 +308,8 @@ function pinAvailableForAllocation(nodeId: string, pin: string, context: Resolut
 function resolveFunctions(
   source: ProjectSource,
   functionRequests: FunctionResolutionRequest[],
+  dependencies: Record<string, ResolvedDependency>,
+  generated: ResolvedProject["generated"],
   context: ResolutionContext
 ): { choices: ResolvedProject["resolvedChoices"]; nets: ResolvedNet[] } {
   const choices: ResolvedProject["resolvedChoices"] = [];
@@ -320,7 +336,17 @@ function resolveFunctions(
 
     if (resolvedProvider) {
       choices.push(resolvedProvider.choice);
-      nets.push(...resolvedProvider.nets);
+      nets.push(
+        ...applyFunctionInlineRules(
+          functionNode,
+          definition,
+          providerEdge,
+          resolvedProvider.nets,
+          dependencies,
+          generated,
+          context
+        )
+      );
       reserveBindings(providerEdge.id, resolvedProvider.choice.selected.bindings, context.reservedPins);
     }
 
@@ -328,6 +354,190 @@ function resolveFunctions(
   }
 
   return { choices, nets };
+}
+
+function applyFunctionInlineRules(
+  functionNode: FunctionNode,
+  definition: FunctionDefinition,
+  providerEdge: IntentProvidesEdge,
+  resolvedNets: ResolvedNet[],
+  dependencies: Record<string, ResolvedDependency>,
+  generated: ResolvedProject["generated"],
+  context: ResolutionContext
+): ResolvedNet[] {
+  const activeRules = (definition.topology.inlineRules ?? []).filter((rule) =>
+    functionInlineRuleEnabled(functionNode, definition, rule)
+  );
+  const rulesBySignal = new Map<string, FunctionInlineRuleDefinition[]>();
+
+  for (const rule of activeRules) {
+    const inlineComponent = components[rule.component];
+
+    if (!inlineComponent) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "INLINE_COMPONENT_NOT_FOUND",
+        message: `Inline topology rule "${rule.id}" references unknown component "${rule.component}".`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      continue;
+    }
+
+    if (
+      rule.pins.provider === rule.pins.connector ||
+      !inlineComponent.pins[rule.pins.provider] ||
+      !inlineComponent.pins[rule.pins.connector]
+    ) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "INLINE_COMPONENT_TERMINALS_INVALID",
+        message: `Inline topology rule "${rule.id}" requires distinct existing provider and connector pins on ${rule.component}.`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      continue;
+    }
+
+    const group = definition.signalGroups.find((candidate) => candidate.id === rule.signals.group);
+
+    if (!group) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "INLINE_SIGNAL_GROUP_NOT_FOUND",
+        message: `Inline topology rule "${rule.id}" references unknown signal group "${rule.signals.group}" on ${definition.id}.`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      continue;
+    }
+
+    for (const signal of group.signals) {
+      const rules = rulesBySignal.get(signal.id) ?? [];
+      rules.push(rule);
+      rulesBySignal.set(signal.id, rules);
+    }
+  }
+
+  const appliedRuleIds = new Set<string>();
+
+  return resolvedNets.flatMap((net) => {
+    const matchingRules = rulesBySignal.get(net.sourceMap.signal) ?? [];
+
+    if (matchingRules.length === 0) {
+      return [net];
+    }
+
+    if (matchingRules.length > 1) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "MULTIPLE_INLINE_INTERPOSERS",
+        message: `Signal "${net.sourceMap.signal}" on edge "${providerEdge.id}" matches multiple inline topology rules: ${matchingRules.map((rule) => rule.id).join(", ")}.`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+      return [net];
+    }
+
+    const rule = matchingRules[0];
+
+    if (!rule) {
+      return [net];
+    }
+
+    if (!appliedRuleIds.has(rule.id)) {
+      recordGeneratedDependency(dependencies, rule.dependency, providerEdge.id, rule.id);
+      appliedRuleIds.add(rule.id);
+    }
+
+    const componentId = `${rule.generatedIdPrefix}_${providerEdge.id}_${net.sourceMap.signal}`;
+    const providerNetId = `${net.id}_provider`;
+    const connectorNetId = `${net.id}_connector`;
+    const providerNet: ResolvedNet = {
+      ...net,
+      id: providerNetId,
+      name: `${net.name}_PROVIDER`,
+      endpoints: {
+        from: net.endpoints.from,
+        to: { node: componentId, pin: rule.pins.provider }
+      },
+      sourceMap: {
+        ...net.sourceMap,
+        feature: rule.id,
+        segment: "provider"
+      }
+    };
+    const connectorNet: ResolvedNet = {
+      ...net,
+      id: connectorNetId,
+      name: `${net.name}_CONNECTOR`,
+      endpoints: {
+        from: { node: componentId, pin: rule.pins.connector },
+        to: net.endpoints.to
+      },
+      sourceMap: {
+        ...net.sourceMap,
+        feature: rule.id,
+        segment: "connector"
+      }
+    };
+
+    generated.push({
+      id: componentId,
+      kind: "component",
+      component: rule.component,
+      value: functionInlineRuleValue(functionNode, rule),
+      connects: [providerNetId, connectorNetId],
+      sourceEdge: providerEdge.id,
+      placementHint: rule.placement
+        ? {
+            edge: providerEdge.id,
+            near: rule.placement.near
+          }
+        : undefined,
+      sourceMap: {
+        edge: providerEdge.id,
+        feature: rule.id,
+        signal: net.sourceMap.signal
+      }
+    });
+
+    return [providerNet, connectorNet];
+  });
+}
+
+function functionInlineRuleEnabled(
+  functionNode: FunctionNode,
+  definition: FunctionDefinition,
+  rule: FunctionInlineRuleDefinition
+) {
+  const includeValue = functionNode.include?.[rule.include];
+
+  if (includeValue !== undefined && !isUnknownRecord(includeValue)) {
+    return false;
+  }
+
+  const includeDefinition = definition.include[rule.include];
+  const authoredValue = isUnknownRecord(includeValue)
+    ? includeValue[rule.enabledWhen.field]
+    : undefined;
+  const defaultValue =
+    includeDefinition?.kind === "object"
+      ? includeDefinition.fields[rule.enabledWhen.field]?.default
+      : undefined;
+  const value = authoredValue ?? defaultValue;
+
+  return rule.enabledWhen.values.some((candidate) => candidate === value);
+}
+
+function functionInlineRuleValue(functionNode: FunctionNode, rule: FunctionInlineRuleDefinition) {
+  const includeValue = functionNode.include?.[rule.include];
+  const authoredValue =
+    isUnknownRecord(includeValue) && rule.value.includeField
+      ? includeValue[rule.value.includeField]
+      : undefined;
+
+  return typeof authoredValue === "string" ? authoredValue : rule.value.default;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function collectFunctionResolutionRequests(

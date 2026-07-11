@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getComponentPinOptions, getI2cPinPairOptions } from "./assignment";
-import { components } from "./fixtures";
+import { components, functions } from "./fixtures";
 import {
   createHdmiSliceProject,
   createHdmiTxSliceProject,
@@ -567,12 +567,356 @@ describe("resolveProject", () => {
     });
     expect(resolved.resolvedChoices[0]?.selected.bindings.cec).toBeUndefined();
     expect(resolved.nets.map((net) => net.name)).toEqual(
-      expect.arrayContaining(["HDMI_TMDS2_P", "HDMI_DDC_SDA", "HDMI_HPD", "HDMI_5V"])
+      expect.arrayContaining(["HDMI_TMDS2_P_PROVIDER", "HDMI_TMDS2_P_CONNECTOR", "HDMI_DDC_SDA", "HDMI_HPD", "HDMI_5V"])
     );
     expect(source.edges.map((edge) => edge.id)).toEqual([
       hdmiSliceIds.videoProvider,
       hdmiSliceIds.hdmiConnector
     ]);
+  });
+
+  it("splits selected HDMI conductors through metadata-defined series components", () => {
+    const source = createHdmiSliceProject();
+    const resolved = expectAllEdgePermutationsToResolveExactly(source);
+    const seriesComponents = resolved.generated.filter(
+      (item) => item.sourceMap.feature === "seriesTermination"
+    );
+    const componentId = `series_${hdmiSliceIds.videoProvider}_tmds2_p`;
+    const providerNetId = `net_${hdmiSliceIds.videoProvider}_tmds2_p_provider`;
+    const connectorNetId = `net_${hdmiSliceIds.videoProvider}_tmds2_p_connector`;
+
+    expect(seriesComponents).toHaveLength(8);
+    expect(seriesComponents[0]).toEqual({
+      id: componentId,
+      kind: "component",
+      component: "@nocad/passives:RESISTOR",
+      value: "270ohm",
+      connects: [providerNetId, connectorNetId],
+      sourceEdge: hdmiSliceIds.videoProvider,
+      placementHint: { edge: hdmiSliceIds.videoProvider, near: "provider" },
+      sourceMap: {
+        edge: hdmiSliceIds.videoProvider,
+        feature: "seriesTermination",
+        signal: "tmds2_p"
+      }
+    });
+    expect(resolved.nets.find((net) => net.id === providerNetId)).toMatchObject({
+      name: "HDMI_TMDS2_P_PROVIDER",
+      endpoints: {
+        from: { node: hdmiSliceIds.mcu, pin: "gpio12" },
+        to: { node: componentId, pin: "1" }
+      },
+      sourceMap: {
+        edge: hdmiSliceIds.videoProvider,
+        feature: "seriesTermination",
+        segment: "provider",
+        signal: "tmds2_p"
+      }
+    });
+    expect(resolved.nets.find((net) => net.id === connectorNetId)).toMatchObject({
+      name: "HDMI_TMDS2_P_CONNECTOR",
+      endpoints: {
+        from: { node: componentId, pin: "2" },
+        to: { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+      },
+      sourceMap: {
+        edge: hdmiSliceIds.videoProvider,
+        feature: "seriesTermination",
+        segment: "connector",
+        signal: "tmds2_p"
+      }
+    });
+    expect(resolved.nets.some((net) => net.id === `net_${hdmiSliceIds.videoProvider}_tmds2_p`)).toBe(false);
+    expect(resolved.resolvedChoices[0]?.selected.bindings.tmds2_p).toEqual({
+      from: { node: hdmiSliceIds.mcu, pin: "gpio12" },
+      to: { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+    });
+    expect(resolved.dependencies["@nocad/passives"]?.introducedBy).toEqual({
+      edge: hdmiSliceIds.videoProvider,
+      feature: "seriesTermination"
+    });
+  });
+
+  it("keeps the original net and dependency state when an inline rule is off", () => {
+    const source = createHdmiSliceProject();
+    const offSource: ProjectSource = {
+      ...source,
+      nodes: source.nodes.map((node) =>
+        node.id === hdmiSliceIds.hdmiFunction && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                seriesTermination: { mode: "off", value: "270ohm" }
+              }
+            }
+          : node
+      )
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(offSource);
+
+    expect(resolved.generated.some((item) => item.sourceMap.feature === "seriesTermination")).toBe(false);
+    expect(resolved.nets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `net_${hdmiSliceIds.videoProvider}_tmds2_p`,
+          name: "HDMI_TMDS2_P"
+        })
+      ])
+    );
+    expect(resolved.dependencies["@nocad/passives"]).toBeUndefined();
+  });
+
+  it("does not apply an active inline rule to disabled signals", () => {
+    const source = createHdmiSliceProject();
+    const withoutTmds: ProjectSource = {
+      ...source,
+      nodes: source.nodes.map((node) =>
+        node.id === hdmiSliceIds.hdmiFunction && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                tmds: false,
+                seriesTermination: { mode: "required", value: "270ohm" }
+              }
+            }
+          : node
+      )
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(withoutTmds);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.generated.filter((item) => item.sourceMap.feature === "seriesTermination")).toEqual([]);
+    expect(resolved.nets.some((net) => net.sourceMap.signal.startsWith("tmds"))).toBe(false);
+    expect(resolved.dependencies["@nocad/passives"]).toBeUndefined();
+  });
+
+  it("honors a custom value for required inline topology", () => {
+    const source = createHdmiSliceProject();
+    const requiredSource: ProjectSource = {
+      ...source,
+      nodes: source.nodes.map((node) =>
+        node.id === hdmiSliceIds.hdmiFunction && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                seriesTermination: { mode: "required", value: "220ohm" }
+              }
+            }
+          : node
+      )
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(requiredSource);
+    const seriesComponents = resolved.generated.filter(
+      (item) => item.sourceMap.feature === "seriesTermination"
+    );
+
+    expect(seriesComponents).toHaveLength(8);
+    expect(new Set(seriesComponents.map((item) => item.value))).toEqual(new Set(["220ohm"]));
+  });
+
+  it("uses object-field defaults when an inline include object is absent", () => {
+    const resolved = expectAllEdgePermutationsToResolveExactly(createHdmiTxSliceProject());
+    const seriesComponents = resolved.generated.filter(
+      (item) => item.sourceMap.feature === "seriesTermination"
+    );
+
+    expect(seriesComponents).toHaveLength(8);
+    expect(new Set(seriesComponents.map((item) => item.value))).toEqual(new Set(["270ohm"]));
+  });
+
+  it("splits a provider-chain output only after its requirements resolve", () => {
+    const source = createHdmiTxSliceProject();
+    const seriesSource: ProjectSource = {
+      ...source,
+      nodes: source.nodes.map((node) =>
+        node.id === hdmiTxSliceIds.hdmiFunction && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                seriesTermination: { mode: "auto", value: "270ohm" }
+              }
+            }
+          : node
+      )
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(seriesSource);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.generated.filter((item) => item.sourceMap.feature === "seriesTermination")).toHaveLength(8);
+    expect(resolved.nets.some((net) => net.id === `net_${hdmiTxSliceIds.txVideoProvider}_tmds2_p`)).toBe(false);
+  });
+
+  it("does not emit partial inline topology when a provider requirement fails", () => {
+    const source = createHdmiTxSliceProject({ omitCtrl: true });
+    const failedSource: ProjectSource = {
+      ...source,
+      nodes: source.nodes.map((node) =>
+        node.id === hdmiTxSliceIds.hdmiFunction && node.kind === "intent.function"
+          ? {
+              ...node,
+              include: {
+                ...node.include,
+                seriesTermination: { mode: "required", value: "270ohm" }
+              }
+            }
+          : node
+      )
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(failedSource);
+
+    expect(resolved.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "PROVIDER_REQUIREMENT_UNSATISFIED"
+    );
+    expect(resolved.generated.filter((item) => item.sourceMap.feature === "seriesTermination")).toEqual([]);
+    expect(resolved.nets.some((net) => net.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(false);
+    expect(resolved.nets.some((net) => net.name === "HDMI_5V")).toBe(true);
+    expect(resolved.dependencies["@nocad/passives"]).toBeUndefined();
+  });
+
+  it("applies the same inline operation to a non-HDMI function", () => {
+    const contract = "@nocad/io:digital_output.v1";
+    const source = createDigitalSeriesProject(contract);
+    const resolved = expectAllEdgePermutationsToResolveExactly(source);
+    const providerEdgeId = "edge_digital_provider";
+    const componentId = `series_${providerEdgeId}_signal`;
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.generated).toContainEqual({
+      id: componentId,
+      kind: "component",
+      component: "@nocad/passives:RESISTOR",
+      value: "47ohm",
+      connects: [`net_${providerEdgeId}_signal_provider`, `net_${providerEdgeId}_signal_connector`],
+      sourceEdge: providerEdgeId,
+      placementHint: { edge: providerEdgeId, near: "provider" },
+      sourceMap: {
+        edge: providerEdgeId,
+        feature: "seriesProtection",
+        signal: "signal"
+      }
+    });
+    expect(resolved.nets.map((net) => net.name)).toEqual([
+      "DIGITAL_SIGNAL_PROVIDER",
+      "DIGITAL_SIGNAL_CONNECTOR"
+    ]);
+  });
+
+  it("diagnoses multiple active interposers for one signal without chaining them", () => {
+    const contract = "@nocad/io:digital_output.v1";
+    const definition = functions[contract];
+
+    if (!definition?.topology.inlineRules?.[0]) {
+      throw new Error("Missing digital inline topology fixture.");
+    }
+
+    const originalRules = definition.topology.inlineRules;
+    definition.topology.inlineRules = [
+      ...originalRules,
+      {
+        ...originalRules[0],
+        id: "duplicateSeriesProtection",
+        generatedIdPrefix: "duplicate_series"
+      }
+    ];
+
+    try {
+      const resolved = expectAllEdgePermutationsToResolveExactly(createDigitalSeriesProject(contract));
+
+      expect(resolved.diagnostics).toEqual([
+        expect.objectContaining({ code: "MULTIPLE_INLINE_INTERPOSERS" })
+      ]);
+      expect(resolved.generated).toEqual([]);
+      expect(resolved.nets).toEqual([
+        expect.objectContaining({
+          id: "net_edge_digital_provider_signal",
+          name: "DIGITAL_SIGNAL"
+        })
+      ]);
+      expect(resolved.dependencies["@nocad/passives"]).toBeUndefined();
+    } finally {
+      definition.topology.inlineRules = originalRules;
+    }
+  });
+
+  it("diagnoses an active inline rule that selects an unknown signal group", () => {
+    const contract = "@nocad/io:digital_output.v1";
+    const definition = functions[contract];
+
+    if (!definition?.topology.inlineRules?.[0]) {
+      throw new Error("Missing digital inline topology fixture.");
+    }
+
+    const originalRules = definition.topology.inlineRules;
+    definition.topology.inlineRules = [
+      {
+        ...originalRules[0],
+        signals: { group: "missing_group" }
+      }
+    ];
+
+    try {
+      const resolved = expectAllEdgePermutationsToResolveExactly(createDigitalSeriesProject(contract));
+
+      expect(resolved.diagnostics).toEqual([
+        expect.objectContaining({ code: "INLINE_SIGNAL_GROUP_NOT_FOUND" })
+      ]);
+      expect(resolved.generated).toEqual([]);
+      expect(resolved.nets).toEqual([
+        expect.objectContaining({ id: "net_edge_digital_provider_signal" })
+      ]);
+    } finally {
+      definition.topology.inlineRules = originalRules;
+    }
+  });
+
+  it("rejects invalid inline component and terminal metadata without splitting nets", () => {
+    const contract = "@nocad/io:digital_output.v1";
+    const definition = functions[contract];
+
+    if (!definition?.topology.inlineRules?.[0]) {
+      throw new Error("Missing digital inline topology fixture.");
+    }
+
+    const originalRules = definition.topology.inlineRules;
+    const baseRule = originalRules[0];
+    const invalidRules = [
+      {
+        ...baseRule,
+        component: "@nocad/passives:MISSING"
+      },
+      {
+        ...baseRule,
+        pins: { provider: "missing", connector: "2" }
+      },
+      {
+        ...baseRule,
+        pins: { provider: "1", connector: "1" }
+      }
+    ];
+
+    try {
+      for (const invalidRule of invalidRules) {
+        definition.topology.inlineRules = [invalidRule];
+        const resolved = expectAllEdgePermutationsToResolveExactly(createDigitalSeriesProject(contract));
+
+        expect(resolved.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+          invalidRule.component === "@nocad/passives:MISSING"
+            ? "INLINE_COMPONENT_NOT_FOUND"
+            : "INLINE_COMPONENT_TERMINALS_INVALID"
+        ]);
+        expect(resolved.generated).toEqual([]);
+        expect(resolved.nets).toEqual([
+          expect.objectContaining({ id: "net_edge_digital_provider_signal" })
+        ]);
+        expect(resolved.dependencies["@nocad/passives"]).toBeUndefined();
+      }
+    } finally {
+      definition.topology.inlineRules = originalRules;
+    }
   });
 
   it("resolves direct TMDS output from a generic FPGA GPIO pin pool", () => {
@@ -791,7 +1135,7 @@ describe("resolveProject", () => {
       blueBits: 8
     });
     expect(resolved.nets.map((net) => net.name)).toEqual(
-      expect.arrayContaining(["PIXEL_PCLK", "I2C_SDA", "HDMI_TMDS2_P", "HDMI_5V"])
+      expect.arrayContaining(["PIXEL_PCLK", "I2C_SDA", "HDMI_TMDS2_P_PROVIDER", "HDMI_5V"])
     );
   });
 
@@ -1124,10 +1468,13 @@ describe("resolveProject", () => {
     const resolved = expectAllEdgePermutationsToResolveExactly(mixedSource);
 
     expect(resolved.diagnostics).toEqual([]);
-    expect(resolved.generated.map((item) => item.id)).toEqual([
-      "pullup_edge_0_sensor_bus_sda",
-      "pullup_edge_0_sensor_bus_scl"
-    ]);
+    expect(resolved.generated.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        "pullup_edge_0_sensor_bus_sda",
+        "pullup_edge_0_sensor_bus_scl"
+      ])
+    );
+    expect(resolved.generated.filter((item) => item.sourceMap.feature === "seriesTermination")).toHaveLength(8);
     expect(resolved.resolvedChoices.some((choice) => choice.sourceEdge === hdmiTxSliceIds.txVideoProvider)).toBe(true);
   });
 
@@ -1643,6 +1990,46 @@ function createRp2350HdmiTxProject(order: "ctrl-first" | "dpi-first"): ProjectSo
       ...source.edges.filter(
         (edge) => edge.id !== hdmiTxSliceIds.ctrlConnection && edge.id !== hdmiTxSliceIds.dpiConnection
       )
+    ]
+  };
+}
+
+function createDigitalSeriesProject(contract: string): ProjectSource {
+  return {
+    schema: "nocad.project.v0",
+    id: "digital-series-interposer",
+    name: "Digital series interposer",
+    dependencies: {
+      "@nocad/io": "0.1.0",
+      "@nocad/rp2350": "0.1.0"
+    },
+    nodes: [
+      { id: "mcu", kind: "component", component: "@nocad/rp2350:RP2350A" },
+      {
+        id: "digital-function",
+        kind: "intent.function",
+        function: contract,
+        include: {
+          seriesProtection: { mode: "required", value: "47ohm" }
+        }
+      },
+      { id: "indicator", kind: "component", component: "@nocad/io:LED" }
+    ],
+    edges: [
+      {
+        id: "edge_digital_provider",
+        kind: "intent.provides",
+        from: { node: "mcu", port: "digital_out" },
+        to: { node: "digital-function" },
+        contract
+      },
+      {
+        id: "edge_digital_exposure",
+        kind: "intent.exposes",
+        from: { node: "digital-function" },
+        to: { node: "indicator", port: "input" },
+        contract
+      }
     ]
   };
 }
