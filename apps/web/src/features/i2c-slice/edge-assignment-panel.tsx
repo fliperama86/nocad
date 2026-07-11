@@ -1,5 +1,15 @@
-import { getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
-import type { ComponentPinOption } from "@nocad/intent-core";
+import { contracts, functions, getComponentPinOptions, getI2cPinPairOptions } from "@nocad/intent-core";
+import type {
+  ComponentPinOption,
+  ConnectionContract,
+  ContractParamDefinition,
+  ContractParams,
+  ContractParamValue,
+  ContractSignal,
+  FunctionIncludeDefinition,
+  FunctionIncludeFieldDefinition,
+  FunctionSignalDefinition
+} from "@nocad/intent-core";
 import type {
   FunctionNode,
   IntentConnectionEdge,
@@ -11,7 +21,14 @@ import type {
 } from "@nocad/intent-core";
 
 import { cn } from "../../lib/utils";
-import { Panel, PanelHeader } from "./panel";
+import { Panel } from "./panel";
+import {
+  fixedProviderPinsForEdge,
+  providerModeDefinitionForEdge,
+  providerModesForEdge,
+  providerSignalIsEditable
+} from "./provider-assignment";
+import type { ProviderModeOption } from "./provider-assignment";
 
 type PinPair = {
   sda: string;
@@ -19,39 +36,9 @@ type PinPair = {
 };
 
 type SelectableIntentEdge = IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge;
-type ProviderModeOption = {
-  label: string;
-  value: string;
-};
-type ProviderSignal = {
-  id: string;
-  label: string;
-};
+type ProviderSignal = FunctionSignalDefinition;
 type MappingSource = "auto" | "mode" | "unassigned" | "user";
 
-const defaultProviderModes: ProviderModeOption[] = [
-  { label: "Auto", value: "auto" },
-  { label: "Custom GPIO", value: "custom_gpio" }
-];
-
-const providerModesByComponent: Record<string, ProviderModeOption[]> = {
-  "@nocad/rp2350:RP2350A": [
-    { label: "Auto", value: "auto" },
-    { label: "HSTX", value: "hstx" },
-    { label: "PIO GPIO", value: "pio_gpio" },
-    { label: "Custom GPIO", value: "custom_gpio" }
-  ]
-};
-const tmdsSignals: ProviderSignal[] = [
-  { id: "tmds2_p", label: "D2+" },
-  { id: "tmds2_n", label: "D2-" },
-  { id: "tmds1_p", label: "D1+" },
-  { id: "tmds1_n", label: "D1-" },
-  { id: "tmds0_p", label: "D0+" },
-  { id: "tmds0_n", label: "D0-" },
-  { id: "clock_p", label: "CLK+" },
-  { id: "clock_n", label: "CLK-" }
-];
 const gpio12To19Preset = {
   clock_n: "gpio19",
   clock_p: "gpio18",
@@ -62,16 +49,13 @@ const gpio12To19Preset = {
   tmds2_n: "gpio13",
   tmds2_p: "gpio12"
 };
-const derivedPinsByProviderMode: Record<string, Record<string, string>> = {
-  auto: gpio12To19Preset,
-  hstx: gpio12To19Preset,
-  pio_gpio: gpio12To19Preset
-};
 
 export function EdgeAssignmentPanel({
   className,
   onLockCurrent,
+  onApplyConnectionPreset,
   onSetAuto,
+  onSetConnectionParam,
   onSetFunctionInclude,
   onSetManualPair,
   onSetProviderMode,
@@ -83,9 +67,11 @@ export function EdgeAssignmentPanel({
   source
 }: {
   className?: string;
+  onApplyConnectionPreset: (edgeId: string, params: ContractParams) => void;
   onLockCurrent: (edgeId: string) => void;
   onSetAuto: (edgeId: string) => void;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetConnectionParam: (edgeId: string, param: string, value: ContractParamValue) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
   onSetManualPair: (edgeId: string, pair: PinPair) => void;
   onSetProviderMode: (edgeId: string, providerMode: string) => void;
   onSetProviderPin: (edgeId: string, signal: string, pin: string | undefined) => void;
@@ -101,8 +87,7 @@ export function EdgeAssignmentPanel({
 
   return (
     <Panel className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
-      <PanelHeader eyebrow="Properties" title="Selection" />
-      <div className="grid gap-4 overflow-auto p-4">
+      <div className="grid gap-3 overflow-auto p-3">
         {!selectedEdgeId && !selectedNode ? (
           <EmptyState text="Select a node or edge to inspect its source intent." />
         ) : !edge ? (
@@ -115,8 +100,10 @@ export function EdgeAssignmentPanel({
           <I2cEdgeProperties
             edge={edge}
             labels={labels}
+            onApplyConnectionPreset={onApplyConnectionPreset}
             onLockCurrent={onLockCurrent}
             onSetAuto={onSetAuto}
+            onSetConnectionParam={onSetConnectionParam}
             onSetManualPair={onSetManualPair}
             resolved={resolved}
             source={source}
@@ -132,6 +119,8 @@ export function EdgeAssignmentPanel({
             pinOptions={getComponentPinOptions(source, edge.from.node, "gpio")}
             resolvedChoice={resolved.resolvedChoices.find((choice) => choice.sourceEdge === edge.id)}
             signals={providerSignalsForEdge(source, edge)}
+            source={source}
+            resolved={resolved}
           />
         ) : (
           <ExposesEdgeProperties edge={edge} labels={labels} />
@@ -146,7 +135,7 @@ function NodeProperties({
   onSetFunctionInclude
 }: {
   node: ProjectNode;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
   if (node.kind === "intent.function") {
     return <FunctionNodeProperties node={node} onSetFunctionInclude={onSetFunctionInclude} />;
@@ -168,8 +157,10 @@ function FunctionNodeProperties({
   onSetFunctionInclude
 }: {
   node: FunctionNode;
-  onSetFunctionInclude: (nodeId: string, feature: string, enabled: boolean) => void;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
+  const definition = functions[node.function];
+
   return (
     <>
       <NodeHeading node={node} />
@@ -178,75 +169,212 @@ function FunctionNodeProperties({
         <Field label="Function" value={node.function} />
       </div>
 
-      {node.function === "@nocad/video:hdmi_output.v1" ? (
+      {definition ? (
         <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
           <div className="text-sm font-medium">Features</div>
-          <FeatureToggle
-            checked={node.include?.ddc !== false && Boolean(node.include?.ddc)}
-            label="DDC"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "ddc", enabled)}
-          />
-          <FeatureToggle
-            checked={node.include?.hpd !== false && Boolean(node.include?.hpd)}
-            label="HPD"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "hpd", enabled)}
-          />
-          <FeatureToggle
-            checked={Boolean(node.include?.cec)}
-            label="CEC"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "cec", enabled)}
-          />
-          <FeatureToggle
-            checked={node.include?.source5v !== false && Boolean(node.include?.source5v)}
-            label="5V source"
-            onChange={(enabled) => onSetFunctionInclude(node.id, "source5v", enabled)}
-          />
+          {Object.entries(definition.include).map(([featureId, featureDefinition]) => (
+            <IncludeControl
+              definition={featureDefinition}
+              featureId={featureId}
+              key={featureId}
+              node={node}
+              onSetFunctionInclude={onSetFunctionInclude}
+            />
+          ))}
         </div>
-      ) : null}
+      ) : (
+        <EmptyState text="This function has no render schema yet." />
+      )}
     </>
   );
 }
 
-function FeatureToggle({
-  checked,
-  label,
-  onChange
+function IncludeControl({
+  definition,
+  featureId,
+  node,
+  onSetFunctionInclude
 }: {
-  checked: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
+  definition: FunctionIncludeDefinition;
+  featureId: string;
+  node: FunctionNode;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
 }) {
+  if (definition.kind === "boolean") {
+    return (
+      <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+        <span className="font-medium">{definition.label}</span>
+        <input
+          checked={includeBooleanValue(node, featureId, definition.default)}
+          className="size-4 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={definition.readonly}
+          onChange={(event) => onSetFunctionInclude(node.id, featureId, event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+    );
+  }
+
+  if (definition.kind === "enum") {
+    return (
+      <label className="grid gap-2 rounded-md border border-border px-3 py-2 text-sm">
+        <span className="font-medium">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => onSetFunctionInclude(node.id, featureId, event.target.value)}
+          value={includeStringValue(node, featureId, definition.default ?? definition.options[0]?.value ?? "")}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  const objectValue = includeObjectValue(node, featureId);
+
   return (
-    <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
-      <span className="font-medium">{label}</span>
+    <div className="grid gap-2 rounded-md border border-border px-3 py-2 text-sm">
+      <div className="font-medium">{definition.label}</div>
+      {Object.entries(definition.fields).map(([fieldId, fieldDefinition]) => (
+        <IncludeObjectField
+          definition={fieldDefinition}
+          featureId={featureId}
+          fieldId={fieldId}
+          key={fieldId}
+          node={node}
+          objectValue={objectValue}
+          onSetFunctionInclude={onSetFunctionInclude}
+        />
+      ))}
+    </div>
+  );
+}
+
+function IncludeObjectField({
+  definition,
+  featureId,
+  fieldId,
+  node,
+  objectValue,
+  onSetFunctionInclude
+}: {
+  definition: FunctionIncludeFieldDefinition;
+  featureId: string;
+  fieldId: string;
+  node: FunctionNode;
+  objectValue: Record<string, unknown>;
+  onSetFunctionInclude: (nodeId: string, feature: string, value: unknown) => void;
+}) {
+  const value = includeObjectFieldValue(objectValue, fieldId, definition.default ?? "");
+  const updateField = (nextValue: string) =>
+    onSetFunctionInclude(node.id, featureId, {
+      ...objectValue,
+      [fieldId]: nextValue
+    });
+
+  if (definition.kind === "enum") {
+    return (
+      <label className="grid gap-1">
+        <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => updateField(event.target.value)}
+          value={value}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label className="grid gap-1">
+      <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
       <input
-        checked={checked}
-        className="size-4 accent-primary"
-        onChange={(event) => onChange(event.target.checked)}
-        type="checkbox"
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        onChange={(event) => updateField(event.target.value)}
+        type="text"
+        value={value}
       />
     </label>
   );
 }
 
+function includeBooleanValue(node: FunctionNode, featureId: string, defaultValue = false) {
+  const value = node.include?.[featureId];
+
+  return typeof value === "boolean" ? value : defaultValue;
+}
+
+function includeStringValue(node: FunctionNode, featureId: string, defaultValue: string) {
+  const value = node.include?.[featureId];
+
+  return typeof value === "string" ? value : defaultValue;
+}
+
+function includeObjectValue(node: FunctionNode, featureId: string): Record<string, unknown> {
+  const value = node.include?.[featureId];
+
+  return isRecord(value) ? value : {};
+}
+
+function includeObjectFieldValue(
+  objectValue: Record<string, unknown>,
+  fieldId: string,
+  defaultValue: string
+) {
+  const value = objectValue[fieldId];
+
+  return typeof value === "string" ? value : defaultValue;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function I2cEdgeProperties({
   edge,
   labels,
+  onApplyConnectionPreset,
   onLockCurrent,
   onSetAuto,
+  onSetConnectionParam,
   onSetManualPair,
   resolved,
   source
 }: {
   edge: IntentConnectionEdge;
   labels: Map<string, string>;
+  onApplyConnectionPreset: (edgeId: string, params: ContractParams) => void;
   onLockCurrent: (edgeId: string) => void;
   onSetAuto: (edgeId: string) => void;
+  onSetConnectionParam: (edgeId: string, param: string, value: ContractParamValue) => void;
   onSetManualPair: (edgeId: string, pair: PinPair) => void;
   resolved: ResolvedProject;
   source: ProjectSource;
 }) {
   const choice = resolved.resolvedChoices.find((resolvedChoice) => resolvedChoice.sourceEdge === edge.id);
+
+  if (edge.contract !== "builtin:i2c.v1") {
+    return (
+      <GenericConnectionEdgeProperties
+        choice={choice}
+        edge={edge}
+        labels={labels}
+        onApplyConnectionPreset={onApplyConnectionPreset}
+        onSetConnectionParam={onSetConnectionParam}
+      />
+    );
+  }
+
   const options = getI2cPinPairOptions(source, edge.id);
   const sourcePair = bindingPair(edge.bindings);
   const resolvedPair = bindingPair(choice?.selected.bindings);
@@ -322,6 +450,293 @@ function I2cEdgeProperties({
   );
 }
 
+function GenericConnectionEdgeProperties({
+  choice,
+  edge,
+  labels,
+  onApplyConnectionPreset,
+  onSetConnectionParam
+}: {
+  choice: ResolvedProject["resolvedChoices"][number] | undefined;
+  edge: IntentConnectionEdge;
+  labels: Map<string, string>;
+  onApplyConnectionPreset: (edgeId: string, params: ContractParams) => void;
+  onSetConnectionParam: (edgeId: string, param: string, value: ContractParamValue) => void;
+}) {
+  const bindings = Object.entries(choice?.selected.bindings ?? {});
+  const contract = contracts[edge.contract];
+
+  return (
+    <>
+      <EdgeHeading edge={edge} labels={labels} />
+
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <Field label="Contract" value={contract?.label ? `${contract.label} (${edge.contract})` : edge.contract} />
+        <Field label="From port" value={edge.from.port ?? "from"} />
+        <Field label="To port" value={edge.to.port ?? "to"} />
+        <Field label="Resolved signals" value={bindings.length.toString()} />
+      </div>
+
+      <ContractParamsEditor
+        contract={contract}
+        onApplyPreset={(params) => onApplyConnectionPreset(edge.id, params)}
+        onSetParam={(param, value) => onSetConnectionParam(edge.id, param, value)}
+        params={edge.params}
+      />
+
+      <SignalPreview contract={contract} params={edge.params} />
+    </>
+  );
+}
+
+function ContractParamsEditor({
+  contract,
+  onApplyPreset,
+  onSetParam,
+  params
+}: {
+  contract: ConnectionContract | undefined;
+  onApplyPreset: (params: ContractParams) => void;
+  onSetParam: (param: string, value: ContractParamValue) => void;
+  params: ContractParams | undefined;
+}) {
+  const paramDefinitions = Object.entries(contract?.params ?? {});
+
+  if (!contract || paramDefinitions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-3 rounded-md border border-border bg-background px-3 py-3">
+      <div className="text-sm font-medium">Connection params</div>
+
+      {contract.presets && contract.presets.length > 0 ? (
+        <div className="grid gap-2">
+          <div className="text-xs font-medium text-muted-foreground">Presets</div>
+          <div className="flex flex-wrap gap-1.5">
+            {contract.presets.map((preset) => (
+              <button
+                className={modeButtonClass(presetMatches(params, preset.params))}
+                key={preset.value}
+                onClick={() => onApplyPreset(preset.params)}
+                type="button"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-2">
+        {paramDefinitions.map(([paramId, definition]) => (
+          <ContractParamControl
+            definition={definition}
+            key={paramId}
+            onSetParam={onSetParam}
+            params={params}
+            paramId={paramId}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContractParamControl({
+  definition,
+  onSetParam,
+  params,
+  paramId
+}: {
+  definition: ContractParamDefinition;
+  onSetParam: (param: string, value: ContractParamValue) => void;
+  params: ContractParams | undefined;
+  paramId: string;
+}) {
+  const value = contractParamValue(params, paramId, definition);
+
+  if (definition.kind === "boolean") {
+    return (
+      <label className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+        <span className="font-medium">{definition.label}</span>
+        <input
+          checked={Boolean(value)}
+          className="size-4 accent-primary"
+          onChange={(event) => onSetParam(paramId, event.target.checked)}
+          type="checkbox"
+        />
+      </label>
+    );
+  }
+
+  if (definition.kind === "enum") {
+    return (
+      <label className="grid gap-1 text-sm">
+        <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => onSetParam(paramId, event.target.value)}
+          value={String(value)}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  if (definition.options) {
+    return (
+      <label className="grid gap-1 text-sm">
+        <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          onChange={(event) => onSetParam(paramId, Number(event.target.value))}
+          value={String(value)}
+        >
+          {definition.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label className="grid gap-1 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">{definition.label}</span>
+      <input
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        max={definition.max}
+        min={definition.min}
+        onChange={(event) => onSetParam(paramId, Number(event.target.value))}
+        type="number"
+        value={String(value)}
+      />
+    </label>
+  );
+}
+
+function contractParamValue(
+  params: ContractParams | undefined,
+  paramId: string,
+  definition: ContractParamDefinition
+): ContractParamValue {
+  const authoredValue = params?.[paramId];
+
+  if (authoredValue !== undefined) {
+    return authoredValue;
+  }
+
+  if (definition.default !== undefined) {
+    return definition.default;
+  }
+
+  if (definition.kind === "boolean") {
+    return false;
+  }
+
+  if (definition.kind === "integer") {
+    return definition.options?.[0]?.value ?? definition.min ?? 0;
+  }
+
+  return definition.options[0]?.value ?? "";
+}
+
+function presetMatches(currentParams: ContractParams | undefined, presetParams: ContractParams) {
+  return Object.entries(presetParams).every(([paramId, value]) => currentParams?.[paramId] === value);
+}
+
+function SignalPreview({
+  contract,
+  params
+}: {
+  contract: ConnectionContract | undefined;
+  params: ContractParams | undefined;
+}) {
+  if (!contract) {
+    return null;
+  }
+
+  const signals = Object.keys(activeContractSignals(contract, mergeDefaultContractParams(contract.id, params)));
+
+  return (
+    <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium">Active signals</div>
+        <div className="font-mono text-xs text-muted-foreground">{signals.length}</div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {signals.map((signal) => (
+          <span className="rounded-sm bg-muted px-1.5 py-1 font-mono text-[11px] text-muted-foreground" key={signal}>
+            {signal}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function mergeDefaultContractParams(contractId: string, params: ContractParams | undefined): ContractParams | undefined {
+  const defaults = defaultContractParams(contracts[contractId]);
+  const merged = {
+    ...(defaults ?? {}),
+    ...(params ?? {})
+  };
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function defaultContractParams(contract: ConnectionContract | undefined): ContractParams | undefined {
+  const params = Object.fromEntries(
+    Object.entries(contract?.params ?? {})
+      .filter(([, definition]) => definition.default !== undefined)
+      .map(([paramId, definition]) => [paramId, definition.default])
+  ) as ContractParams;
+
+  return Object.keys(params).length > 0 ? params : undefined;
+}
+
+function activeContractSignals(contract: ConnectionContract, params: ContractParams | undefined): Record<string, ContractSignal> {
+  if (!contract.signalPlan) {
+    return contract.signals;
+  }
+
+  const signals: Record<string, ContractSignal> = {};
+  const includeSignal = (signal: string) => {
+    const definition = contract.signals[signal];
+
+    if (definition) {
+      signals[signal] = definition;
+    }
+  };
+
+  for (const item of contract.signalPlan) {
+    if (item.kind === "fixed") {
+      item.signals.forEach(includeSignal);
+    } else if (item.kind === "conditional") {
+      if (params?.[item.param]) {
+        includeSignal(item.signal);
+      }
+    } else {
+      const value = params?.[item.widthParam];
+      const width = typeof value === "number" ? value : item.maxWidth;
+
+      for (let index = 0; index < Math.min(width, item.maxWidth); index += 1) {
+        includeSignal(`${item.prefix}${index}`);
+      }
+    }
+  }
+
+  return signals;
+}
+
 function ProviderEdgeProperties({
   edge,
   labels,
@@ -331,7 +746,9 @@ function ProviderEdgeProperties({
   onSetProviderPinPreset,
   pinOptions,
   resolvedChoice,
-  signals
+  resolved,
+  signals,
+  source
 }: {
   edge: IntentProvidesEdge;
   labels: Map<string, string>;
@@ -341,7 +758,9 @@ function ProviderEdgeProperties({
   onSetProviderPinPreset: (edgeId: string, pinsBySignal: Record<string, string>) => void;
   pinOptions: ComponentPinOption[];
   resolvedChoice: ResolvedProject["resolvedChoices"][number] | undefined;
+  resolved: ResolvedProject;
   signals: ProviderSignal[];
+  source: ProjectSource;
 }) {
   const mode = edge.strategy?.providerMode ?? "auto";
 
@@ -349,7 +768,12 @@ function ProviderEdgeProperties({
     <>
       <EdgeHeading edge={edge} labels={labels} />
 
-      <div className="grid grid-cols-2 rounded-md border border-border p-1">
+      <div
+        className={cn(
+          "grid rounded-md border border-border p-1",
+          modes.length === 1 ? "grid-cols-1" : "grid-cols-2"
+        )}
+      >
         {modes.map((providerMode) => (
           <button
             className={modeButtonClass(mode === providerMode.value)}
@@ -368,6 +792,8 @@ function ProviderEdgeProperties({
         <Field label="Function port" value={edge.to.port ?? "source"} />
       </div>
 
+      <ProviderRequirements edge={edge} labels={labels} mode={mode} resolved={resolved} source={source} />
+
       <SignalMapping
         edge={edge}
         mode={mode}
@@ -376,8 +802,119 @@ function ProviderEdgeProperties({
         pinOptions={pinOptions}
         resolvedChoice={resolvedChoice}
         signals={signals}
+        source={source}
       />
     </>
+  );
+}
+
+function ProviderRequirements({
+  edge,
+  labels,
+  mode,
+  resolved,
+  source
+}: {
+  edge: IntentProvidesEdge;
+  labels: Map<string, string>;
+  mode: string;
+  resolved: ResolvedProject;
+  source: ProjectSource;
+}) {
+  const modeDefinition = providerModeDefinitionForEdge(source, edge, mode);
+  const requirements = Object.entries(modeDefinition?.requires?.ports ?? {}).filter(([, requirement]) => !requirement.optional);
+
+  if (requirements.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+      <div className="text-sm font-medium">Provider requirements</div>
+      {requirements.map(([port, requirement]) => {
+        const status = providerRequirementStatus(source, resolved, edge.from.node, port, requirement.contract);
+
+        return (
+          <div className="grid gap-1 rounded-md bg-muted px-2 py-2 text-xs" key={port}>
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <span className="font-mono font-medium">{port}</span>
+              <span className={requirementStatusClassName(status.state)}>{requirementStatusLabel(status.state)}</span>
+            </div>
+            <div className="text-muted-foreground">
+              needs {acceptedContractsLabel(requirement.contract)}
+              {status.edge ? ` via ${status.edge.label ?? status.edge.role ?? status.edge.id}` : ""}
+            </div>
+            {status.edge ? (
+              <div className="font-mono text-muted-foreground">
+                {endpointLabel(status.edge.from, labels)} {"->"} {endpointLabel(status.edge.to, labels)}
+              </div>
+            ) : (
+              <div className="text-muted-foreground">Drag a compatible source component to this provider to add it.</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type RequirementState = "missing" | "resolved" | "unresolved";
+
+function providerRequirementStatus(
+  source: ProjectSource,
+  resolved: ResolvedProject,
+  nodeId: string,
+  port: string,
+  contract: string | string[]
+) {
+  const acceptedContracts = Array.isArray(contract) ? contract : [contract];
+  const matchingEdge = source.edges.find(
+    (candidate): candidate is IntentConnectionEdge =>
+      candidate.kind === "intent.connection" &&
+      acceptedContracts.includes(candidate.contract) &&
+      (endpointMatchesPort(candidate.from, nodeId, port) || endpointMatchesPort(candidate.to, nodeId, port))
+  );
+
+  if (!matchingEdge) {
+    return { edge: undefined, state: "missing" as RequirementState };
+  }
+
+  return {
+    edge: matchingEdge,
+    state: resolved.resolvedChoices.some((choice) => choice.sourceEdge === matchingEdge.id)
+      ? ("resolved" as RequirementState)
+      : ("unresolved" as RequirementState)
+  };
+}
+
+function endpointMatchesPort(endpoint: { node?: string; port?: string }, nodeId: string, port: string) {
+  return endpoint.node === nodeId && endpoint.port === port;
+}
+
+function acceptedContractsLabel(contract: string | string[]) {
+  const acceptedContracts = Array.isArray(contract) ? contract : [contract];
+
+  return acceptedContracts.map((contractId) => contracts[contractId]?.label ?? contractId).join(" or ");
+}
+
+function requirementStatusLabel(state: RequirementState) {
+  if (state === "resolved") {
+    return "OK";
+  }
+
+  if (state === "unresolved") {
+    return "BROKEN";
+  }
+
+  return "MISSING";
+}
+
+function requirementStatusClassName(state: RequirementState) {
+  return cn(
+    "inline-flex rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold",
+    state === "resolved" && "border-chart-2/40 bg-chart-2/10 text-foreground",
+    state === "unresolved" && "border-chart-4/40 bg-chart-4/10 text-foreground",
+    state === "missing" && "border-border bg-background text-muted-foreground"
   );
 }
 
@@ -388,7 +925,8 @@ function SignalMapping({
   onSetProviderPinPreset,
   pinOptions,
   resolvedChoice,
-  signals
+  signals,
+  source
 }: {
   edge: IntentProvidesEdge;
   mode: string;
@@ -397,8 +935,12 @@ function SignalMapping({
   pinOptions: ComponentPinOption[];
   resolvedChoice: ResolvedProject["resolvedChoices"][number] | undefined;
   signals: ProviderSignal[];
+  source: ProjectSource;
 }) {
-  const derivedPins = derivedPinsByProviderMode[mode] ?? {};
+  const derivedPins = fixedProviderPinsForEdge(source, edge, mode);
+  const presetSupported =
+    presetFitsOptions(gpio12To19Preset, pinOptions) &&
+    Object.keys(gpio12To19Preset).every((signal) => providerSignalIsEditable(source, edge, mode, signal));
   const selectedPins = new Set(
     [
       ...Object.values(derivedPins),
@@ -417,10 +959,9 @@ function SignalMapping({
     <div className="grid gap-3 rounded-md border border-border bg-background px-3 py-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">Signal mapping</span>
-        {mode === "custom_gpio" ? (
+        {presetSupported ? (
           <button
             className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!presetFitsOptions(gpio12To19Preset, pinOptions)}
             onClick={() => onSetProviderPinPreset(edge.id, gpio12To19Preset)}
             type="button"
           >
@@ -436,8 +977,8 @@ function SignalMapping({
           const resolvedPin = resolvedChoice?.selected.bindings[signal.id]?.from?.pin;
           const selectedPin = sourcePin ?? "";
           const visiblePin = sourcePin ?? derivedPin ?? resolvedPin;
-          const source = mappingSource({ derivedPin, mode, resolvedPin, signal: signal.id, sourcePin });
-          const editable = mode === "custom_gpio" || !isTmdsSignal(signal.id);
+          const editable = providerSignalIsEditable(source, edge, mode, signal.id);
+          const mapping = mappingSource({ derivedPin, editable, resolvedPin, sourcePin });
 
           return (
             <label className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-2 text-sm" key={signal.id}>
@@ -468,7 +1009,7 @@ function SignalMapping({
                     {visiblePin ? pinLabel(visiblePin) : "AUTO"}
                   </div>
                 )}
-                <span className={mappingSourceClassName(source)}>{mappingSourceLabel(source, mode)}</span>
+                <span className={mappingSourceClassName(mapping)}>{mappingSourceLabel(mapping, mode)}</span>
               </div>
             </label>
           );
@@ -478,21 +1019,15 @@ function SignalMapping({
   );
 }
 
-function isTmdsSignal(signal: string) {
-  return tmdsSignals.some((item) => item.id === signal);
-}
-
 function mappingSource({
   derivedPin,
-  mode,
+  editable,
   resolvedPin,
-  signal,
   sourcePin
 }: {
   derivedPin: string | undefined;
-  mode: string;
+  editable: boolean;
   resolvedPin: string | undefined;
-  signal: string;
   sourcePin: string | undefined;
 }): MappingSource {
   if (sourcePin) {
@@ -507,7 +1042,7 @@ function mappingSource({
     return "auto";
   }
 
-  return mode === "custom_gpio" || !isTmdsSignal(signal) ? "unassigned" : "auto";
+  return editable ? "unassigned" : "auto";
 }
 
 function mappingSourceLabel(source: MappingSource, mode: string) {
@@ -627,38 +1162,54 @@ function nodeLabels(source: ProjectSource) {
   return new Map(source.nodes.map((node) => [node.id, node.label ?? node.role ?? "Node"]));
 }
 
-function providerModesForEdge(source: ProjectSource, edge: IntentProvidesEdge) {
-  const providerNode = source.nodes.find((node) => node.id === edge.from.node);
-
-  if (providerNode?.kind !== "component") {
-    return defaultProviderModes;
+function endpointLabel(endpoint: { node?: string; pin?: string; port?: string } | undefined, labels: Map<string, string>) {
+  if (!endpoint?.node) {
+    return "unassigned";
   }
 
-  return providerModesByComponent[providerNode.component] ?? defaultProviderModes;
+  return `${labels.get(endpoint.node) ?? endpoint.node}.${endpoint.pin ?? endpoint.port ?? "?"}`;
 }
 
 function providerSignalsForEdge(source: ProjectSource, edge: IntentProvidesEdge): ProviderSignal[] {
   const functionNode = source.nodes.find((node) => node.id === edge.to.node);
 
   if (functionNode?.kind !== "intent.function") {
-    return tmdsSignals;
+    return [];
   }
 
-  const signals = [...tmdsSignals];
+  const definition = functions[functionNode.function];
 
-  if (functionNode.include?.ddc) {
-    signals.push({ id: "ddc_sda", label: "SDA" }, { id: "ddc_scl", label: "SCL" });
+  if (!definition) {
+    return [];
   }
 
-  if (functionNode.include?.hpd) {
-    signals.push({ id: "hpd", label: "HPD" });
+  return definition.signalGroups.flatMap((group) =>
+    signalGroupEnabled(functionNode, group.include, group.include ? definition.include[group.include] : undefined)
+      ? group.signals
+      : []
+  );
+}
+
+function signalGroupEnabled(
+  node: FunctionNode,
+  includeId: string | undefined,
+  includeDefinition: FunctionIncludeDefinition | undefined
+) {
+  if (!includeId) {
+    return true;
   }
 
-  if (functionNode.include?.cec) {
-    signals.push({ id: "cec", label: "CEC" });
+  const value = node.include?.[includeId];
+
+  if (typeof value === "boolean") {
+    return value;
   }
 
-  return signals;
+  if (value === undefined && includeDefinition?.kind === "boolean") {
+    return includeDefinition.default ?? false;
+  }
+
+  return Boolean(value);
 }
 
 function presetFitsOptions(preset: Record<string, string>, pinOptions: ComponentPinOption[]) {

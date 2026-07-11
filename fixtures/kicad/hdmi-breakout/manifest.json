@@ -1,0 +1,72 @@
+{
+  "schema": "nocad.kicad-fixture.v1",
+  "name": "hdmi-breakout",
+  "capturedAt": "2026-07-10",
+  "source": {
+    "repository": "~/Projects/pico-retrodigital",
+    "repositoryHeadAtCapture": "3400eec4b5aba0b10302e5e54ed1dbe0758e3a88",
+    "trackedAtCapture": false,
+    "directory": "hardware/hdmi_breakout/hdmi_breakout"
+  },
+  "rights": {
+    "owner": "user-provided design",
+    "license": "NOASSERTION",
+    "usage": "repository-local test fixture pending an explicit license decision"
+  },
+  "qualification": {
+    "fabricated": "unknown",
+    "hardwareTested": "unknown",
+    "golden": false,
+    "blockers": [
+      "source was untracked at capture",
+      "license is not explicit",
+      "fabrication and hardware-test status are not recorded"
+    ]
+  },
+  "files": [
+    {
+      "path": "hdmi_breakout.kicad_pcb",
+      "bytes": 72443,
+      "sha256": "1f3799b15f06591c8dc239b006508886be4069c4e09ba5d6b74222fbf73bac7e"
+    },
+    {
+      "path": "hdmi_breakout.kicad_pro",
+      "bytes": 15798,
+      "sha256": "8f66d87e4e4cba1d9364d3034a1075fbc080eeb1668023bbfb3c69d23e7e4951"
+    },
+    {
+      "path": "hdmi_breakout.kicad_sch",
+      "bytes": 51873,
+      "sha256": "d3bf834ad2dc100dd2fe184b258dc6c06847dbac1587c1d6f66a58fe459f6bc3"
+    }
+  ],
+  "expected": {
+    "kicadGeneratorVersion": "10.0",
+    "schematicSymbols": 10,
+    "schematicComponents": 4,
+    "schematicUniqueLabels": 12,
+    "labeledSignals": [
+      "CEC",
+      "CLK+",
+      "CLK-",
+      "D0+",
+      "D0-",
+      "D1+",
+      "D1-",
+      "D2+",
+      "D2-",
+      "HDP",
+      "SCL",
+      "SDA"
+    ],
+    "copperLayers": 2,
+    "footprints": 4,
+    "pads": 41,
+    "trackSegments": 52,
+    "vias": 0,
+    "zones": 1,
+    "outlineWidthMm": 22,
+    "outlineHeightMm": 41,
+    "selectedNetRoutingCandidate": "SCL"
+  }
+}

@@ -168,6 +168,68 @@ Provider modes live in component definitions. A source edge selects a provider m
 
 The target function node does not know what `hstx` means. The RP2350 package defines that mode, its required resources, its pin constraints, and any implementation-specific signal mapping options.
 
+### Provider Chains
+
+A function node describes board-level behavior at an external or user-facing boundary. Implementation choices are represented by provider topology. If a user chooses an HDMI transmitter IC instead of direct TMDS drive, the HDMI function node is unchanged. The `intent.provides` edge simply moves from the MCU or FPGA to the transmitter IC, and the upstream pixel and control links become ordinary `intent.connection` edges.
+
+Direct drive:
+
+```txt
+mcu.video_out --intent.provides--> hdmi_output --intent.exposes--> hdmi_connector
+```
+
+HDMI transmitter IC:
+
+```txt
+mcu.dpi_out --intent.connection, @nocad/video:pixel_stream.v1 { transport: parallel_rgb, rgb: 5/6/5 }--> tx.video_in
+mcu.i2c     --intent.connection, builtin:i2c.v1--> tx.ctrl
+tx.hdmi_tx  --intent.provides---------------> hdmi_output --intent.exposes--> hdmi_connector
+```
+
+The `hdmi_output` node and its `intent.exposes` edge to the connector remain the same in both cases. The difference is which concrete port provides the function, and which upstream contracts must be satisfied before that provider mode is valid.
+
+Provider modes may declare cross-port requirements. A provider requirement states that a port on the same component must be bound to a compatible contract before this mode can provide the function. Requirements are mandatory by default; use `"optional": true` only for dependencies that improve or modify a mode but are not required for validity.
+
+```json
+{
+  "ports": {
+    "hdmi_tx": {
+      "kind": "fixed_port",
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "hdmi_1v4": {
+              "requires": {
+                "ports": {
+                  "video_in": {
+                    "contract": "@nocad/video:pixel_stream.v1"
+                  },
+                  "ctrl": {
+                    "contract": "builtin:i2c.v1"
+                  }
+                }
+              },
+              "signalMap": {
+                "tmds2.p": { "pin": "tmds2_p" },
+                "tmds2.n": { "pin": "tmds2_n" },
+                "ddc.sda": { "pin": "ddc_sda" },
+                "ddc.scl": { "pin": "ddc_scl" },
+                "hpd": { "pin": "hpd" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The resolver validates these requirements against the resolved graph. If `tx.hdmi_tx` provides `@nocad/video:hdmi_output.v1` but no authored edge binds `tx.video_in` to `@nocad/video:pixel_stream.v1`, the resolver should emit a diagnostic on the provider edge instead of changing the function node schema. If an authored upstream edge exists but fails to resolve, the primary diagnostic should stay on that upstream edge and the provider-requirement diagnostic should not misleadingly tell the user to add an edge that already exists.
+
+This pattern is not HDMI-specific. A USB-serial bridge can provide a debug UART exposure while requiring a USB device connection. An audio codec can provide line out while requiring I2S and I2C. If adding a feature seems to require separate function node types for each implementation, that is a sign that implementation detail has leaked into the function definition and should move to provider topology or provider-mode requirements.
+
 ### Connection Contract
 
 A connection contract is the semantic signal contract for an edge. It may be a built-in contract, a package-provided contract, a project-local contract, or an inline object.
@@ -178,12 +240,34 @@ Examples:
 - `builtin:spi.v1`
 - `builtin:usb2.device.v1`
 - `@nocad/video:hdmi_output.v1`
-- `local:rgb_parallel_8bit.v1`
+- `@nocad/video:pixel_stream.v1`
 - inline custom contract objects
 
 Contracts define signal names, direction, electrical expectations, optional timing information, feature expansion, and routing constraints. They do not need to imply a standard protocol.
 
 An edge must use `contract` for the connection's semantic contract. Endpoint fields use `from.port` and `to.port` to describe where the contract is being bound. Do not use root-level `interface`; it is ambiguous.
+
+Connection contracts may expose parameter metadata. Parameters describe the authored intent of this particular binding; they are not provider modes. For example, a Pico-to-HDMI-TX edge can bind the generic pixel-stream contract and select a parallel RGB transport plus RGB565 color width:
+
+```json
+{
+  "kind": "intent.connection",
+  "from": { "node": "mcu", "port": "dpi_out" },
+  "to": { "node": "tx", "port": "video_in" },
+  "contract": "@nocad/video:pixel_stream.v1",
+  "params": {
+    "transport": "parallel_rgb",
+    "redBits": 5,
+    "greenBits": 6,
+    "blueBits": 5,
+    "hsync": true,
+    "vsync": true,
+    "de": true
+  }
+}
+```
+
+The contract descriptor defines which params are valid, optional UI presets such as RGB332/RGB565/RGB888, and how params expand to active signals. A preset is only a convenience patch over `params`; the resolver should record the resolved params and active bindings, not a hidden mode name.
 
 ### Capability
 
@@ -240,6 +324,16 @@ Non-stable references:
 Physical package pads, semantic roles, user-visible pin names, net labels, and reference designators are properties of stable objects. They can change across packages, imports, renames, or annotation passes, so they should not be used as source-level identity.
 
 Patch operations should prefer semantic targets such as `{ "op": "setEdgeBindings", "edge": "edge_dcb5a3c6-b232-4dbe-8f73-bd7f84aa9b65" }` over raw JSON Pointer paths into ordered arrays. Raw JSON Patch can still be an interchange format, but it should be generated after resolving stable IDs to current document paths.
+
+### Project Document API
+
+The intent-core `ProjectDocument` is the persistent mutation boundary for `nocad.project.v0`. Public patches address stable IDs and cover node/edge addition and removal, dependencies, function include fields, edge bindings/params/strategy, board placements, and atomic batches. Array indices appear only in generated inverse patches so undo can restore exact source ordering; callers do not address graph objects by index.
+
+Every successful edit records the requested semantic patch and its exact inverse. Undo and redo use those inverses, preserve node/edge order and absent optional containers, and expose an inspectable revision history. Failed batches are atomic, no-op patches do not create history, and a new edit invalidates the redo branch. Resolver-derived suggestions may pass `expectedRevision` so stale patches are rejected instead of applying to a newer document.
+
+`getSnapshot()` returns a frozen identity-stable snapshot until the document changes, and `subscribe()` supports external-store adapters without moving document objects into React component state. Returned mutable source copies and patch records are deep clones, so callers cannot mutate stored state or history out of band.
+
+Save/load uses JSON validation without reconstructing known fields, preserving unknown future keys. Ingress rejects duplicate IDs, missing edge-node references, unsupported schemas, and values JSON cannot preserve exactly. A loaded document starts with clean undo, redo, and patch history. The current React slice owns one `ProjectDocument`, subscribes through `useSyncExternalStore`, dispatches all source edits through semantic patches, and keeps only graph positions and transient selection outside the document.
 
 ### Reference Designators And Labels
 
@@ -783,6 +877,28 @@ Packages may attach rules to functions, contracts, features, provider modes, or 
 - preserve source maps and reasons
 - validate hard rules and score soft recommendations
 
+The current TypeScript prototype implements a deliberately narrow first subset of this model. A function definition declares `topology.contract`, may declare a `topology.genericProvider` that maps required pin capabilities onto a component pin pool, may declare supplementary `topology.generatedNets` that connect a matching power domain to a named pin on the exposed component, and may declare `topology.inlineRules` that select a signal group and insert one series component per active conductor. Connection contracts may declare `shuntToPower` rules gated by authored include flags, and component definitions may declare contract-scoped preferred pin groups. Signal groups, explicit and capability-derived provider modes, exposed-port mappings, generated-net provenance, shunt components, series interposers, and contract net-name prefixes are interpreted without function-specific, HDMI-specific, or I2C-specific dispatch. Direct FPGA TMDS through a generic GPIO pin pool, HDMI source 5V, HDMI series termination, I2C pullups, a digital-output series-protection fixture, and a non-I2C biased-signal fixture exercise these paths. More general interposer chains, endpoint/provider-mode selectors, shunt variants, and recommendation scoring remain future topology-rule operations.
+
+The implemented inline-rule subset is represented directly on function topology:
+
+```json
+{
+  "id": "seriesTermination",
+  "kind": "seriesInterposer",
+  "include": "seriesTermination",
+  "enabledWhen": { "field": "mode", "values": ["auto", "required"] },
+  "signals": { "group": "tmds" },
+  "component": "@nocad/passives:RESISTOR",
+  "dependency": "@nocad/passives",
+  "value": { "default": "270ohm", "includeField": "value" },
+  "pins": { "provider": "1", "connector": "2" },
+  "generatedIdPrefix": "series",
+  "placement": { "near": "provider" }
+}
+```
+
+Object-field defaults participate when the include object is absent. An authored `mode: "off"` disables the rule and preserves the original net and dependency state. An active rule that names an unknown signal group is a deterministic package-data diagnostic, not a silent no-op.
+
 Example rule:
 
 ```json
@@ -813,7 +929,7 @@ The lockfile should show the generated topology explicitly:
 
 ```json
 {
-  "id": "gen_mcu_provides_hdmi_tmds2_p_series",
+  "id": "series_mcu_provides_hdmi_tmds2_p",
   "kind": "component",
   "component": "@nocad/passives:RESISTOR",
   "value": "270ohm",
@@ -821,14 +937,21 @@ The lockfile should show the generated topology explicitly:
     "net_mcu_provides_hdmi_tmds2_p_provider",
     "net_mcu_provides_hdmi_tmds2_p_connector"
   ],
+  "placementHint": {
+    "edge": "mcu_provides_hdmi",
+    "near": "provider"
+  },
   "sourceMap": {
-    "node": "hdmi_output",
     "edge": "mcu_provides_hdmi",
     "feature": "seriesTermination",
-    "signal": "tmds2.p"
+    "signal": "tmds2_p"
   }
 }
 ```
+
+The selected logical net is replaced by two resolved nets. The provider segment terminates at generated pin `1`; the connector segment begins at generated pin `2`. Their stable IDs and names use `_provider` / `_connector` and `_PROVIDER` / `_CONNECTOR` suffixes. The generated component's `connects` array is always ordered provider segment first, connector segment second. Both net source maps retain the provider edge, feature, and signal and add a matching `segment`. The resolved pin-assignment choice remains the original provider-to-connector binding so authored intent does not acquire generated IDs.
+
+An active signal may match at most one inline rule. Multiple active interposers for the same signal are diagnosed and the original net remains unsplit; the resolver never creates an implicit chain. The selected component and its provider/connector terminals must exist and be distinct, otherwise package data is diagnosed and the net remains unsplit. Inline components are created only after provider binding and provider requirements resolve successfully. Supplementary function nets such as source 5V retain their independent behavior. The board projection treats generated components as stable placement obligations and preserves both split ratsnest segments; `placementHint.near` supplies an approximate initial anchor, not authored placement.
 
 ## Example: Local Custom Protocol
 

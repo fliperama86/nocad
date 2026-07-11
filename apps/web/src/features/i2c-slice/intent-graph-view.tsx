@@ -6,12 +6,18 @@ import {
   MarkerType,
   Position,
   ReactFlow,
+  applyEdgeChanges,
+  applyNodeChanges,
   type Connection,
   type Edge,
+  type EdgeChange,
+  type FinalConnectionState,
   type Node,
+  type NodeChange,
   type NodeProps,
   type NodeTypes,
   type OnSelectionChangeFunc,
+  useUpdateNodeInternals,
   type Viewport,
   type XYPosition
 } from "@xyflow/react";
@@ -20,7 +26,12 @@ import type { Dispatch, SetStateAction } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
-import { Panel, PanelHeader } from "./panel";
+import { Panel } from "./panel";
+import {
+  providerRequirementHandlesForNode,
+  providerRequirementTargetHandle,
+  type ProviderRequirementHandle
+} from "./provider-requirement-handles";
 
 type NodePositions = Record<string, XYPosition>;
 
@@ -33,6 +44,7 @@ type IntentNodeData = Record<string, unknown> & {
   connectable: boolean;
   details: string[];
   generatedPowerTarget: boolean;
+  providerRequirements: ProviderRequirementHandle[];
   subtitle: string;
   title: string;
   tone: "default" | "function" | "rail" | "warning";
@@ -50,14 +62,18 @@ const maxNodeDetailRows = 4;
 const pointerIntentThreshold = 8;
 
 export function IntentGraphView({
+  connectionFeedback,
   componentTemplates,
   className,
   graphRevision,
+  isValidConnection,
   onAddComponent,
+  onCanvasPaneClick,
   onConnectNodes,
+  onDismissConnectionFeedback,
+  onInvalidConnection,
   onPositionsChange,
-  onRemoveEdges,
-  onRemoveNodes,
+  onRemoveSelection,
   onSelectedEdgeChange,
   onSelectedNodeChange,
   positions,
@@ -65,13 +81,17 @@ export function IntentGraphView({
   source
 }: {
   className?: string;
+  connectionFeedback?: string;
   componentTemplates: ComponentTemplate[];
   graphRevision: number;
+  isValidConnection: (connection: Connection | Edge) => boolean;
   onAddComponent: (template: string) => void;
+  onCanvasPaneClick?: () => void;
   onConnectNodes: (connection: Connection) => void;
+  onDismissConnectionFeedback: () => void;
+  onInvalidConnection: (sourceNodeId: string, targetNodeId: string, targetHandle?: string | null) => void;
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
-  onRemoveEdges: (edgeIds: string[]) => void;
-  onRemoveNodes: (nodeIds: string[]) => void;
+  onRemoveSelection: (selection: { edgeIds: string[]; nodeIds: string[] }) => void;
   onSelectedEdgeChange: (edgeId: string | undefined) => void;
   onSelectedNodeChange: (nodeId: string | undefined) => void;
   positions: NodePositions;
@@ -83,8 +103,28 @@ export function IntentGraphView({
   const [flowReady, setFlowReady] = useState(false);
   const flowContainerRef = useRef<HTMLDivElement>(null);
   const flowModel = useMemo(() => buildFlowModel(source, resolved, positions), [positions, source, resolved]);
-  const graphKey = useMemo(() => createGraphKey(source, graphRevision), [graphRevision, source]);
+  const [flowNodes, setFlowNodes] = useState<IntentFlowNode[]>(flowModel.nodes);
+  const [flowEdges, setFlowEdges] = useState<Edge[]>(flowModel.edges);
+  const previousGraphRevisionRef = useRef(graphRevision);
   const hasSelection = selectedNodeIds.length > 0 || selectedEdgeIds.length > 0;
+
+  useEffect(() => {
+    const shouldResetGraphState = previousGraphRevisionRef.current !== graphRevision;
+    const nextNodeIds = new Set(flowModel.nodes.map((node) => node.id));
+    const nextEdgeIds = new Set(flowModel.edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id));
+
+    previousGraphRevisionRef.current = graphRevision;
+    setFlowNodes((currentNodes) => reconcileNodes(currentNodes, flowModel.nodes, shouldResetGraphState));
+    setFlowEdges((currentEdges) => reconcileEdges(currentEdges, flowModel.edges, shouldResetGraphState));
+    setSelectedNodeIds((currentIds) => {
+      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextNodeIds.has(id));
+      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
+    });
+    setSelectedEdgeIds((currentIds) => {
+      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextEdgeIds.has(id));
+      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
+    });
+  }, [flowModel.edges, flowModel.nodes, graphRevision]);
 
   useEffect(() => {
     const container = flowContainerRef.current;
@@ -120,12 +160,21 @@ export function IntentGraphView({
     }
   }, [onSelectedEdgeChange, onSelectedNodeChange]);
 
+  const updateNodes = useCallback((changes: NodeChange<IntentFlowNode>[]) => {
+    setFlowNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
+  }, []);
+
+  const updateEdges = useCallback((changes: EdgeChange<Edge>[]) => {
+    setFlowEdges((currentEdges) => applyEdgeChanges(changes, currentEdges));
+  }, []);
+
   const clearSelection = useCallback(() => {
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
-  }, [onSelectedEdgeChange, onSelectedNodeChange]);
+    onCanvasPaneClick?.();
+  }, [onCanvasPaneClick, onSelectedEdgeChange, onSelectedNodeChange]);
 
   const commitNodePosition = useCallback((node: IntentFlowNode) => {
     onPositionsChange((currentPositions) => ({
@@ -139,44 +188,36 @@ export function IntentGraphView({
       return;
     }
 
-    if (selectedEdgeIds.length > 0) {
-      onRemoveEdges(selectedEdgeIds);
-    }
-    if (selectedNodeIds.length > 0) {
-      onRemoveNodes(selectedNodeIds);
-    }
+    onRemoveSelection({ edgeIds: selectedEdgeIds, nodeIds: selectedNodeIds });
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [hasSelection, onRemoveEdges, onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
+  }, [hasSelection, onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
 
-  const removeDeletedEdges = useCallback((deletedEdges: Edge[]) => {
-    const deletableEdgeIds = deletedEdges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
-
-    if (deletableEdgeIds.length > 0) {
-      onRemoveEdges(deletableEdgeIds);
-    }
-    onSelectedEdgeChange(undefined);
-    onSelectedNodeChange(undefined);
-    setSelectedEdgeIds([]);
-  }, [onRemoveEdges, onSelectedEdgeChange, onSelectedNodeChange]);
-
-  const removeDeletedNodes = useCallback((deletedNodes: IntentFlowNode[]) => {
-    onRemoveNodes(deletedNodes.map((node) => node.id));
+  const removeDeletedSelection = useCallback(({ edges, nodes }: { edges: Edge[]; nodes: IntentFlowNode[] }) => {
+    onRemoveSelection({
+      edgeIds: edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id),
+      nodeIds: nodes.map((node) => node.id)
+    });
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
     setSelectedEdgeIds([]);
     setSelectedNodeIds([]);
-  }, [onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange]);
+  }, [onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange]);
+
+  const finishConnection = useCallback((_: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+    if (connectionState.isValid === false && connectionState.fromNode && connectionState.toNode) {
+      onInvalidConnection(connectionState.fromNode.id, connectionState.toNode.id, connectionState.toHandle?.id);
+    }
+  }, [onInvalidConnection]);
 
   return (
     <Panel className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
-      <PanelHeader eyebrow="Source graph" title="Intent topology" />
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-2 py-2">
         {componentTemplates.map((template) => (
           <button
-            className="h-8 rounded-md border border-border px-3 text-sm font-medium"
+            className="h-7 rounded-md border border-border px-2.5 text-xs font-medium"
             key={template.id}
             onClick={() => onAddComponent(template.id)}
             type="button"
@@ -185,7 +226,7 @@ export function IntentGraphView({
           </button>
         ))}
         <button
-          className="h-8 rounded-md border border-border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-7 rounded-md border border-border px-2.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!hasSelection}
           onClick={deleteSelection}
           type="button"
@@ -193,6 +234,21 @@ export function IntentGraphView({
           Delete selection
         </button>
       </div>
+      {connectionFeedback ? (
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          role="alert"
+        >
+          <span>{connectionFeedback}</span>
+          <button
+            className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium hover:bg-destructive/10"
+            onClick={onDismissConnectionFeedback}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       <div
         className="h-full min-h-0 flex-1 overflow-hidden rounded-b-md bg-muted/30"
         ref={flowContainerRef}
@@ -203,21 +259,24 @@ export function IntentGraphView({
             className="intent-flow"
             colorMode="system"
             connectionDragThreshold={pointerIntentThreshold}
-            defaultEdges={flowModel.edges}
-            defaultNodes={flowModel.nodes}
             defaultViewport={defaultViewport}
             deleteKeyCode={["Backspace", "Delete"]}
+            edges={flowEdges}
             edgesFocusable
             elementsSelectable
-            key={graphKey}
+            key={graphRevision}
+            isValidConnection={isValidConnection}
+            nodes={flowNodes}
             nodesFocusable
             nodeTypes={nodeTypes}
             nodeClickDistance={pointerIntentThreshold}
             nodeDragThreshold={pointerIntentThreshold}
             onConnect={onConnectNodes}
-            onEdgesDelete={removeDeletedEdges}
+            onConnectEnd={finishConnection}
+            onDelete={removeDeletedSelection}
+            onEdgesChange={updateEdges}
             onNodeDragStop={(_, node) => commitNodePosition(node)}
-            onNodesDelete={removeDeletedNodes}
+            onNodesChange={updateNodes}
             onPaneClick={clearSelection}
             onSelectionChange={updateSelection}
             paneClickDistance={pointerIntentThreshold}
@@ -236,30 +295,60 @@ function sameStringList(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function createGraphKey(source: ProjectSource, revision: number) {
-  return JSON.stringify({
-    edges: source.edges.map((edge) => [
-      edge.id,
-      edge.kind,
-      edge.label,
-      edge.role,
-      edge.kind === "intent.connection" ? edge.strategy?.pinAssignment : undefined,
-      edge.kind === "intent.provides" ? edge.strategy?.providerMode : undefined,
-      edge.kind === "intent.connection" || edge.kind === "intent.provides" ? edge.bindings : undefined
-    ]),
-    nodes: source.nodes.map((node) => [
-      node.id,
-      node.kind,
-      node.label,
-      node.role,
-      node.kind === "intent.function" ? node.function : undefined,
-      node.kind === "intent.function" ? node.include : undefined
-    ]),
-    revision
+function reconcileNodes(
+  currentNodes: IntentFlowNode[],
+  nextNodes: IntentFlowNode[],
+  resetGraphState: boolean
+) {
+  if (resetGraphState) {
+    return nextNodes;
+  }
+
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+
+  return nextNodes.map((nextNode) => {
+    const currentNode = currentById.get(nextNode.id);
+
+    return currentNode
+      ? {
+          ...nextNode,
+          dragging: currentNode.dragging,
+          position: currentNode.position,
+          selected: currentNode.selected
+        }
+      : nextNode;
   });
 }
 
-const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, selected }: NodeProps<IntentFlowNode>) {
+function reconcileEdges(currentEdges: Edge[], nextEdges: Edge[], resetGraphState: boolean) {
+  if (resetGraphState) {
+    return nextEdges;
+  }
+
+  const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+
+  return nextEdges.map((nextEdge) => {
+    const currentEdge = currentById.get(nextEdge.id);
+
+    return currentEdge
+      ? {
+          ...nextEdge,
+          selected: currentEdge.selected
+        }
+      : nextEdge;
+  });
+}
+
+const IntentGraphNode = memo(function IntentGraphNode({ data, id, isConnectable, selected }: NodeProps<IntentFlowNode>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const requirementHandleSignature = data.providerRequirements
+    .map((requirement) => `${requirement.handleId}:${requirement.connectedEdgeId ?? "open"}`)
+    .join("|");
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, requirementHandleSignature, updateNodeInternals]);
+
   return (
     <div
       className={cn(
@@ -280,12 +369,14 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
 
       {data.connectable ? (
         <>
-          <Handle
-            className="!size-3 !border-2 !border-background !bg-foreground"
-            isConnectable={isConnectable}
-            position={Position.Left}
-            type="target"
-          />
+          {data.providerRequirements.length === 0 ? (
+            <Handle
+              className="!size-3 !border-2 !border-background !bg-foreground"
+              isConnectable={isConnectable}
+              position={Position.Left}
+              type="target"
+            />
+          ) : null}
           <Handle
             className="!size-3 !border-2 !border-background !bg-foreground"
             isConnectable={isConnectable}
@@ -343,6 +434,37 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, isConnectable, sel
           </div>
         ))}
       </div>
+      {data.providerRequirements.length > 0 ? (
+        <div className="mt-3 grid gap-1.5 border-t border-border pt-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Requirements</div>
+          {data.providerRequirements.map((requirement) => (
+            <div
+              className="relative flex min-h-7 items-center justify-between gap-2 rounded-sm bg-muted px-2 py-1 text-xs"
+              data-provider-requirement={requirement.port}
+              key={requirement.handleId}
+              title={`${requirement.label}: ${requirement.acceptedContracts.join(" or ")}`}
+            >
+              <Handle
+                aria-label={`Connect ${requirement.label}`}
+                className={cn(
+                  "!-left-[17px] !top-1/2 !size-3 !border-2",
+                  requirement.connectedEdgeId
+                    ? "!border-background !bg-chart-2"
+                    : "!border-foreground !bg-background"
+                )}
+                id={requirement.handleId}
+                isConnectable={isConnectable && !requirement.connectedEdgeId}
+                position={Position.Left}
+                type="target"
+              />
+              <span className="min-w-0 truncate font-medium">{requirement.label}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {requirement.connectedEdgeId ? "Connected" : requirement.optional ? "Optional" : "Required"}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -372,6 +494,9 @@ function buildFlowModel(
     ...pullupTargetIds,
     ...source5vNets.map((net) => net.endpoints.to.node)
   ]);
+  const providerRequirementsByNode = new Map(
+    source.nodes.map((node) => [node.id, providerRequirementHandlesForNode(source, node)])
+  );
 
   const nodes: IntentFlowNode[] = source.nodes.map((node, index) => {
     const tone =
@@ -389,6 +514,7 @@ function buildFlowModel(
         connectable: node.kind === "component" || node.kind === "intent.function",
         details: nodeDetails(node, source.edges, reservations.get(node.id) ?? []),
         generatedPowerTarget: generatedPowerTargetIds.has(node.id),
+        providerRequirements: providerRequirementsByNode.get(node.id) ?? [],
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
         tone
@@ -432,6 +558,10 @@ function buildFlowModel(
           strokeWidth: 2
         },
         target: edge.to.node,
+        targetHandle:
+          edge.kind === "intent.connection"
+            ? providerRequirementTargetHandle(source, edge)
+            : undefined,
         type: "smoothstep"
       }
     ];

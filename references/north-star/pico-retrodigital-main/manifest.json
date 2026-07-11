@@ -1,0 +1,249 @@
+{
+  "schema": "nocad.north-star-reference.v1",
+  "id": "pico-retrodigital-main",
+  "name": "Pico RetroDigital main board",
+  "capturedAt": "2026-07-11",
+  "source": {
+    "requestedProjectStem": "~/Projects/pico-retrodigital/hardware/pico-retrodigital/pico-retrodigital",
+    "resolvedDirectory": "~/Projects/pico-retrodigital/hardware/pico-retrodigital",
+    "repository": "https://github.com/fliperama86/pico-retrodigital.git",
+    "branchAtCapture": "main",
+    "headAtCapture": "3400eec4b5aba0b10302e5e54ed1dbe0758e3a88",
+    "headAuthorDate": "2026-05-14T18:34:06-03:00",
+    "headSubject": "Add JLCPCB part numbers",
+    "captureBasis": "working-tree-content",
+    "cleanAtCapture": false,
+    "workspaceStatus": [
+      {
+        "path": "hardware/hdmi_breakout/",
+        "status": "untracked",
+        "relevance": "outside-this-reference"
+      },
+      {
+        "path": "hardware/pico-retrodigital/pico-retrodigital.kicad_pcb",
+        "status": "modified",
+        "relevance": "pinned-primary-source",
+        "headBlobSha1": "6ea28fefc40ad32714d5df77107d181b8f3b48bf"
+      },
+      {
+        "path": "hardware/pico-retrodigital/pico-retrodigital.pretty/TDP158_RSB_WQFN-40-1EP_5x5mm_P0.4mm_EP3.15x3.15mm.kicad_mod",
+        "status": "untracked",
+        "relevance": "pinned-but-not-referenced-by-captured-board"
+      }
+    ]
+  },
+  "pin": {
+    "algorithm": "sha256",
+    "aggregateEncoding": "selected files sorted by ascending ASCII path bytes; each record is path + NUL + decimal bytes + NUL + lowercase SHA-256 + LF",
+    "files": [
+      {
+        "path": "fabrication-toolkit-options.json",
+        "role": "tool-configuration",
+        "status": "tracked-clean",
+        "bytes": 236,
+        "sha256": "25ad91fbffd0450e85190d29a8d757553e0a812e7967b1dc3b2b60564234f376"
+      },
+      {
+        "path": "fp-lib-table",
+        "role": "library-table",
+        "status": "tracked-clean",
+        "bytes": 169,
+        "sha256": "cef920734492d4d85c7a76541af4949027fe4ff0b77657e7c7966aa72b4ba1c4"
+      },
+      {
+        "path": "jlcpcb/production_files/GERBER-pico-retrodigital.zip",
+        "role": "stale-fabrication-output",
+        "status": "ignored-stale",
+        "bytes": 151748,
+        "sha256": "25abcdb9daebe8cfc04baca2c0a6957626738403ee9123cdcfb934908300b5ce"
+      },
+      {
+        "path": "pico-retrodigital.kicad_dru",
+        "role": "design-rules",
+        "status": "tracked-clean",
+        "bytes": 516,
+        "sha256": "3da3ac176d4fe0ffa000b6631577439f49382654c80faf21100e6fdb0a98b0ae"
+      },
+      {
+        "path": "pico-retrodigital.kicad_pcb",
+        "role": "board-source",
+        "status": "tracked-modified",
+        "bytes": 855656,
+        "sha256": "b91921fb207b6c3c24b4cb46086adcbcb286005c83addd736d1713c6eea853f8"
+      },
+      {
+        "path": "pico-retrodigital.kicad_pro",
+        "role": "project-source",
+        "status": "tracked-clean",
+        "bytes": 18300,
+        "sha256": "85a9a59dc27e352a0a8a51d14a82646de4dabdba67f5fd4d8d269137305b7a27"
+      },
+      {
+        "path": "pico-retrodigital.kicad_sch",
+        "role": "schematic-source",
+        "status": "tracked-clean",
+        "bytes": 403118,
+        "sha256": "2fa76861773fed9d7b83c716b1308ef6404c49366af44710eef2e85b44a6f6ed"
+      },
+      {
+        "path": "pico-retrodigital.kicad_sym",
+        "role": "symbol-library",
+        "status": "tracked-clean",
+        "bytes": 10594,
+        "sha256": "2eebb6dd6de4d93ecfb103abfd538f850c65c5326aec223ceac368a34c5dc681"
+      },
+      {
+        "path": "pico-retrodigital.pretty/IND-SMD_L2.0-W1.6_AOTA-B201610S3R3-101-T.kicad_mod",
+        "role": "footprint-library",
+        "status": "tracked-clean",
+        "bytes": 3257,
+        "sha256": "6bc819e1f74f927f5dbc9e6cc48d0d7302b394c62bc5dcb896f401e5a205ba8a"
+      },
+      {
+        "path": "pico-retrodigital.pretty/SOT-23-5.kicad_mod",
+        "role": "footprint-library",
+        "status": "tracked-clean",
+        "bytes": 3439,
+        "sha256": "2b5d963eb2ae1b3c1195f257b067789bb7992155dc767b2d0051d17d7cb143f9"
+      },
+      {
+        "path": "pico-retrodigital.pretty/TDP158_RSB_WQFN-40-1EP_5x5mm_P0.4mm_EP3.15x3.15mm.kicad_mod",
+        "role": "unreferenced-workspace-footprint",
+        "status": "untracked",
+        "bytes": 7564,
+        "sha256": "e4495502399f4522838cf622106964e853df4d03c844b600282f9ee3f2530f04"
+      },
+      {
+        "path": "pico-retrodigital.pretty/USB_C_Receptacle_Jing_918-418K2023S40001.kicad_mod",
+        "role": "unreferenced-workspace-footprint",
+        "status": "tracked-clean",
+        "bytes": 4610,
+        "sha256": "d2510d7fcd0563bae6007ccb4a1e3be33310e0b0031cac2d9500cc4e377cf8a9"
+      },
+      {
+        "path": "pico-retrodigital_drc_violations.json",
+        "role": "stale-drc-evidence",
+        "status": "ignored-stale",
+        "bytes": 2242,
+        "sha256": "4c549addc0bbb64ae5409acf1aff5a3c9107fb70d855aac0309459436c272f66"
+      },
+      {
+        "path": "production/pico-retrodigital.zip",
+        "role": "stale-fabrication-output",
+        "status": "ignored-stale",
+        "bytes": 149808,
+        "sha256": "0cd19a2a35680f75c658ec68fbb91258c88eef06b36fc48976f5030c840686a6"
+      },
+      {
+        "path": "sym-lib-table",
+        "role": "library-table",
+        "status": "tracked-clean",
+        "bytes": 149,
+        "sha256": "0aa7bee7bef56bb2941b57bb45c7fabe9c22301214252ddc318eb6dbb33d5a20"
+      }
+    ],
+    "designFilePaths": [
+      "fp-lib-table",
+      "pico-retrodigital.kicad_dru",
+      "pico-retrodigital.kicad_pcb",
+      "pico-retrodigital.kicad_pro",
+      "pico-retrodigital.kicad_sch",
+      "pico-retrodigital.kicad_sym",
+      "pico-retrodigital.pretty/IND-SMD_L2.0-W1.6_AOTA-B201610S3R3-101-T.kicad_mod",
+      "pico-retrodigital.pretty/SOT-23-5.kicad_mod",
+      "sym-lib-table"
+    ],
+    "designAggregateSha256": "9fd8b91e18c86eda9b784fecb8082fc353facc73672e427eb18b371365012b2e",
+    "evidenceAggregateSha256": "70ac8638eaa1327486e652a54996227288c33fe5789038505471beb2c9a8f062"
+  },
+  "inventory": {
+    "path": "inventory.json",
+    "bytes": 195217,
+    "sha256": "b2e5119c46aacfd85e2151bb367529133503fbde7620a6c07af1e047d4e9a958"
+  },
+  "rights": {
+    "sourceOrigin": "user-provided local repository",
+    "copyrightHolder": "NOASSERTION",
+    "license": "NOASSERTION",
+    "redistribution": "not-authorized-by-capture",
+    "sourceFilesCopied": false,
+    "note": "No LICENSE or COPYING file was found in the captured repository. This reference retains hashes and normalized facts, not KiCad source or production files."
+  },
+  "qualification": {
+    "golden": false,
+    "fabricated": "unknown",
+    "hardwareTested": "unknown",
+    "currentDrc": "unknown",
+    "drcBaseline": {
+      "reportCapturedAt": "2026-05-14T14:37:23",
+      "reportSha256": "4c549addc0bbb64ae5409acf1aff5a3c9107fb70d855aac0309459436c272f66",
+      "errors": 0,
+      "warnings": 7,
+      "warningType": "lib_footprint_mismatch",
+      "appliesToPinnedBoard": false,
+      "note": "The report predates the dirty July PCB content and therefore is stale evidence, not a current DRC result."
+    },
+    "fabricationBaseline": {
+      "outputsPresent": true,
+      "newestPinnedOutputAt": "2026-05-18T00:10:43-03:00",
+      "appliesToPinnedBoard": false,
+      "orderEvidenceFound": false,
+      "asBuiltLinkFound": false,
+      "note": "Pinned production archives predate the July PCB content. No fabrication order or as-built identity tied to the pinned hashes was found."
+    },
+    "blockers": [
+      "current DRC is unknown",
+      "current ERC is unknown",
+      "external rpi library revision is unknown",
+      "fabrication status is unknown",
+      "hardware-test status is unknown",
+      "license is NOASSERTION",
+      "one untracked footprint exists beside the project",
+      "schematic wire and virtual power-symbol membership is not normalized",
+      "stale production and DRC outputs do not qualify the pinned board",
+      "the primary PCB differs from repository HEAD"
+    ]
+  },
+  "knownIssues": [
+    {
+      "id": "dirty-primary-source",
+      "severity": "info",
+      "detail": "The board source was modified relative to HEAD at capture and is pinned by content hash."
+    },
+    {
+      "id": "duplicate-c5-footprint",
+      "severity": "warning",
+      "detail": "Two PCB footprint UUIDs share the same C5 schematic path, producing 70 footprints for 69 schematic components."
+    },
+    {
+      "id": "external-library-revision",
+      "severity": "warning",
+      "detail": "The external rpi-lib-kicad-rp235x revision used for the captured RP2354B source is unavailable."
+    },
+    {
+      "id": "schematic-connectivity-not-normalized",
+      "severity": "info",
+      "detail": "PCB pad membership is the normalized manufacturing connectivity view; schematic wires and virtual power-symbol memberships are not individually normalized."
+    },
+    {
+      "id": "stale-drc",
+      "severity": "warning",
+      "detail": "The only recorded DRC report predates the pinned board hash."
+    },
+    {
+      "id": "stale-production",
+      "severity": "warning",
+      "detail": "Available production outputs predate the pinned board hash."
+    },
+    {
+      "id": "unknown-erc",
+      "severity": "warning",
+      "detail": "No ERC report tied to the pinned design inputs was found."
+    },
+    {
+      "id": "untracked-footprint",
+      "severity": "info",
+      "detail": "An untracked TDP158 footprint was present but is not referenced by the captured board."
+    }
+  ]
+}

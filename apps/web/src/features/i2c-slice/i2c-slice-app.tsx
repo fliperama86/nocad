@@ -1,22 +1,54 @@
-import { createHdmiSliceProject, hdmiSliceIds, resolveProject } from "@nocad/intent-core";
+import {
+  components,
+  contracts,
+  createHdmiSliceProject,
+  createHdmiTxSliceProject,
+  createRp2350HdmiTxSliceProject,
+  hdmiSliceIds,
+  hdmiTxSliceIds,
+  parseProjectSourceJson,
+  ProjectDocument,
+  ProjectDocumentError,
+  resolveProject
+} from "@nocad/intent-core";
 import type {
+  ContractParams,
+  ContractParamValue,
   GraphObjectMetadata,
   IntentConnectionEdge,
   IntentExposesEdge,
   IntentProvidesEdge,
   ProjectEdge,
   ProjectNode,
+  ProjectPatch,
   ProjectSource,
   SignalBindings
 } from "@nocad/intent-core";
 import type { Connection, XYPosition } from "@xyflow/react";
-import { useCallback, useMemo, useState } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import type { ChangeEvent } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import { cn } from "../../lib/utils";
 import { BindingsPanel } from "./bindings-panel";
+import {
+  ConnectionIntentDialog,
+  type ConnectionIntentOption,
+  type PendingConnectionIntent
+} from "./connection-intent-dialog";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
+import { matchFunctionComponentConnection } from "./function-connection-intent";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
+import { PcbDesignerPanel, type BoardComponentPlacement } from "./pcb-designer-panel";
+import { bindingsForProviderMode } from "./provider-assignment";
+import {
+  filterConnectionOptionsForProviderRequirement,
+  providerRequirementForHandle,
+  providerRequirementHandlesForNode,
+  providerRequirementPortFromHandle
+} from "./provider-requirement-handles";
 import { ResolutionPanel } from "./resolution-panel";
 
 function createSource() {
@@ -34,8 +66,8 @@ function createBlankSource() {
   } satisfies ProjectSource;
 }
 
-type ComponentTemplate = "hdmiFunction" | "hdmiPort" | "mcu" | "sensor" | "rail3v3" | "rail5v";
-type WorkspaceTab = "graph" | "resolution" | "diagnostics" | "json";
+type ComponentTemplate = "fpga" | "hdmiFunction" | "hdmiPort" | "hdmiTx" | "mcu" | "sensor" | "rail3v3" | "rail5v";
+type WorkspaceTab = "graph" | "pcb" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
 type SourceDependency = {
@@ -70,18 +102,59 @@ type ComponentTemplateDefinition = {
 const dependencyVersions: Record<string, string> = {
   "@nocad/connectors": "0.1.0",
   "@nocad/video": "0.1.0",
+  "@nocad/fpga": "0.1.0",
+  "@nocad/hdmi-tx": "0.1.0",
   "@nocad/rp2350": "0.1.0",
   "@nocad/sensors": "0.1.0"
 };
 
-const defaultPositions: NodePositions = {
+const directHdmiPositions: NodePositions = {
   [hdmiSliceIds.mcu]: { x: 110, y: 270 },
   [hdmiSliceIds.hdmiFunction]: { x: 460, y: 215 },
   [hdmiSliceIds.hdmiPort]: { x: 820, y: 270 },
   [hdmiSliceIds.rail5v]: { x: 820, y: 80 }
 };
 
+const hdmiTxPositions: NodePositions = {
+  [hdmiTxSliceIds.videoSource]: { x: 80, y: 280 },
+  [hdmiTxSliceIds.tx]: { x: 400, y: 280 },
+  [hdmiTxSliceIds.hdmiFunction]: { x: 720, y: 220 },
+  [hdmiTxSliceIds.hdmiPort]: { x: 1040, y: 280 },
+  [hdmiTxSliceIds.rail5v]: { x: 1040, y: 80 }
+};
+
 const componentTemplates: Record<ComponentTemplate, ComponentTemplateDefinition> = {
+  fpga: {
+    dependency: {
+      name: "@nocad/fpga",
+      version: dependencyVersions["@nocad/fpga"]
+    },
+    idPrefix: "node",
+    label: "FPGA",
+    node: {
+      kind: "component",
+      label: "Video source",
+      role: "video_source",
+      component: "@nocad/fpga:GENERIC_FPGA",
+      package: "BGA",
+      refdesHint: "U?"
+    }
+  },
+  hdmiTx: {
+    dependency: {
+      name: "@nocad/hdmi-tx",
+      version: dependencyVersions["@nocad/hdmi-tx"]
+    },
+    idPrefix: "node",
+    label: "HDMI TX",
+    node: {
+      kind: "component",
+      label: "HDMI transmitter",
+      role: "hdmi_tx",
+      component: "@nocad/hdmi-tx:IT66121",
+      refdesHint: "U?"
+    }
+  },
   mcu: {
     dependency: {
       name: "@nocad/rp2350",
@@ -187,31 +260,35 @@ const componentPalette = Object.entries(componentTemplates).map(([id, template])
 
 const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "graph", label: "Graph" },
+  { id: "pcb", label: "PCB" },
   { id: "resolution", label: "Resolution" },
   { id: "diagnostics", label: "Diagnostics" },
   { id: "json", label: "JSON" }
 ];
-const providerDataSignalIds = new Set([
-  "clock_n",
-  "clock_p",
-  "tmds0_n",
-  "tmds0_p",
-  "tmds1_n",
-  "tmds1_p",
-  "tmds2_n",
-  "tmds2_p"
-]);
-
 export function I2cSliceApp() {
+  const [projectDocument] = useState(() => new ProjectDocument(createBlankSource()));
+  const source = useSyncExternalStore(
+    projectDocument.subscribe,
+    projectDocument.getSnapshot,
+    projectDocument.getSnapshot
+  );
   const [jsonView, setJsonView] = useState<JsonView>("source");
-  const [source, setSource] = useState<ProjectSource>(createBlankSource);
   const [positions, setPositions] = useState<NodePositions>({});
   const [graphRevision, setGraphRevision] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<PendingConnectionIntent>();
+  const [connectionFeedback, setConnectionFeedback] = useState<string>();
+  const [projectFeedback, setProjectFeedback] = useState<{ kind: "error" | "success"; message: string }>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const resolved = useMemo(() => resolveProject(source), [source]);
+  const resolutionSnapshot = useMemo(
+    () => ({ resolved: resolveProject(source), revision: projectDocument.revision }),
+    [projectDocument, source]
+  );
+  const resolved = resolutionSnapshot.resolved;
   const selectedChoice = selectedEdgeId
     ? (resolved.resolvedChoices.find((choice) => choice.sourceEdge === selectedEdgeId) ?? resolved.resolvedChoices[0])
     : resolved.resolvedChoices[0];
@@ -219,27 +296,120 @@ export function I2cSliceApp() {
   const resolvedJson = useMemo(() => JSON.stringify(resolved, null, 2), [resolved]);
 
   const setSelectedGraphEdge = useCallback((edgeId: string | undefined) => {
+    if (edgeId) {
+      setPendingConnection(undefined);
+    }
     setSelectedEdgeId((currentEdgeId) => (currentEdgeId === edgeId ? currentEdgeId : edgeId));
   }, []);
 
   const setSelectedGraphNode = useCallback((nodeId: string | undefined) => {
+    if (nodeId) {
+      setPendingConnection(undefined);
+    }
     setSelectedNodeId((currentNodeId) => (currentNodeId === nodeId ? currentNodeId : nodeId));
   }, []);
 
-  function resetSample() {
-    setSource(createSource());
-    setPositions(defaultPositions);
+  function dispatchProjectPatch(patch: ProjectPatch, expectedRevision?: number) {
+    try {
+      const record = projectDocument.apply(
+        patch,
+        expectedRevision === undefined ? undefined : { expectedRevision }
+      );
+      setProjectFeedback(undefined);
+      return Boolean(record);
+    } catch (error) {
+      setProjectFeedback({ kind: "error", message: projectDocumentErrorMessage(error) });
+      return false;
+    }
+  }
+
+  function loadSource(nextSource: ProjectSource, nextPositions: NodePositions) {
+    projectDocument.replace(nextSource);
+    setPositions(nextPositions);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
+  function resetSample() {
+    loadSource(createSource(), directHdmiPositions);
+  }
+
+  function loadTxSample() {
+    loadSource(createHdmiTxSliceProject(), hdmiTxPositions);
+  }
+
+  function loadRp2350TxSample() {
+    loadSource(createRp2350HdmiTxSliceProject(), hdmiTxPositions);
+  }
+
   function clearCanvas() {
-    setSource(createBlankSource());
-    setPositions({});
+    loadSource(createBlankSource(), {});
+  }
+
+  function undoProjectEdit() {
+    projectDocument.undo();
+    setGraphRevision((revision) => revision + 1);
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
+  }
+
+  function redoProjectEdit() {
+    projectDocument.redo();
     setGraphRevision((revision) => revision + 1);
+    setSelectedEdgeId(undefined);
+    setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
+    setProjectFeedback(undefined);
+  }
+
+  function saveProjectFile() {
+    const blob = new Blob([projectDocument.save()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = "project.nocad.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setProjectFeedback({ kind: "success", message: "Saved project.nocad.json." });
+  }
+
+  async function loadProjectFile(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const expectedRevision = projectDocument.revision;
+
+    try {
+      const nextSource = parseProjectSourceJson(await file.text());
+      projectDocument.replace(nextSource, { expectedRevision });
+      setPositions({});
+      setSelectedEdgeId(undefined);
+      setSelectedNodeId(undefined);
+      setPendingConnection(undefined);
+      setConnectionFeedback(undefined);
+      setGraphRevision((revision) => revision + 1);
+      setProjectFeedback({ kind: "success", message: `Loaded ${file.name}.` });
+    } catch (error) {
+      setProjectFeedback({
+        kind: "error",
+        message: `Could not load ${file.name}: ${projectDocumentErrorMessage(error)}`
+      });
+    } finally {
+      input.value = "";
+    }
   }
 
   function addComponent(template: string) {
@@ -250,22 +420,32 @@ export function I2cSliceApp() {
     const component = componentTemplates[template];
     const id = createGraphId(component.idPrefix);
 
-    setSource({
-      ...source,
-      dependencies: component.dependency
-        ? {
-            ...source.dependencies,
-            [component.dependency.name]: component.dependency.version
-          }
-        : source.dependencies,
-      nodes: [
-        ...source.nodes,
+    const added = dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        ...(component.dependency
+          ? ([
+              {
+                op: "setDependency",
+                dependency: component.dependency.name,
+                version: component.dependency.version
+              }
+            ] satisfies ProjectPatch[])
+          : []),
         {
-          ...component.node,
-          id
-        } as ProjectNode
+          op: "addNode",
+          node: {
+            ...component.node,
+            id
+          } as ProjectNode
+        }
       ]
     });
+
+    if (!added) {
+      return;
+    }
+
     setPositions((currentPositions) => ({
       ...currentPositions,
       [id]: currentPositions[id] ?? nextPosition(source.nodes.length)
@@ -274,79 +454,173 @@ export function I2cSliceApp() {
 
   function connectNodes(connection: Connection) {
     if (!connection.source || !connection.target || connection.source === connection.target) {
+      setConnectionFeedback("A connection requires two different compatible nodes.");
       return;
     }
 
-    setSource((current) => {
-      const sourceNode = current.nodes.find((node) => node.id === connection.source);
-      const targetNode = current.nodes.find((node) => node.id === connection.target);
+    const sourceNode = source.nodes.find((node) => node.id === connection.source);
+    const targetNode = source.nodes.find((node) => node.id === connection.target);
 
-      if (!sourceNode || !targetNode) {
-        return current;
+    if (!sourceNode || !targetNode) {
+      setConnectionFeedback("The connection endpoints are no longer present in the project.");
+      return;
+    }
+
+    if (sourceNode.kind === "component" && targetNode.kind === "component") {
+      const activeRequirements = providerRequirementHandlesForNode(source, targetNode);
+      const requirement = providerRequirementForHandle(source, targetNode, connection.targetHandle);
+      const requestedRequirementPort = providerRequirementPortFromHandle(connection.targetHandle);
+
+      if (requestedRequirementPort && !requirement) {
+        setConnectionFeedback("The selected requirement is no longer available.");
+        setPendingConnection(undefined);
+        return;
       }
 
-      const edgeIds = new Set(current.edges.map((edge) => edge.id));
-      const edge = createIntentEdge(sourceNode, targetNode, edgeIds);
-
-      if (!edge) {
-        return current;
+      if (requirement?.connectedEdgeId) {
+        setConnectionFeedback(`${requirement.label} is already connected.`);
+        setPendingConnection(undefined);
+        return;
       }
 
-      return {
-        ...current,
-        edges: [...current.edges, edge]
-      };
-    });
+      const options = filterConnectionOptionsForProviderRequirement(
+        componentConnectionOptionsForPair(sourceNode, targetNode, source.edges),
+        targetNode.id,
+        requirement,
+        activeRequirements
+      );
+
+      if (options.length === 0) {
+        setConnectionFeedback(
+          requirement
+            ? `${nodeDisplayName(sourceNode)} cannot satisfy ${requirement.label}.`
+            : incompatibleConnectionMessage(sourceNode, targetNode)
+        );
+        setPendingConnection(undefined);
+        return;
+      }
+
+      setConnectionFeedback(undefined);
+
+      if (options.length === 1 && (requirement || shouldAutoCreateConnection(options))) {
+        createConnectionFromIntent(options[0], options[0].params);
+        return;
+      }
+
+      setPendingConnection({
+        options,
+        revision: projectDocument.revision,
+        sourceNode: sourceNode.id,
+        targetNode: targetNode.id
+      });
+      setSelectedEdgeId(undefined);
+      setSelectedNodeId(undefined);
+      return;
+    }
+
+    const validation = validateNodeConnection(sourceNode, targetNode, source.edges);
+
+    if (!validation.valid) {
+      setConnectionFeedback(validation.message);
+      setPendingConnection(undefined);
+      return;
+    }
+
+    setConnectionFeedback(undefined);
+    setPendingConnection(undefined);
+    const edge = createIntentEdge(sourceNode, targetNode, new Set(source.edges.map((currentEdge) => currentEdge.id)));
+
+    if (edge) {
+      dispatchProjectPatch({ op: "addEdge", edge });
+    }
   }
 
-  function removeNodes(nodeIds: string[]) {
-    const nodeIdSet = new Set(nodeIds);
-
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.filter((edge) => !edgeReferencesAnyNode(edge, nodeIdSet)),
-      dependencies: dependenciesForNodes(current.nodes.filter((node) => !nodeIdSet.has(node.id)), current.dependencies),
-      nodes: current.nodes.filter((node) => !nodeIdSet.has(node.id))
-    }));
-    setPositions((currentPositions) =>
-      Object.fromEntries(Object.entries(currentPositions).filter(([nodeId]) => !nodeIdSet.has(nodeId)))
+  function removeSelection({ edgeIds, nodeIds }: { edgeIds: string[]; nodeIds: string[] }) {
+    const requestedNodeIds = new Set(nodeIds);
+    const edgeIdSet = new Set(edgeIds);
+    const existingNodeIds = source.nodes.filter((node) => requestedNodeIds.has(node.id)).map((node) => node.id);
+    const existingNodeIdSet = new Set(existingNodeIds);
+    const explicitEdgeIds = source.edges
+      .filter((edge) => edgeIdSet.has(edge.id) && !edgeReferencesAnyNode(edge, existingNodeIdSet))
+      .map((edge) => edge.id);
+    const nextDependencies = dependenciesForNodes(
+      source.nodes.filter((node) => !existingNodeIdSet.has(node.id)),
+      source.dependencies
     );
+    const dependencyPatches: ProjectPatch[] =
+      existingNodeIds.length > 0
+        ? Object.keys(source.dependencies)
+            .filter((dependency) => !(dependency in nextDependencies))
+            .map((dependency) => ({ op: "setDependency", dependency, version: null }))
+        : [];
+
+    if (existingNodeIds.length > 0 || explicitEdgeIds.length > 0) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          ...explicitEdgeIds.map((edge) => ({ op: "removeEdge", edge }) satisfies ProjectPatch),
+          ...existingNodeIds.map((node) => ({ op: "removeNode", node }) satisfies ProjectPatch),
+          ...dependencyPatches
+        ]
+      });
+    }
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
+    setPendingConnection(undefined);
   }
 
-  function removeEdges(edgeIds: string[]) {
-    const edgeIdSet = new Set(edgeIds);
-
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.filter((edge) => !edgeIdSet.has(edge.id))
-    }));
-    setSelectedEdgeId((currentEdgeId) => (currentEdgeId && edgeIdSet.has(currentEdgeId) ? undefined : currentEdgeId));
-  }
-
-  function setFunctionInclude(nodeId: string, feature: string, enabled: boolean) {
-    setSource((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) =>
-        node.id === nodeId && node.kind === "intent.function"
-          ? {
-              ...node,
-              include: {
-                ...node.include,
-                [feature]: enabled
-              }
-            }
-          : node
-      )
-    }));
+  function setFunctionInclude(nodeId: string, feature: string, value: unknown) {
+    dispatchProjectPatch({ op: "setFunctionInclude", node: nodeId, feature, value });
   }
 
   function setEdgeAuto(edgeId: string) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => (edge.id === edgeId && edge.kind === "intent.connection" ? autoEdge(edge) : edge))
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (!edge) {
+      return;
+    }
+
+    const automatic = autoEdge(edge);
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        { op: "setEdgeBindings", edge: edgeId, value: null },
+        { op: "setEdgeStrategy", edge: edgeId, value: automatic.strategy ?? null }
+      ]
+    });
+  }
+
+  function setConnectionParam(edgeId: string, param: string, value: ContractParamValue) {
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({ op: "setEdgeParams", edge: edgeId, value: { ...edge.params, [param]: value } });
+    }
+  }
+
+  function applyConnectionPreset(edgeId: string, params: ContractParams) {
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({ op: "setEdgeParams", edge: edgeId, value: { ...edge.params, ...params } });
+    }
+  }
+
+  function createConnectionFromIntent(
+    option: ConnectionIntentOption,
+    params: ContractParams | undefined,
+    expectedRevision?: number
+  ) {
+    const edge = createComponentConnectionEdge(option, new Set(source.edges.map((currentEdge) => currentEdge.id)), params);
+
+    dispatchProjectPatch({ op: "addEdge", edge }, expectedRevision);
+    setPendingConnection(undefined);
   }
 
   function lockCurrentAssignment(edgeId: string) {
@@ -356,176 +630,254 @@ export function I2cSliceApp() {
       return;
     }
 
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              strategy: {
-                pinAssignment: "manual"
-              },
-              bindings: choice.selected.bindings
-            }
-          : edge
-      )
-    }));
+    dispatchProjectPatch(
+      {
+        op: "batch",
+        patches: [
+          { op: "setEdgeStrategy", edge: edgeId, value: { pinAssignment: "manual" } },
+          { op: "setEdgeBindings", edge: edgeId, value: choice.selected.bindings }
+        ]
+      },
+      resolutionSnapshot.revision
+    );
   }
 
   function setManualPinPair(edgeId: string, pair: { sda: string; scl: string }) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.connection"
-          ? {
-              ...edge,
-              strategy: {
-                pinAssignment: "manual"
-              },
-              bindings: manualBindings(edge, pair)
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          { op: "setEdgeStrategy", edge: edgeId, value: { pinAssignment: "manual" } },
+          { op: "setEdgeBindings", edge: edgeId, value: manualBindings(edge, pair) }
+        ]
+      });
+    }
   }
 
   function setProviderMode(edgeId: string, providerMode: string) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) =>
-        edge.id === edgeId && edge.kind === "intent.provides"
-          ? {
-              ...edge,
-              bindings:
-                providerMode === "custom_gpio"
-                  ? edge.bindings
-                  : removeProviderDataBindings(edge.bindings),
-              strategy: {
-                ...edge.strategy,
-                providerMode
-              }
-            }
-          : edge
-      )
-    }));
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
+
+    if (edge) {
+      dispatchProjectPatch({
+        op: "batch",
+        patches: [
+          {
+            op: "setEdgeBindings",
+            edge: edgeId,
+            value: bindingsForProviderMode(source, edge, providerMode) ?? null
+          },
+          {
+            op: "setEdgeStrategy",
+            edge: edgeId,
+            value: { ...edge.strategy, providerMode }
+          }
+        ]
+      });
+    }
   }
 
   function setProviderPin(edgeId: string, signal: string, pin: string | undefined) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => {
-        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
-          return edge;
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
+
+    if (!edge) {
+      return;
+    }
+
+    const bindings = { ...(edge.bindings ?? {}) };
+
+    if (pin) {
+      bindings[signal] = {
+        ...bindings[signal],
+        from: {
+          node: edge.from.node,
+          pin
         }
+      };
+    } else {
+      delete bindings[signal];
+    }
 
-        const bindings = { ...(edge.bindings ?? {}) };
-
-        if (pin) {
-          bindings[signal] = {
-            ...bindings[signal],
-            from: {
-              node: edge.from.node,
-              pin
-            }
-          };
-        } else {
-          delete bindings[signal];
-        }
-
-        return {
-          ...edge,
-          bindings: Object.keys(bindings).length > 0 ? bindings : undefined,
-          strategy: {
-            ...edge.strategy
-          }
-        };
-      })
-    }));
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        {
+          op: "setEdgeBindings",
+          edge: edgeId,
+          value: Object.keys(bindings).length > 0 ? bindings : null
+        },
+        { op: "setEdgeStrategy", edge: edgeId, value: { ...edge.strategy } }
+      ]
+    });
   }
 
   function applyProviderPinPreset(edgeId: string, pinsBySignal: Record<string, string>) {
-    setSource((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => {
-        if (edge.id !== edgeId || edge.kind !== "intent.provides") {
-          return edge;
-        }
+    const edge = source.edges.find(
+      (candidate): candidate is IntentProvidesEdge => candidate.id === edgeId && candidate.kind === "intent.provides"
+    );
 
-        const bindings: SignalBindings = Object.fromEntries(
-          Object.entries(pinsBySignal).map(([signal, pin]) => [
-            signal,
-            {
-              from: {
-                node: edge.from.node,
-                pin
-              }
-            }
-          ])
-        );
+    if (!edge) {
+      return;
+    }
 
-        return {
-          ...edge,
-          bindings,
-          strategy: {
-            ...edge.strategy,
-            providerMode: "custom_gpio"
+    const bindings: SignalBindings = Object.fromEntries(
+      Object.entries(pinsBySignal).map(([signal, pin]) => [
+        signal,
+        {
+          from: {
+            node: edge.from.node,
+            pin
           }
-        };
-      })
-    }));
+        }
+      ])
+    );
+
+    dispatchProjectPatch({
+      op: "batch",
+      patches: [
+        { op: "setEdgeBindings", edge: edgeId, value: bindings },
+        {
+          op: "setEdgeStrategy",
+          edge: edgeId,
+          value: { ...edge.strategy, providerMode: "custom_gpio" }
+        }
+      ]
+    });
+  }
+
+  function setBoardComponentPlacement(nodeId: string, placement: BoardComponentPlacement) {
+    dispatchProjectPatch({
+      op: "setBoardPlacement",
+      object: nodeId,
+      value: {
+        rotation: `${roundLayoutNumber(placement.rotationDeg)}deg`,
+        x: `${roundLayoutNumber(placement.xMm)}mm`,
+        y: `${roundLayoutNumber(placement.yMm)}mm`
+      }
+    });
   }
 
   return (
     <main className="h-svh overflow-hidden bg-background text-foreground">
-      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 overflow-hidden px-4 py-4 sm:px-6">
-        <header className="flex shrink-0 flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              Intent resolver slice
-            </p>
-            <h1 className="text-2xl font-semibold tracking-normal">RP2350 intent graph</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className="h-9 rounded-md border border-border px-4 text-sm font-medium"
-              onClick={clearCanvas}
-              type="button"
-            >
-              Clear
-            </button>
-            <button
-              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-              onClick={resetSample}
-              type="button"
-            >
-              Load HDMI sample
-            </button>
-          </div>
-        </header>
-
+      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 overflow-hidden px-3 py-3 sm:px-4">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div aria-label="Workspace views" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border pb-3" role="tablist">
-            {workspaceTabs.map((tab) => (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+            <div aria-label="Workspace views" className="flex flex-wrap items-center gap-1.5" role="tablist">
+              {workspaceTabs.map((tab) => (
+                <button
+                  aria-controls={`${tab.id}-panel`}
+                  aria-selected={activeTab === tab.id}
+                  className={workspaceTabClassName(activeTab === tab.id)}
+                  id={`${tab.id}-tab`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
-                aria-controls={`${tab.id}-panel`}
-                aria-selected={activeTab === tab.id}
-                className={workspaceTabClassName(activeTab === tab.id)}
-                id={`${tab.id}-tab`}
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                role="tab"
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!projectDocument.canUndo}
+                onClick={undoProjectEdit}
                 type="button"
               >
-                {tab.label}
+                Undo
               </button>
-            ))}
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={!projectDocument.canRedo}
+                onClick={redoProjectEdit}
+                type="button"
+              >
+                Redo
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                Load project
+              </button>
+              <input
+                accept=".json,application/json"
+                className="sr-only"
+                onChange={loadProjectFile}
+                ref={fileInputRef}
+                type="file"
+              />
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={saveProjectFile}
+                type="button"
+              >
+                Save project
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={clearCanvas}
+                type="button"
+              >
+                Clear
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={resetSample}
+                type="button"
+              >
+                Load direct HDMI
+              </button>
+              <button
+                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                onClick={loadTxSample}
+                type="button"
+              >
+                Load FPGA via TX IC
+              </button>
+              <button
+                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+                onClick={loadRp2350TxSample}
+                type="button"
+              >
+                Load RP2350 via TX IC
+              </button>
+            </div>
           </div>
+          {projectFeedback ? (
+            <div
+              aria-live="polite"
+              className={cn(
+                "mt-2 shrink-0 rounded-md border px-3 py-2 text-xs",
+                projectFeedback.kind === "error"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              )}
+              role={projectFeedback.kind === "error" ? "alert" : "status"}
+            >
+              {projectFeedback.message}
+            </div>
+          ) : null}
 
-          <div className="min-h-0 flex-1 overflow-hidden pt-4">
+          <div className="min-h-0 flex-1 overflow-hidden pt-2">
             {activeTab === "graph" ? (
               <div
                 aria-labelledby="graph-tab"
-                className="grid h-full min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
+                className={cn(
+                  "grid h-full min-h-0 gap-2",
+                  propertiesCollapsed
+                    ? "lg:grid-cols-[minmax(0,1fr)_44px]"
+                    : "lg:grid-cols-[minmax(0,1fr)_360px]"
+                )}
                 id="graph-panel"
                 role="tabpanel"
               >
@@ -533,10 +885,23 @@ export function I2cSliceApp() {
                   className="min-h-0"
                   componentTemplates={componentPalette}
                   graphRevision={graphRevision}
+                  connectionFeedback={connectionFeedback}
+                  isValidConnection={(connection) => isValidGraphConnection(source, connection)}
                   onAddComponent={addComponent}
+                  onCanvasPaneClick={() => setPropertiesCollapsed(true)}
                   onConnectNodes={connectNodes}
-                  onRemoveEdges={removeEdges}
-                  onRemoveNodes={removeNodes}
+                  onDismissConnectionFeedback={() => setConnectionFeedback(undefined)}
+                  onInvalidConnection={(sourceNodeId, targetNodeId, targetHandle) => {
+                    const sourceNode = source.nodes.find((node) => node.id === sourceNodeId);
+                    const targetNode = source.nodes.find((node) => node.id === targetNodeId);
+
+                    setConnectionFeedback(
+                      sourceNode && targetNode
+                        ? validateNodeConnection(sourceNode, targetNode, source.edges, targetHandle, source).message
+                        : "These nodes do not expose a compatible connection."
+                    );
+                  }}
+                  onRemoveSelection={removeSelection}
                   onPositionsChange={setPositions}
                   onSelectedEdgeChange={setSelectedGraphEdge}
                   onSelectedNodeChange={setSelectedGraphNode}
@@ -544,18 +909,57 @@ export function I2cSliceApp() {
                   resolved={resolved}
                   source={source}
                 />
-                <EdgeAssignmentPanel
-                  className="min-h-0 lg:w-[360px]"
-                  onLockCurrent={lockCurrentAssignment}
-                  onSetAuto={setEdgeAuto}
-                  onSetFunctionInclude={setFunctionInclude}
-                  onSetManualPair={setManualPinPair}
-                  onSetProviderMode={setProviderMode}
-                  onSetProviderPin={setProviderPin}
-                  onSetProviderPinPreset={applyProviderPinPreset}
+                {propertiesCollapsed ? (
+                  <div className="flex h-9 min-h-0 items-start justify-end lg:h-auto lg:w-9 lg:justify-center">
+                    <button
+                      aria-label="Expand properties panel"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-card-foreground hover:bg-muted"
+                      onClick={() => setPropertiesCollapsed(false)}
+                      title="Expand properties panel"
+                      type="button"
+                    >
+                      <PanelRightOpen aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] lg:w-[360px]">
+                    <div className="flex justify-end pb-2">
+                      <button
+                        aria-label="Collapse properties panel"
+                        className="flex size-8 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => setPropertiesCollapsed(true)}
+                        title="Collapse properties panel"
+                        type="button"
+                      >
+                        <PanelRightClose aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                      </button>
+                    </div>
+                    <EdgeAssignmentPanel
+                      className="h-full min-h-0"
+                      onApplyConnectionPreset={applyConnectionPreset}
+                      onLockCurrent={lockCurrentAssignment}
+                      onSetAuto={setEdgeAuto}
+                      onSetConnectionParam={setConnectionParam}
+                      onSetFunctionInclude={setFunctionInclude}
+                      onSetManualPair={setManualPinPair}
+                      onSetProviderMode={setProviderMode}
+                      onSetProviderPin={setProviderPin}
+                      onSetProviderPinPreset={applyProviderPinPreset}
+                      resolved={resolved}
+                      selectedEdgeId={selectedEdgeId}
+                      selectedNodeId={selectedNodeId}
+                      source={source}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {activeTab === "pcb" ? (
+              <div aria-labelledby="pcb-tab" className="h-full min-h-0" id="pcb-panel" role="tabpanel">
+                <PcbDesignerPanel
+                  onSetComponentPlacement={setBoardComponentPlacement}
                   resolved={resolved}
-                  selectedEdgeId={selectedEdgeId}
-                  selectedNodeId={selectedNodeId}
                   source={source}
                 />
               </div>
@@ -572,7 +976,13 @@ export function I2cSliceApp() {
 
             {activeTab === "diagnostics" ? (
               <div aria-labelledby="diagnostics-tab" className="h-full overflow-auto" id="diagnostics-panel" role="tabpanel">
-                <DiagnosticsPanel diagnostics={resolved.diagnostics} source={source} />
+                <DiagnosticsPanel
+                  diagnostics={resolved.diagnostics}
+                  onApplySuggestion={(suggestion) =>
+                    dispatchProjectPatch(suggestion.patch, resolutionSnapshot.revision)
+                  }
+                  source={source}
+                />
               </div>
             ) : null}
 
@@ -590,14 +1000,28 @@ export function I2cSliceApp() {
           </div>
         </section>
       </div>
+      <ConnectionIntentDialog
+        onCancel={() => setPendingConnection(undefined)}
+        onCreate={(option, params) => createConnectionFromIntent(option, params, pendingConnection?.revision)}
+        pendingConnection={pendingConnection}
+        source={source}
+      />
     </main>
   );
 }
 
 function workspaceTabClassName(active: boolean) {
   return active
-    ? "h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-    : "h-9 rounded-md border border-border px-4 text-sm font-medium text-muted-foreground";
+    ? "h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground"
+    : "h-8 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground";
+}
+
+function projectDocumentErrorMessage(error: unknown) {
+  if (error instanceof ProjectDocumentError) {
+    return `${error.message} (${error.code})`;
+  }
+
+  return error instanceof Error ? error.message : "An unknown project document error occurred.";
 }
 
 function autoEdge(edge: IntentConnectionEdge): IntentConnectionEdge {
@@ -617,101 +1041,335 @@ function createIntentEdge(
   edgeIds: Set<string>
 ): IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge | undefined {
   if (sourceNode.kind === "component" && targetNode.kind === "component") {
-    if (isConnectorNode(sourceNode) || isConnectorNode(targetNode)) {
-      return undefined;
-    }
-
-    return createI2cIntentEdge(sourceNode, targetNode, edgeIds);
+    return undefined;
   }
 
-  if (sourceNode.kind === "intent.function" && targetNode.kind === "component") {
-    return isConnectorNode(targetNode)
-      ? createExposesEdge(sourceNode, targetNode, edgeIds)
-      : createProvidesEdge(targetNode, sourceNode, edgeIds);
+  const functionNode = sourceNode.kind === "intent.function" ? sourceNode : targetNode;
+  const componentNode = sourceNode.kind === "component" ? sourceNode : targetNode;
+  const match = matchFunctionComponentConnection(componentNode, functionNode);
+
+  if (!match.intent || componentNode.kind !== "component" || functionNode.kind !== "intent.function") {
+    return undefined;
   }
 
-  if (sourceNode.kind === "component" && targetNode.kind === "intent.function") {
-    return isConnectorNode(sourceNode)
-      ? createExposesEdge(targetNode, sourceNode, edgeIds)
-      : createProvidesEdge(sourceNode, targetNode, edgeIds);
-  }
-
-  return undefined;
+  return match.intent.kind === "provides"
+    ? createProvidesEdge(
+        componentNode,
+        functionNode,
+        match.intent.componentPort,
+        match.intent.contract,
+        match.intent.providerMode,
+        edgeIds
+      )
+    : createExposesEdge(functionNode, componentNode, match.intent.componentPort, match.intent.contract, edgeIds);
 }
 
-function createI2cIntentEdge(
+type NodeConnectionValidation =
+  | { message: ""; valid: true }
+  | { message: string; valid: false };
+
+function validateNodeConnection(
   sourceNode: ProjectNode,
   targetNode: ProjectNode,
-  edgeIds: Set<string>
+  currentEdges: ProjectEdge[],
+  targetHandle?: string | null,
+  source?: ProjectSource
+): NodeConnectionValidation {
+  if (sourceNode.id === targetNode.id) {
+    return { message: "A node cannot connect to itself.", valid: false };
+  }
+
+  if (sourceNode.kind === "component" && targetNode.kind === "component") {
+    const activeRequirements = source ? providerRequirementHandlesForNode(source, targetNode) : [];
+    const requirement = source ? providerRequirementForHandle(source, targetNode, targetHandle) : undefined;
+    const options = filterConnectionOptionsForProviderRequirement(
+      componentConnectionOptionsForPair(sourceNode, targetNode, currentEdges),
+      targetNode.id,
+      requirement,
+      activeRequirements
+    );
+
+    if (providerRequirementPortFromHandle(targetHandle) && !requirement) {
+      return { message: "The selected requirement is no longer available.", valid: false };
+    }
+
+    if (requirement?.connectedEdgeId) {
+      return { message: `${requirement.label} is already connected.`, valid: false };
+    }
+
+    return options.length > 0
+      ? { message: "", valid: true }
+      : {
+          message: requirement
+            ? `${nodeDisplayName(sourceNode)} cannot satisfy ${requirement.label}.`
+            : incompatibleConnectionMessage(sourceNode, targetNode),
+          valid: false
+        };
+  }
+
+  const functionNode = sourceNode.kind === "intent.function" ? sourceNode : targetNode;
+  const componentNode = sourceNode.kind === "component" ? sourceNode : targetNode;
+
+  if (functionNode.kind !== "intent.function" || componentNode.kind !== "component") {
+    return { message: "Only compatible components and function intents can be connected.", valid: false };
+  }
+
+  const match = matchFunctionComponentConnection(componentNode, functionNode);
+
+  if (!match.intent) {
+    const reason =
+      match.reason === "ambiguous"
+        ? "Multiple compatible ports were found; explicit port selection is required."
+        : `${nodeDisplayName(componentNode)} does not provide or expose ${nodeDisplayName(functionNode)}.`;
+
+    return { message: reason, valid: false };
+  }
+
+  const duplicate = currentEdges.some((edge) =>
+    match.intent.kind === "provides"
+      ? edge.kind === "intent.provides" &&
+        edge.from.node === componentNode.id &&
+        edge.to.node === functionNode.id &&
+        edge.contract === match.intent.contract
+      : edge.kind === "intent.exposes" &&
+        edge.from.node === functionNode.id &&
+        edge.to.node === componentNode.id &&
+        edge.contract === match.intent.contract
+  );
+
+  return duplicate
+    ? { message: `${nodeDisplayName(componentNode)} is already connected to ${nodeDisplayName(functionNode)}.`, valid: false }
+    : { message: "", valid: true };
+}
+
+function isValidGraphConnection(
+  source: ProjectSource,
+  connection: {
+    source: string | null;
+    target: string | null;
+    targetHandle?: string | null;
+  }
+) {
+  const sourceNode = source.nodes.find((node) => node.id === connection.source);
+  const targetNode = source.nodes.find((node) => node.id === connection.target);
+
+  return Boolean(
+    sourceNode &&
+      targetNode &&
+      validateNodeConnection(sourceNode, targetNode, source.edges, connection.targetHandle, source).valid
+  );
+}
+
+function incompatibleConnectionMessage(sourceNode: ProjectNode, targetNode: ProjectNode) {
+  return `${nodeDisplayName(sourceNode)} and ${nodeDisplayName(targetNode)} do not share a compatible contract and port direction.`;
+}
+
+function nodeDisplayName(node: ProjectNode) {
+  if (node.label) {
+    return node.label;
+  }
+
+  if (node.kind === "component") {
+    return humanIdentifier(node.component.split(":").pop() ?? node.component);
+  }
+
+  if (node.kind === "intent.function") {
+    return humanIdentifier(node.function.split(":").pop() ?? node.function);
+  }
+
+  return node.voltage;
+}
+
+function createComponentConnectionEdge(
+  option: ConnectionIntentOption,
+  edgeIds: Set<string>,
+  params: ContractParams | undefined
 ): IntentConnectionEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.connection",
-    label: "Sensor I2C bus",
-    role: "sensor_bus",
-    from: {
-      node: sourceNode.id,
-      port: "i2c"
-    },
-    to: {
-      node: targetNode.id,
-      port: "i2c"
-    },
-    contract: "builtin:i2c.v1",
+    label: connectionLabel(option.contract),
+    role: connectionRole(option.contract),
+    from: option.from,
+    to: option.to,
+    contract: option.contract,
+    params,
     strategy: {
       pinAssignment: "auto"
-    },
-    include: {
-      pullups: true
     }
   };
+}
+
+function componentConnectionOptionsForPair(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  currentEdges: ProjectEdge[]
+): ConnectionIntentOption[] {
+  return [
+    ...componentConnectionOptions(sourceNode, targetNode, currentEdges),
+    ...componentConnectionOptions(targetNode, sourceNode, currentEdges)
+  ];
+}
+
+function componentConnectionOptions(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  currentEdges: ProjectEdge[]
+): ConnectionIntentOption[] {
+  if (sourceNode.kind !== "component" || targetNode.kind !== "component") {
+    return [];
+  }
+
+  const sourceDefinition = components[sourceNode.component];
+  const targetDefinition = components[targetNode.component];
+
+  if (!sourceDefinition || !targetDefinition) {
+    return [];
+  }
+
+  const existing = new Set(
+    currentEdges.flatMap((edge) =>
+      edge.kind === "intent.connection"
+        ? [`${edge.from.node}.${edge.from.port ?? ""}->${edge.to.node}.${edge.to.port ?? ""}:${edge.contract}`]
+        : []
+    )
+  );
+  const options: ConnectionIntentOption[] = [];
+
+  for (const [fromPort, fromDefinition] of Object.entries(sourceDefinition.ports)) {
+    for (const [contract, fromMap] of Object.entries(fromDefinition.contractMaps ?? {})) {
+      if (fromMap.role !== "from") {
+        continue;
+      }
+
+      for (const [toPort, toDefinition] of Object.entries(targetDefinition.ports)) {
+        const toMap = toDefinition.contractMaps?.[contract];
+
+        if (toMap?.role !== "to") {
+          continue;
+        }
+
+        if (existing.has(`${sourceNode.id}.${fromPort}->${targetNode.id}.${toPort}:${contract}`)) {
+          continue;
+        }
+
+        options.push({
+          contract,
+          from: {
+            node: sourceNode.id,
+            port: fromPort
+          },
+          id: `${sourceNode.id}.${fromPort}->${targetNode.id}.${toPort}:${contract}`,
+          label: connectionLabel(contract),
+          params: defaultConnectionParams(contract),
+          to: {
+            node: targetNode.id,
+            port: toPort
+          }
+        });
+      }
+    }
+  }
+
+  return [...options].sort(
+    (left, right) =>
+      connectionSignalCount(right.contract) - connectionSignalCount(left.contract) ||
+      left.contract.localeCompare(right.contract)
+  );
+}
+
+function connectionSignalCount(contractId: string) {
+  return Object.keys(contracts[contractId]?.signals ?? {}).length;
+}
+
+function connectionLabel(contractId: string) {
+  return contracts[contractId]?.label ?? humanIdentifier(contractId.split(":").pop() ?? contractId);
+}
+
+function connectionRole(contractId: string) {
+  if (contractId === "builtin:i2c.v1") {
+    return "i2c_bus";
+  }
+
+  if (contractId === "@nocad/video:pixel_stream.v1") {
+    return "pixel_stream";
+  }
+
+  return "connection";
+}
+
+function shouldAutoCreateConnection(options: ConnectionIntentOption[]) {
+  const onlyOption = options[0];
+
+  return options.length === 1 && Boolean(onlyOption) && !connectionNeedsDialog(onlyOption);
+}
+
+function connectionNeedsDialog(option: ConnectionIntentOption) {
+  const contract = contracts[option.contract];
+
+  return Boolean(contract && (Object.keys(contract.params ?? {}).length > 0 || (contract.presets?.length ?? 0) > 0));
+}
+
+function defaultConnectionParams(contractId: string): ContractParams | undefined {
+  const params = Object.fromEntries(
+    Object.entries(contracts[contractId]?.params ?? {})
+      .filter(([, definition]) => definition.default !== undefined)
+      .map(([paramId, definition]) => [paramId, definition.default])
+  ) as ContractParams;
+
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 
 function createProvidesEdge(
   componentNode: ProjectNode,
   functionNode: ProjectNode,
+  componentPort: string,
+  contract: string,
+  providerMode: string | undefined,
   edgeIds: Set<string>
 ): IntentProvidesEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.provides",
-    label: "Video provider",
-    role: "video_provider",
+    label: `Provides ${connectionLabel(contract)}`,
+    role: "function_provider",
     from: {
       node: componentNode.id,
-      port: componentProviderPort(componentNode)
+      port: componentPort
     },
     to: {
       node: functionNode.id,
       port: "source"
     },
-    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown",
+    contract,
     strategy: {
       pinAssignment: "auto",
-      providerMode: "auto"
+      providerMode: providerMode ?? "auto"
     }
   };
 }
 
 function createExposesEdge(
   functionNode: ProjectNode,
-  connectorNode: ProjectNode,
+  componentNode: ProjectNode,
+  componentPort: string,
+  contract: string,
   edgeIds: Set<string>
 ): IntentExposesEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.exposes",
-    label: "HDMI connector",
-    role: "video_connector",
+    label: `Exposes ${connectionLabel(contract)}`,
+    role: "function_exposure",
     from: {
       node: functionNode.id,
       port: "connector"
     },
     to: {
-      node: connectorNode.id,
-      port: connectorPort(connectorNode)
+      node: componentNode.id,
+      port: componentPort
     },
-    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown"
+    contract
   };
 }
 
@@ -730,18 +1388,6 @@ function manualBindings(edge: IntentConnectionEdge, pair: { sda: string; scl: st
       }
     }
   };
-}
-
-function removeProviderDataBindings(bindings: SignalBindings | undefined) {
-  if (!bindings) {
-    return undefined;
-  }
-
-  const sidebandBindings = Object.fromEntries(
-    Object.entries(bindings).filter(([signal]) => !providerDataSignalIds.has(signal))
-  );
-
-  return Object.keys(sidebandBindings).length > 0 ? sidebandBindings : undefined;
 }
 
 function uniqueId(base: string, usedIds: Set<string>) {
@@ -774,8 +1420,12 @@ function isComponentTemplate(value: string): value is ComponentTemplate {
 }
 
 function edgeReferencesAnyNode(edge: ProjectEdge, nodeIds: Set<string>) {
-  if (edge.kind === "intent.connection" || edge.kind === "intent.exposes" || edge.kind === "intent.provides") {
-    return nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node);
+  if ("from" in edge && "to" in edge && (nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node))) {
+    return true;
+  }
+
+  if (!("bindings" in edge) || !edge.bindings) {
+    return false;
   }
 
   return Object.values(edge.bindings).some((binding) =>
@@ -815,14 +1465,10 @@ function dependencyNameForNode(node: ProjectNode) {
   return undefined;
 }
 
-function isConnectorNode(node: ProjectNode) {
-  return node.kind === "component" && (node.role?.includes("port") === true || node.component.includes("CONNECTOR"));
+function humanIdentifier(value: string) {
+  return value.replaceAll(/[_-]/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function componentProviderPort(node: ProjectNode) {
-  return node.kind === "component" && node.role === "mcu" ? "video_out" : "provider";
-}
-
-function connectorPort(node: ProjectNode) {
-  return node.kind === "component" && node.role === "hdmi_port" ? "hdmi" : "connector";
+function roundLayoutNumber(value: number) {
+  return Number(value.toFixed(3));
 }
