@@ -18,6 +18,51 @@ The web prototype also exposes the snapshot under **PCB > KiCad fixture**. A nar
 
 The snapshot is immutable and suitable for parser and structure regression work, but it is not yet qualified as a golden or redistributable fixture. Its manifest deliberately records `NOASSERTION` for the license and `unknown` for fabricated and hardware-tested status. The original HDMI breakout directory was untracked at capture time, so the fixture is pinned by content digest rather than an original source commit.
 
+## Product North Star
+
+The current Pico RetroDigital main board is nocad's product north star:
+
+> Author the board's complete semantic design in nocad, turn the resolved obligations into an editable PCB, and export a KiCad project that is electrically and manufacturing-equivalent to the qualified reference.
+
+This is deliberately more ambitious than the smaller RP2350 plus HDMI transmitter EDA capability MVP. The EDA capability MVP proves that the document model, editor, manual routing, validation, and export path work end to end on a tractable board. The north star proves that the same architecture can represent and complete a real design with power, USB, clocks, level shifting, FFC interfaces, audio, control, TMDS pairs, custom rules, vias, and zones.
+
+North-star equivalence does not mean reproducing every coordinate or track bend. Acceptance is based on preserved engineering meaning and manufacturability:
+
+- equivalent logical connectivity, component values, package identities, and connector pin assignments;
+- equivalent board outline, layer stack, power domains, special net rules, keepouts, and fabrication-critical geometry;
+- satisfied declared constraints for differential pairs, clearances, placement relationships, and power distribution;
+- complete routing and zones, with no unexplained DRC regressions against the documented reference baseline; and
+- reproducible KiCad export that preserves fabrication-critical board data and can produce auditable connectivity, DRC, and manufacturing comparison artifacts through the KiCad toolchain.
+
+Trace-for-trace similarity may be useful for visual comparison, but it is not a success criterion. Manual routing is sufficient. Selected-net and deterministic assists may reduce effort, but automatic placement, global autorouting, and proof of routing optimality are not required.
+
+The north-star manufacturing boundary includes the board outline, stackup, pad and drill geometry, placements, copper, zones, keepouts, and rules required for a fabrication-capable KiCad project. It does not require nocad-native BOM, CPL, Gerber, or drill-file generation at this stage. Those derived artifacts may be produced from the exported KiCad project and compared with the reference under recorded tool versions and normalization rules.
+
+### Progressive Subsystem Slices
+
+The north star should be built in integration slices rather than transcribed as one flat 70-footprint exercise. Each slice first expands the semantic graph, then projects the resulting obligations into the PCB track:
+
+1. HDMI and video path, including the connector, TMDS signals, sidebands, and any transmitter/provider topology.
+2. MCU and clocks, including pin allocation and timing-related constraints. The exact MCU identity remains a reference-qualification fact for roadmap G1 rather than an assumption in this plan.
+3. Level shifters and FFC interfaces, including directionality, voltage domains, and connector mappings.
+4. USB and power, including regulation, rails, protection, decoupling, and source/sink relationships.
+5. Audio and control interfaces, including I2C and remaining low-speed signals.
+6. Remaining passives, support circuitry, mounting features, and fabrication rules.
+
+The order may change when the pinned reference reveals a dependency, but each slice must remain inspectable and preserve stable identities across later expansion.
+
+### Integration Gates
+
+| Gate | Evidence |
+| --- | --- |
+| Reference baseline | Immutable source snapshot, provenance, qualification state, known issues, structural facts, and DRC baseline are recorded |
+| Semantic parity | Every subsystem is representable in the intent graph; resolution has no unexplained diagnostics; resolved connectivity compares cleanly with the reference schematic and PCB netlist |
+| Board-model parity | Outline, stackup, footprints, placement, keepouts, rules, and zones are represented with stable links to intent obligations |
+| Layout completion | All required components are placed and all required nets are routed; zones and declared constraints pass nocad validation, using manual work or optional deterministic assists |
+| Export qualification | KiCad can open the export; fabrication-critical board data is preserved; normalized connectivity matches the qualified reference; KiCad DRC and derived comparison artifacts have no unexplained regression from the recorded baseline |
+
+Progress through these gates can be reported per subsystem before whole-board parity is reached. This gives both the graph-builder and PCB-editor tracks real acceptance evidence without requiring either track to be completed in isolation.
+
 ## Fixture Candidates
 
 ### HDMI breakout
@@ -64,6 +109,7 @@ Observed inventory:
 
 Intended use:
 
+- product north-star acceptance target for the complete graph-to-board-to-export workflow;
 - full board-model and rendering acceptance fixture;
 - connectivity, ratsnest, zones, custom rules, and DRC coverage;
 - intent-to-obligation examples for interfaces, level shifting, power, clocks, and differential pairs;
@@ -71,7 +117,7 @@ Intended use:
 - BOM and fabrication provenance tests; and
 - eventual AI explanations and patch evaluation against a design whose intent is known.
 
-This fixture should follow the HDMI breakout. It is small enough to remain inspectable but broad enough to expose realistic interactions between routing, placement, component metadata, and manufacturing output.
+This fixture should follow the HDMI breakout for fixture infrastructure, then grow through the subsystem slices above. It is small enough to remain inspectable but broad enough to expose realistic interactions between routing, placement, component metadata, and manufacturing output. It must not become an implicit dependency on the author's mutable local checkout: north-star qualification still requires the immutable snapshot and provenance process in this document.
 
 ### Main-board backup
 
@@ -166,3 +212,5 @@ Counts are regression sentinels, not the canonical meaning of a design. Semantic
 | M10 selected-net search | Remove one simple HDMI-breakout management/control route and propose a deterministic, DRC-clean patch or explain failure |
 
 General KiCad import remains outside the M1-M8 MVP. A curated fixture may be represented through a narrow research converter or checked-in normalized nocad form before a supported general importer exists.
+
+The milestone table describes reusable capabilities, not a requirement to finish the PCB track before expanding the north-star graph. After the shared resolver and document foundations, subsystem slices should alternate between semantic representation and board projection so that real placement, routing, and manufacturing constraints can correct the graph model early.

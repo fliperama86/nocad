@@ -22,6 +22,31 @@ The core framing: **layout is manual satisfaction of generated obligations.** Th
 - Do not let the board file become an independently authored world with its own truth. The first time "just store this in the board file because it's easier" wins an argument, the architecture quietly becomes KiCad with extra steps.
 - Do not render board objects as React components. The board surface is the custom canvas/WebGL engine; React is chrome only.
 
+## Product Targets
+
+nocad has two related targets with different scopes.
+
+### EDA Capability MVP
+
+The smaller RP2350 plus IT66121 sample remains the first end-to-end capability proof. It is deliberately bounded enough to validate authored board geometry, manual routing, obligations, DRC, document patches, persistence, and KiCad export without waiting for every real-board package and constraint.
+
+This EDA capability MVP is not a replacement for the **Initial Product Slice** in `product-vision.md`. That product-wide slice establishes the workspace, schematic, structured graph, package/module, stable-ID, and AI-edit foundations before PCB layout becomes the focus. The target here is a narrower integration proof for the board stack once those foundations are available; it does not silently reorder or redefine the product slice.
+
+### Pico RetroDigital North Star
+
+The current Pico RetroDigital main board is the product north star. Success means authoring its complete semantic graph, resolving stable board obligations, completing an editable layout, and exporting a KiCad design that is functionally and manufacturing-equivalent to a qualified reference snapshot.
+
+Equivalence is measured by connectivity, component/package identity, connector mappings, board outline and stackup, fabrication-critical pad and drill geometry, power and signal rules, placement-critical relationships, complete routes and zones, and an explainable DRC and manufacturing-artifact comparison. It does not require copying the original trace geometry, track ordering, or exact component coordinates. Manual layout can satisfy the north star. Automatic placement, global autorouting, and optimal routing are not acceptance requirements.
+
+The required manufacturing boundary is a fabrication-capable KiCad export that preserves the authored board data and can feed auditable comparison artifacts. nocad-native BOM, CPL, Gerber, and drill-file generation is outside this north-star acceptance boundary for now; those artifacts may be generated from the exported KiCad project by the recorded external toolchain.
+
+The north star therefore connects two product tracks:
+
+- **Semantic graph track:** represent every subsystem, interface, power domain, provider chain, constraint, and generated obligation without raw resolver special cases.
+- **PCB editor track:** project those obligations into authored placement, routes, vias, zones, checks, and a fabrication-capable KiCad export.
+
+Neither track should be completed against toy data in isolation. They meet through progressive Pico RetroDigital subsystem slices and explicit integration gates, described in `pico-retrodigital-fixture-plan.md`.
+
 ## Routing Complexity And Product Strategy
 
 "PCB routing" is not one algorithmic problem. Its complexity depends on what is fixed, what may change, which constraints apply, and whether the goal is any legal solution or a globally optimal one.
@@ -184,19 +209,24 @@ Export `.kicad_pcb` early, before nocad's own routing matures. Users can place i
 
 ## Sequencing
 
-Milestone ordering, acceptance criteria, and current status live in `docs/roadmap.md`. The dependency logic:
+Milestone ordering, acceptance criteria, and current status live in `docs/roadmap.md`. The dependency logic starts with a shared foundation, then advances the semantic graph and PCB editor as interacting tracks:
 
 1. Data-driven resolver comes first; it is upstream of everything (obligations must come from package data, not resolver code).
 2. Document model with patches and undo/redo comes before any editor surface that mutates state.
-3. Read-only projections (schematic, then board placements + ratsnest) prove the engine before editing exists.
-4. Placement editing before routing; placement plus pin-assignment scoring delivers most of the early value.
-5. Obligations panel before routing tools; manual routing MVP (45-degree segments, vias, live clearance DRC, no shove) after.
-6. KiCad export once placement exists; declarative pours and deterministic assists (diff-pair assist, pattern replication, corridor completion) after the data model proves out.
-7. Bounded selected-net search follows manual routing and deterministic assists. Global multi-net routing is not scheduled until selected-net evidence justifies it.
+3. After that shared foundation, expand a real Pico RetroDigital subsystem in the semantic graph and carry its resolved obligations into the editor before modeling the next subsystem where practical.
+4. Read-only projections (schematic, then board placements + ratsnest) prove the engine before editing exists and expose missing semantic metadata early.
+5. Placement editing precedes routing; placement plus pin-assignment scoring delivers most of the early value and feeds layout constraints back into the graph model.
+6. The obligations panel precedes routing tools; manual routing MVP (45-degree segments, vias, live clearance DRC, no shove) follows.
+7. KiCad export begins once placement exists. Declarative pours are required for north-star manufacturing equivalence, while deterministic assists (diff-pair assist, pattern replication, corridor completion) remain optional productivity tools.
+8. Bounded selected-net search follows manual routing and deterministic assists. Global multi-net routing is not scheduled and is not required for either target unless selected-net evidence later justifies it.
 
-## MVP Cutline
+Each subsystem should pass progressively stronger gates: semantic connectivity, board-model projection, authored layout obligations, and export/DRC comparison. This alternating path prevents the editor from being designed only around toy obligations and prevents the graph from accumulating constraints that have never been exercised by layout.
 
-MVP definition: **place and route the RP2350 + IT66121 sample board in nocad, see every obligation's status, and export `.kicad_pcb` to finish in KiCad.** That is roadmap M1-M8. Explicitly out of the MVP: pours, push-and-shove, autorouting, length tuning, KiCad import, 3D preview (M9 and later).
+## EDA Capability MVP Cutline
+
+EDA capability MVP definition: **place and route the RP2350 + IT66121 sample board in nocad, see every obligation's status, and export `.kicad_pcb` to finish in KiCad.** That is roadmap M1-M8. Explicitly out of the EDA capability MVP: pours, push-and-shove, autorouting, length tuning, KiCad import, and 3D preview (M9 and later).
+
+This cutline is not the product north star. Recreating the Pico RetroDigital main board additionally requires the zones and broader rule coverage needed for manufacturing equivalence, but still does not require push-and-shove or automatic/global routing.
 
 Feature inventory by layer:
 

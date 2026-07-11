@@ -20,7 +20,7 @@ Reference documents:
 - `docs/research/pico-retrodigital-fixture-plan.md` - trusted board fixtures and their intended milestone coverage.
 - `docs/i2c-vertical-slice-plan.md` - the original vertical slice plan (largely delivered).
 
-## Current State (2026-07-10)
+## Current State (2026-07-11)
 
 What exists and works:
 
@@ -45,11 +45,33 @@ Known architectural debts (tracked in M1/M2 below):
 
 ## In Progress (2026-07-11)
 
-M1 is active. Function resolution, generated supplementary nets, contract shunts such as pullups, contract- and port-scoped preferred pin groups, and diagnostic pin suggestions now come from package data. Connection allocation has deterministic candidate scoring and improved edge-order invariance for unique edge IDs, while remaining a bounded greedy pass rather than Cartesian or global search. Next, decide whether function-provider allocation must join the same scoring pass, then close the remaining full-output edge-order cases before starting M2.
+Shared-foundation milestone M1 is active. Function resolution, generated supplementary nets, contract shunts such as pullups, contract- and port-scoped preferred pin groups, and diagnostic pin suggestions now come from package data. Connection allocation has deterministic candidate scoring and improved edge-order invariance for unique edge IDs, while remaining a bounded greedy pass rather than Cartesian or global search. Next, decide whether function-provider allocation must join the same scoring pass, then close the remaining full-output edge-order cases before starting M2.
 
-## Milestones
+The Pico RetroDigital main board is the product north star. Work after the shared foundation advances in two cooperating tracks rather than completing one in isolation: the semantic graph grows subsystem by subsystem toward full design representation, while the editor/PCB track consumes those increasingly realistic resolved outputs. The integration gates below decide when a capability works end to end.
 
-Ordering rationale lives in `docs/research/pcb-layout-approach.md` (Sequencing section). Statuses: `todo`, `in progress`, `done` (with date).
+## North Star and Delivery Model
+
+The product north star is:
+
+> Recreate the Pico RetroDigital main board natively in nocad and export an electrically equivalent, DRC-reviewable KiCad design.
+
+"Recreate" means functional and manufacturing equivalence against a content-pinned reference, not identical placement or trace geometry. The current reference is a useful scale marker (about 70 footprints, 123 observed nets, 379 pads, 611 track segments, 58 vias, and 5 zones), but these observations are not yet a qualified golden baseline. Provenance, licensing, source revision, known design issues, and the reference DRC result must be recorded before parity claims are accepted.
+
+The smaller RP2350 + IT66121 project remains the **EDA capability MVP**. It is the first compact design that must pass through graph authoring, resolution, placement, routing, and export. It reduces iteration cost; it does not replace the north star or the broader Initial Product Slice in `docs/research/product-vision.md`.
+
+The Initial Product Slice remains the product-level target around that EDA proof: workspace and multi-project UX, schematic basics, package/module manifests, install/configuration/override flows, stable identities, AI-readable context, and validated AI-proposed edits. The roadmap tracks those concerns primarily in M2, G2, and M3 rather than treating one sample board as the whole product.
+
+Delivery has three parts:
+
+1. **Shared foundation (M1-M2):** deterministic resolution and a persistent, patch-based document model used by both tracks.
+2. **Intent / Semantic Graph track (G1-G3):** represent the complete north-star design as packages, functions, connections, constraints, and diagnostics.
+3. **Editor / PCB track (M3-M9):** project resolved obligations into shared schematic/board editor infrastructure and an authored board, then place, route, pour, inspect, and export it.
+
+The tracks should advance in integrated vertical slices. A real subsystem is modeled in the graph, projected into the editor, and used to expose missing semantics or editor assumptions before the next subsystem is added. The current suggested subsystem order is video/HDMI, MCU and clocks, level shifting and FFC interfaces, USB and power, audio/control, then remaining support circuitry. G1 must qualify the exact parts and boundaries before this ordering becomes a reference claim.
+
+Statuses: `todo`, `in progress`, `done` (with date). Detailed architecture and sequencing rationale remain in `docs/research/pcb-layout-approach.md`.
+
+## Shared Foundation
 
 ### M1 - Data-driven resolver - in progress
 
@@ -71,6 +93,44 @@ Done when:
 - The slice UI mutates only through the document API.
 - Every edit is an inspectable patch; undo/redo works across all edit types.
 - A project round-trips to disk and back losslessly.
+
+## Intent / Semantic Graph Track
+
+### G1 - North-star reference and semantic inventory - todo
+
+Establish the exact Pico RetroDigital revision being recreated and inventory the design before claiming semantic coverage. Decompose it into reviewable subsystems and identify every component, interface, power domain, generated support circuit, and board-relevant constraint that the graph must express.
+
+Done when:
+
+- The reference revision is content-pinned or otherwise immutable and its provenance, license status, known issues, and DRC baseline are recorded.
+- A machine-checkable inventory maps reference components, nets, interfaces, and power domains to planned nocad packages and contracts, including explicit unsupported items.
+- Subsystem boundaries and cross-subsystem interfaces are documented without changing electrical identity.
+
+### G2 - Scalable graph composition and subsystem coverage - todo
+
+Extend the graph model and builder only where real north-star subsystems or the Initial Product Slice demonstrate a need. Likely semantic work includes hierarchy or grouping for navigation, reusable subsystem composition, package coverage, power and clock semantics, differential-pair and impedance constraints, placement hints, and generated passives. Product-level graph authoring must also fit into a workspace with multiple projects, package/module manifests, install and configuration flows, local overrides, AI-readable context, and AI-proposed structured patches. M2 supplies the patch and persistence foundation; M3 supplies the first real editor projection. Do not introduce abstractions solely to mirror KiCad syntax.
+
+Done when:
+
+- Each agreed subsystem can be authored and reviewed through the graph UI without raw JSON surgery.
+- Packages and contracts cover the subsystem's real interfaces and constraints without component-specific resolver branches.
+- Package/module manifests support explicit installation, configuration, versioned identity, and project-local overrides without losing source provenance.
+- A workspace can host and reopen multiple projects, and exposes stable project context for validated, inspectable AI-proposed patches.
+- Diagnostics distinguish missing package data, unsatisfied requirements, electrical conflicts, and intentionally unsupported reference features.
+- Each completed subsystem has a deterministic resolution fixture and a reference-connectivity comparison.
+
+### G3 - Full north-star semantic parity - todo
+
+Compose all completed subsystems into one project and prove that nocad can represent the whole electrical design before board geometry is considered complete.
+
+Done when:
+
+- Every in-scope reference component and electrical connection has a stable nocad identity and source mapping.
+- The full project can be authored, saved, reopened, and resolved without unexplained errors or raw JSON repair.
+- A machine-readable connectivity comparison reports equivalence to the qualified reference, with every intentional difference explicitly waived and documented.
+- Required board obligations and constraints are emitted for the PCB editor, including power domains, differential pairs, placement constraints, keepouts, and generated support circuitry represented by the semantic model.
+
+## Editor / PCB Track
 
 ### M3 - Editor engine foundation + schematic projection (read-only) - todo
 
@@ -104,17 +164,77 @@ Done when:
 
 Constraint states (unplaced / unrouted / violating / satisfied) listed with click-to-locate. Useful before routing tools exist.
 
+Done when:
+
+- Every placement, routing, and declared-constraint obligation has a stable state and source mapping.
+- Selecting an obligation locates the relevant graph or board objects.
+
 ### M7 - Manual routing MVP - todo
 
 45-degree segments, vias, snap, live clearance DRC. No push-and-shove.
+
+Done when:
+
+- A user can route and edit all nets in the capability MVP using authored segments and vias.
+- Live clearance checks and final DRC use the same portable rule implementation.
+- Routing edits are inspectable, undoable board-document patches.
 
 ### M8 - KiCad export - todo
 
 `.kicad_pcb` (and schematic) export as the escape hatch: place in nocad, finish in KiCad. Export before import.
 
-### M9 - Declarative pours + deterministic routing assists - todo
+Done when:
 
-Pours as intent ("GND pour on L2 with these keepouts", geometry generated). Add user-directed operations that do not require a global router: diff-pair drawing assistance, pattern replication, fanout helpers, and corridor-constrained completion. Every result is an ordinary inspectable board patch and must pass the same DRC as manual geometry.
+- The capability MVP exports to a supported KiCad version and opens without repair.
+- Exported connectivity is machine-compared with the resolved nocad project.
+- Unsupported or lossy constructs are reported explicitly rather than silently omitted.
+
+### M9 - Declarative zones and pours - todo
+
+Pours as intent ("GND pour on L2 with these keepouts", geometry generated). Zones are required for north-star manufacturing equivalence, not an optional routing convenience. Every result is ordinary inspectable board geometry and must pass the same DRC as manual geometry.
+
+Done when:
+
+- The north-star project's declared copper zones can be generated deterministically, inspected, regenerated, and exported.
+- Manual edits and generated geometry have clear ownership so regeneration cannot silently destroy authored work.
+
+## Cross-track Integration Gates
+
+These gates are acceptance checkpoints, not a third implementation track. Passing one may expose work that belongs back in either track.
+
+### I1 - Capability MVP connectivity - todo
+
+The RP2350 + IT66121 sample is authored through the graph UI, resolves deterministically, exposes all provider requirements and generated circuitry, and has a machine-checkable expected netlist.
+
+### I2 - Capability MVP board loop - todo
+
+The same sample is projected, placed, manually routed, checked, persisted, reopened, and exported to KiCad with connectivity preserved. Pours are not required for this compact gate unless the sample declares them.
+
+### I3 - North-star intent parity - todo
+
+G3's complete graph passes the qualified reference connectivity comparison and produces no unexplained diagnostics. This gate can be reached before the full board is routed.
+
+### I4 - North-star board parity - todo
+
+The full project has its outline, stackup, footprints, placement, rules, keepouts, ratsnest, and obligations represented in nocad. Every reference element is mapped, intentionally replaced, or explicitly waived.
+
+### I5 - North-star export qualification - todo
+
+All required nets are routed, declared zones are generated, nocad DRC has no unexplained violations, and the exported KiCad design passes the documented connectivity and DRC comparison procedure. The KiCad export must preserve the fabrication-critical board definition needed to produce the qualified design, including stackup, outline and cutouts, copper, drills, mask, and fabrication layers. Nocad-native BOM, CPL, or Gerber generation is not required at this gate; those outputs may still be produced from the qualified KiCad export. Exact human trace geometry and global route optimality are not acceptance requirements.
+
+## Nonblocking Automation and Routing Research
+
+### A1 - Deterministic board assists - todo
+
+Add user-directed operations that do not require a global router: differential-pair drawing assistance, pattern replication, fanout helpers, and corridor-constrained completion. Every result is an ordinary inspectable board patch and must pass the same DRC as manual geometry.
+
+Done when:
+
+- Differential-pair, fanout, replication, and corridor assists never bypass the board document or DRC path.
+- Proposed geometry is deterministic for the same inputs, previewable before application, and undoable after application.
+- Failure leaves the document unchanged and explains which declared rule or geometric condition prevented a proposal.
+
+A1 is useful for north-star completion but does not block it; manual board editing remains the required path.
 
 ### M10 - Selected-net routing experiment - todo
 
@@ -129,7 +249,7 @@ Done when:
 - The UI can overlay the proposal, existing geometry, explored region, and relevant cost or failure information in board coordinates.
 - Success is measured by legality, bounded interactive behavior, and reviewability. Matching the original human route or proving optimality is not required.
 
-Global multi-net autorouting is deliberately not a committed milestone. Evidence from M10 must justify any later experiment in net ordering, congestion pricing, local rip-up-and-reroute, partitioning, or learned ranking. A useful system may route only a selected region or subset and identify the remaining placement or constraint conflicts.
+M10 does not block the north-star milestones or integration gates. Global multi-net autorouting is deliberately not committed. Evidence from M10 must justify any later experiment in net ordering, congestion pricing, local rip-up-and-reroute, partitioning, or learned ranking. A useful system may route only a selected region or subset and identify the remaining placement or constraint conflicts.
 
 ## Architecture Invariants
 
@@ -152,6 +272,7 @@ Short list; violating one is a design regression, not a style issue:
 
 ## History
 
+- 2026-07-11 - Adopted the Pico RetroDigital main board as the product north star and reorganized delivery into shared M1-M2 foundations, cooperating semantic-graph and editor/PCB tracks, explicit cross-track integration gates, required M9 zones, and nonblocking board-assist and M10 selected-net routing research.
 - 2026-07-11 - Added metadata-driven provider requirement sockets to the graph. HDMI transmitter requirements now appear as separate `Video In` and `I2C Control` target handles with open/connected state, exact port/contract drops, duplicate protection, and attached existing edges.
 - 2026-07-11 - Replaced source-order allocation ties and first-matching selectable pins with deterministic candidate scoring. Connections use effective candidate cardinality after authored reservations, explicit bindings take priority, constrained signals and stable IDs break ties, and generic selectors preserve pins with scarce extra capabilities. Reversed-edge regressions cover competing auto and explicit assignments. Allocation remains greedy, and function providers remain sequential.
 - 2026-07-11 - Added capability-derived direct TMDS output for the generic FPGA. The graph matches the HDMI function's `generic_gpio` provider rule to the FPGA's 64-pin `io0` through `io63` pool, without adding an FPGA-specific HDMI port, and retains the FPGA-via-TX-IC path as a separate topology. The provider inspector derives this generic mode from package/function metadata and no longer leaks the RP2350 GPIO12-19 HSTX preset into FPGA mappings.

@@ -15,3 +15,8 @@
 - When changing repeated JSX controls, patch with component-specific context and inspect the exact occurrence. The provider mode grid may collapse to one column for a single generic mode, while the I2C auto/manual grid must remain two columns.
 - Provider inspector editability and mode-switch binding retention must come from the selected ProviderModeDefinition signal map. A `pinSelector` mapping is user-editable and preserves authored provider bindings; a fixed `pin` mapping is read-only and discards conflicting authored provider bindings.
 - Render active provider requirements as metadata-labeled, individually connectable target sockets on the component node. When those sockets exist, omit the anonymous target handle so users cannot bypass exact requirement selection.
+
+## Roadmap Direction
+
+- Treat the current Pico RetroDigital main board as the product north star, while keeping the smaller RP2350 plus IT66121 board as an EDA capability MVP.
+- After shared resolver and document foundations, advance two cooperating tracks: full semantic-graph representation of the north-star design and the editor/PCB path through placement, manual routing, zones, and KiCad export. Validate them through subsystem slices and integration gates rather than completing either track only against toy data.
