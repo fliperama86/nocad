@@ -33,6 +33,7 @@ import {
 } from "./connection-intent-dialog";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 import { EdgeAssignmentPanel } from "./edge-assignment-panel";
+import { matchFunctionComponentConnection } from "./function-connection-intent";
 import { IntentGraphView } from "./intent-graph-view";
 import { JsonPanel, type JsonView } from "./json-panel";
 import { PcbDesignerPanel, type BoardComponentPlacement } from "./pcb-designer-panel";
@@ -273,6 +274,7 @@ export function I2cSliceApp() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingConnectionIntent>();
+  const [connectionFeedback, setConnectionFeedback] = useState<string>();
 
   const resolved = useMemo(() => resolveProject(source), [source]);
   const selectedChoice = selectedEdgeId
@@ -301,6 +303,7 @@ export function I2cSliceApp() {
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -322,6 +325,7 @@ export function I2cSliceApp() {
     setSelectedEdgeId(undefined);
     setSelectedNodeId(undefined);
     setPendingConnection(undefined);
+    setConnectionFeedback(undefined);
     setGraphRevision((revision) => revision + 1);
   }
 
@@ -357,6 +361,7 @@ export function I2cSliceApp() {
 
   function connectNodes(connection: Connection) {
     if (!connection.source || !connection.target || connection.source === connection.target) {
+      setConnectionFeedback("A connection requires two different compatible nodes.");
       return;
     }
 
@@ -364,11 +369,20 @@ export function I2cSliceApp() {
     const targetNode = source.nodes.find((node) => node.id === connection.target);
 
     if (!sourceNode || !targetNode) {
+      setConnectionFeedback("The connection endpoints are no longer present in the project.");
       return;
     }
 
     if (sourceNode.kind === "component" && targetNode.kind === "component") {
       const options = componentConnectionOptionsForPair(sourceNode, targetNode, source.edges);
+
+      if (options.length === 0) {
+        setConnectionFeedback(incompatibleConnectionMessage(sourceNode, targetNode));
+        setPendingConnection(undefined);
+        return;
+      }
+
+      setConnectionFeedback(undefined);
 
       if (options.length === 1 && shouldAutoCreateConnection(options)) {
         createConnectionFromIntent(options[0], options[0].params);
@@ -385,6 +399,15 @@ export function I2cSliceApp() {
       return;
     }
 
+    const validation = validateNodeConnection(sourceNode, targetNode, source.edges);
+
+    if (!validation.valid) {
+      setConnectionFeedback(validation.message);
+      setPendingConnection(undefined);
+      return;
+    }
+
+    setConnectionFeedback(undefined);
     setPendingConnection(undefined);
     setSource((current) => {
       const edgeIds = new Set(current.edges.map((edge) => edge.id));
@@ -721,9 +744,22 @@ export function I2cSliceApp() {
                   className="min-h-0"
                   componentTemplates={componentPalette}
                   graphRevision={graphRevision}
+                  connectionFeedback={connectionFeedback}
+                  isValidConnection={(connection) => isValidGraphConnection(source, connection)}
                   onAddComponent={addComponent}
                   onCanvasPaneClick={() => setPropertiesCollapsed(true)}
                   onConnectNodes={connectNodes}
+                  onDismissConnectionFeedback={() => setConnectionFeedback(undefined)}
+                  onInvalidConnection={(sourceNodeId, targetNodeId) => {
+                    const sourceNode = source.nodes.find((node) => node.id === sourceNodeId);
+                    const targetNode = source.nodes.find((node) => node.id === targetNodeId);
+
+                    setConnectionFeedback(
+                      sourceNode && targetNode
+                        ? validateNodeConnection(sourceNode, targetNode, source.edges).message
+                        : "These nodes do not expose a compatible connection."
+                    );
+                  }}
                   onRemoveEdges={removeEdges}
                   onRemoveNodes={removeNodes}
                   onPositionsChange={setPositions}
@@ -854,19 +890,101 @@ function createIntentEdge(
     return undefined;
   }
 
-  if (sourceNode.kind === "intent.function" && targetNode.kind === "component") {
-    return isConnectorNode(targetNode)
-      ? createExposesEdge(sourceNode, targetNode, edgeIds)
-      : createProvidesEdge(targetNode, sourceNode, edgeIds);
+  const functionNode = sourceNode.kind === "intent.function" ? sourceNode : targetNode;
+  const componentNode = sourceNode.kind === "component" ? sourceNode : targetNode;
+  const match = matchFunctionComponentConnection(componentNode, functionNode);
+
+  if (!match.intent || componentNode.kind !== "component" || functionNode.kind !== "intent.function") {
+    return undefined;
   }
 
-  if (sourceNode.kind === "component" && targetNode.kind === "intent.function") {
-    return isConnectorNode(sourceNode)
-      ? createExposesEdge(targetNode, sourceNode, edgeIds)
-      : createProvidesEdge(sourceNode, targetNode, edgeIds);
+  return match.intent.kind === "provides"
+    ? createProvidesEdge(componentNode, functionNode, match.intent.componentPort, match.intent.contract, edgeIds)
+    : createExposesEdge(functionNode, componentNode, match.intent.componentPort, match.intent.contract, edgeIds);
+}
+
+type NodeConnectionValidation =
+  | { message: ""; valid: true }
+  | { message: string; valid: false };
+
+function validateNodeConnection(
+  sourceNode: ProjectNode,
+  targetNode: ProjectNode,
+  currentEdges: ProjectEdge[]
+): NodeConnectionValidation {
+  if (sourceNode.id === targetNode.id) {
+    return { message: "A node cannot connect to itself.", valid: false };
   }
 
-  return undefined;
+  if (sourceNode.kind === "component" && targetNode.kind === "component") {
+    return componentConnectionOptionsForPair(sourceNode, targetNode, currentEdges).length > 0
+      ? { message: "", valid: true }
+      : { message: incompatibleConnectionMessage(sourceNode, targetNode), valid: false };
+  }
+
+  const functionNode = sourceNode.kind === "intent.function" ? sourceNode : targetNode;
+  const componentNode = sourceNode.kind === "component" ? sourceNode : targetNode;
+
+  if (functionNode.kind !== "intent.function" || componentNode.kind !== "component") {
+    return { message: "Only compatible components and function intents can be connected.", valid: false };
+  }
+
+  const match = matchFunctionComponentConnection(componentNode, functionNode);
+
+  if (!match.intent) {
+    const reason =
+      match.reason === "ambiguous"
+        ? "Multiple compatible ports were found; explicit port selection is required."
+        : `${nodeDisplayName(componentNode)} does not provide or expose ${nodeDisplayName(functionNode)}.`;
+
+    return { message: reason, valid: false };
+  }
+
+  const duplicate = currentEdges.some((edge) =>
+    match.intent.kind === "provides"
+      ? edge.kind === "intent.provides" &&
+        edge.from.node === componentNode.id &&
+        edge.to.node === functionNode.id &&
+        edge.contract === match.intent.contract
+      : edge.kind === "intent.exposes" &&
+        edge.from.node === functionNode.id &&
+        edge.to.node === componentNode.id &&
+        edge.contract === match.intent.contract
+  );
+
+  return duplicate
+    ? { message: `${nodeDisplayName(componentNode)} is already connected to ${nodeDisplayName(functionNode)}.`, valid: false }
+    : { message: "", valid: true };
+}
+
+function isValidGraphConnection(
+  source: ProjectSource,
+  connection: { source: string | null; target: string | null }
+) {
+  const sourceNode = source.nodes.find((node) => node.id === connection.source);
+  const targetNode = source.nodes.find((node) => node.id === connection.target);
+
+  return Boolean(sourceNode && targetNode && validateNodeConnection(sourceNode, targetNode, source.edges).valid);
+}
+
+function incompatibleConnectionMessage(sourceNode: ProjectNode, targetNode: ProjectNode) {
+  return `${nodeDisplayName(sourceNode)} and ${nodeDisplayName(targetNode)} do not share a compatible contract and port direction.`;
+}
+
+function nodeDisplayName(node: ProjectNode) {
+  if (node.label) {
+    return node.label;
+  }
+
+  if (node.kind === "component") {
+    return humanIdentifier(node.component.split(":").pop() ?? node.component);
+  }
+
+  if (node.kind === "intent.function") {
+    return humanIdentifier(node.function.split(":").pop() ?? node.function);
+  }
+
+  return node.voltage;
 }
 
 function createComponentConnectionEdge(
@@ -1012,22 +1130,24 @@ function defaultConnectionParams(contractId: string): ContractParams | undefined
 function createProvidesEdge(
   componentNode: ProjectNode,
   functionNode: ProjectNode,
+  componentPort: string,
+  contract: string,
   edgeIds: Set<string>
 ): IntentProvidesEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.provides",
-    label: "Video provider",
-    role: "video_provider",
+    label: `Provides ${connectionLabel(contract)}`,
+    role: "function_provider",
     from: {
       node: componentNode.id,
-      port: componentProviderPort(componentNode)
+      port: componentPort
     },
     to: {
       node: functionNode.id,
       port: "source"
     },
-    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown",
+    contract,
     strategy: {
       pinAssignment: "auto",
       providerMode: "auto"
@@ -1037,23 +1157,25 @@ function createProvidesEdge(
 
 function createExposesEdge(
   functionNode: ProjectNode,
-  connectorNode: ProjectNode,
+  componentNode: ProjectNode,
+  componentPort: string,
+  contract: string,
   edgeIds: Set<string>
 ): IntentExposesEdge {
   return {
     id: uniqueId(createGraphId("edge"), edgeIds),
     kind: "intent.exposes",
-    label: "HDMI connector",
-    role: "video_connector",
+    label: `Exposes ${connectionLabel(contract)}`,
+    role: "function_exposure",
     from: {
       node: functionNode.id,
       port: "connector"
     },
     to: {
-      node: connectorNode.id,
-      port: connectorPort(connectorNode)
+      node: componentNode.id,
+      port: componentPort
     },
-    contract: functionNode.kind === "intent.function" ? functionNode.function : "builtin:unknown"
+    contract
   };
 }
 
@@ -1155,30 +1277,6 @@ function dependencyNameForNode(node: ProjectNode) {
   }
 
   return undefined;
-}
-
-function isConnectorNode(node: ProjectNode) {
-  return node.kind === "component" && (node.role?.includes("port") === true || node.component.includes("CONNECTOR"));
-}
-
-function componentProviderPort(node: ProjectNode) {
-  if (node.kind !== "component") {
-    return "provider";
-  }
-
-  if (node.role === "mcu") {
-    return "video_out";
-  }
-
-  if (node.role === "hdmi_tx") {
-    return "hdmi_tx";
-  }
-
-  return "provider";
-}
-
-function connectorPort(node: ProjectNode) {
-  return node.kind === "component" && node.role === "hdmi_port" ? "hdmi" : "connector";
 }
 
 function humanIdentifier(value: string) {

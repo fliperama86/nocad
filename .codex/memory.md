@@ -7,3 +7,7 @@
 - In placed `.kicad_pcb` footprints, transform pad `at` x/y from footprint-local coordinates, but treat the pad `at` angle as the serialized board orientation. Do not add the footprint rotation again. Validate the long axis of signal and mounting pads against the source footprint and connected traces.
 - Render the declared pad and drill shapes and dimensions. In particular, through-hole `oval` pads with `drill oval` must appear as pill-shaped copper with a pill-shaped hole, not as rectangles with circular holes.
 - A board preview is not visually representative if it omits filled copper zones or source drawing layers. Render serialized `filled_polygon` geometry and expose footprint silk, fabrication, courtyard, drawing, and comment layers separately.
+
+## Interaction Validation
+
+- Do not let the graph UI appear to accept an electrically invalid connection and rely only on the Diagnostics tab to explain it later. Validate endpoint and contract compatibility before committing an edge, or make rejection immediate and visible at the interaction site.

@@ -11,6 +11,7 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -54,12 +55,16 @@ const maxNodeDetailRows = 4;
 const pointerIntentThreshold = 8;
 
 export function IntentGraphView({
+  connectionFeedback,
   componentTemplates,
   className,
   graphRevision,
+  isValidConnection,
   onAddComponent,
   onCanvasPaneClick,
   onConnectNodes,
+  onDismissConnectionFeedback,
+  onInvalidConnection,
   onPositionsChange,
   onRemoveEdges,
   onRemoveNodes,
@@ -70,11 +75,15 @@ export function IntentGraphView({
   source
 }: {
   className?: string;
+  connectionFeedback?: string;
   componentTemplates: ComponentTemplate[];
   graphRevision: number;
+  isValidConnection: (connection: Connection | Edge) => boolean;
   onAddComponent: (template: string) => void;
   onCanvasPaneClick?: () => void;
   onConnectNodes: (connection: Connection) => void;
+  onDismissConnectionFeedback: () => void;
+  onInvalidConnection: (sourceNodeId: string, targetNodeId: string) => void;
   onPositionsChange: Dispatch<SetStateAction<NodePositions>>;
   onRemoveEdges: (edgeIds: string[]) => void;
   onRemoveNodes: (nodeIds: string[]) => void;
@@ -195,6 +204,12 @@ export function IntentGraphView({
     setSelectedNodeIds([]);
   }, [onRemoveNodes, onSelectedEdgeChange, onSelectedNodeChange]);
 
+  const finishConnection = useCallback((_: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+    if (connectionState.isValid === false && connectionState.fromNode && connectionState.toNode) {
+      onInvalidConnection(connectionState.fromNode.id, connectionState.toNode.id);
+    }
+  }, [onInvalidConnection]);
+
   return (
     <Panel className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}>
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-2 py-2">
@@ -217,6 +232,21 @@ export function IntentGraphView({
           Delete selection
         </button>
       </div>
+      {connectionFeedback ? (
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          role="alert"
+        >
+          <span>{connectionFeedback}</span>
+          <button
+            className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium hover:bg-destructive/10"
+            onClick={onDismissConnectionFeedback}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       <div
         className="h-full min-h-0 flex-1 overflow-hidden rounded-b-md bg-muted/30"
         ref={flowContainerRef}
@@ -233,12 +263,14 @@ export function IntentGraphView({
             edgesFocusable
             elementsSelectable
             key={graphRevision}
+            isValidConnection={isValidConnection}
             nodes={flowNodes}
             nodesFocusable
             nodeTypes={nodeTypes}
             nodeClickDistance={pointerIntentThreshold}
             nodeDragThreshold={pointerIntentThreshold}
             onConnect={onConnectNodes}
+            onConnectEnd={finishConnection}
             onEdgesChange={updateEdges}
             onEdgesDelete={removeDeletedEdges}
             onNodeDragStop={(_, node) => commitNodePosition(node)}
