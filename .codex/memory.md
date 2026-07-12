@@ -15,6 +15,7 @@
 
 ## Interaction Validation
 
+- For Vite-served JSON modules, do not add native JSON import attributes to dynamic imports. Vite transforms JSON into JavaScript modules, so `{ with: { type: "json" } }` makes the browser reject the transformed `text/javascript` response even though build-time checks pass. Verify dynamic chunks through the live development server.
 - The application and UI must remain protocol-, component-, feature-, and project-agnostic just like the engine. Demo/test-specific UI code must be minimal and isolated to fixture loading or clearly bounded development surfaces; it must not add bespoke panels, conditionals, layout rules, labels, controls, or interaction behavior to the general product implementation.
 - Do not let the graph UI appear to accept an electrically invalid connection and rely only on the Diagnostics tab to explain it later. Validate endpoint and contract compatibility before committing an edge, or make rejection immediate and visible at the interaction site.
 - Keep generic pin-pool and function-level capability matching as test-local semantics, not as a shipped fake FPGA component. Real FPGA support must begin with an identified part definition; an external transmitter remains a separate provider topology.

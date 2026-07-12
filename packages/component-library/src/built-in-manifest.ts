@@ -22,7 +22,7 @@ export const builtInComponentEntries: readonly ComponentLibraryEntry[] = [
         }
       ]
     },
-    load: () => import("./definitions/raspberry-pi/rp2350a.json", { with: { type: "json" } })
+    load: () => import("./definitions/raspberry-pi/rp2350a.json")
   },
   {
     descriptor: {
@@ -45,7 +45,7 @@ export const builtInComponentEntries: readonly ComponentLibraryEntry[] = [
         }
       ]
     },
-    load: () => import("./definitions/raspberry-pi/rp2354b.json", { with: { type: "json" } })
+    load: () => import("./definitions/raspberry-pi/rp2354b.json")
   },
   {
     descriptor: {
@@ -61,7 +61,7 @@ export const builtInComponentEntries: readonly ComponentLibraryEntry[] = [
       },
       partNumber: "IT66121"
     },
-    load: () => import("./definitions/ite/it66121.json", { with: { type: "json" } })
+    load: () => import("./definitions/ite/it66121.json")
   },
   {
     descriptor: {
@@ -77,6 +77,6 @@ export const builtInComponentEntries: readonly ComponentLibraryEntry[] = [
       },
       partNumber: "1-1734839-4"
     },
-    load: () => import("./definitions/te-connectivity/1-1734839-4.json", { with: { type: "json" } })
+    load: () => import("./definitions/te-connectivity/1-1734839-4.json")
   }
 ] as const;

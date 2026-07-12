@@ -34,6 +34,11 @@ await rejectPatterns(engineFiles, specificBehaviorPatterns, "portable engine");
 await rejectPatterns(["apps/web/src/App.tsx", ...workspaceFiles], specificBehaviorPatterns, "production workspace");
 await rejectPatterns(libraryInterpreterFiles, specificBehaviorPatterns, "definition-library interpreter");
 await rejectPatterns(
+  await sourceFiles("packages/component-library/src"),
+  [/with\s*:\s*\{\s*type\s*:\s*["']json["']/],
+  "Vite dynamic JSON imports"
+);
+await rejectPatterns(
   await sourceFiles("packages/component-library/src/definitions"),
   [/GENERIC_FPGA/i, /I2C_TEMP_SENSOR/i, /HDMI_TYPE_A_RECEPTACLE/i, /@nocad\/passives:RESISTOR/i, /@nocad\/io:LED/i],
   "production component definitions"

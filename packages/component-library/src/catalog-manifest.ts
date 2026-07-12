@@ -29,7 +29,7 @@ export const builtInContractEntries: readonly LibraryDefinitionEntry<ContractDes
       label: "I2C",
       package: builtinPackage
     },
-    load: () => import("./definitions/contracts/builtin/i2c.v1.json", { with: { type: "json" } })
+    load: () => import("./definitions/contracts/builtin/i2c.v1.json")
   },
   {
     descriptor: {
@@ -39,7 +39,7 @@ export const builtInContractEntries: readonly LibraryDefinitionEntry<ContractDes
       label: "Digital output",
       package: ioPackage
     },
-    load: () => import("./definitions/contracts/nocad/io/digital-output.v1.json", { with: { type: "json" } })
+    load: () => import("./definitions/contracts/nocad/io/digital-output.v1.json")
   },
   {
     descriptor: {
@@ -49,7 +49,7 @@ export const builtInContractEntries: readonly LibraryDefinitionEntry<ContractDes
       label: "HDMI output",
       package: videoPackage
     },
-    load: () => import("./definitions/contracts/nocad/video/hdmi-output.v1.json", { with: { type: "json" } })
+    load: () => import("./definitions/contracts/nocad/video/hdmi-output.v1.json")
   },
   {
     descriptor: {
@@ -59,7 +59,7 @@ export const builtInContractEntries: readonly LibraryDefinitionEntry<ContractDes
       label: "Pixel stream",
       package: videoPackage
     },
-    load: () => import("./definitions/contracts/nocad/video/pixel-stream.v1.json", { with: { type: "json" } })
+    load: () => import("./definitions/contracts/nocad/video/pixel-stream.v1.json")
   }
 ] as const;
 
@@ -74,6 +74,6 @@ export const builtInFunctionEntries: readonly LibraryDefinitionEntry<FunctionAut
       label: "HDMI video output",
       package: videoPackage
     },
-    load: () => import("./definitions/functions/nocad/video/hdmi-output.v1.json", { with: { type: "json" } })
+    load: () => import("./definitions/functions/nocad/video/hdmi-output.v1.json")
   }
 ] as const;
