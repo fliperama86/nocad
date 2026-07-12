@@ -94,7 +94,7 @@ The normal graph UI should not show these machine IDs. They are visible only in 
       "label": "Main MCU",
       "role": "mcu",
       "component": "@nocad/rp2350:RP2350A",
-      "package": "QFN80",
+      "package": "QFN-60",
       "refdesHint": "U?"
     },
     {

@@ -15,8 +15,9 @@
 
 ## Interaction Validation
 
+- The application and UI must remain protocol-, component-, feature-, and project-agnostic just like the engine. Demo/test-specific UI code must be minimal and isolated to fixture loading or clearly bounded development surfaces; it must not add bespoke panels, conditionals, layout rules, labels, controls, or interaction behavior to the general product implementation.
 - Do not let the graph UI appear to accept an electrically invalid connection and rely only on the Diagnostics tab to explain it later. Validate endpoint and contract compatibility before committing an edge, or make rejection immediate and visible at the interaction site.
-- The generic FPGA should connect directly to HDMI intent through a generic GPIO pin pool and function-level capability matching, not through a bespoke FPGA HDMI port. The external HDMI transmitter path remains a separate topology.
+- Keep generic pin-pool and function-level capability matching as test-local semantics, not as a shipped fake FPGA component. Real FPGA support must begin with an identified part definition; an external transmitter remains a separate provider topology.
 - When changing repeated JSX controls, patch with component-specific context and inspect the exact occurrence. The provider mode grid may collapse to one column for a single generic mode, while the I2C auto/manual grid must remain two columns.
 - Provider inspector editability and mode-switch binding retention must come from the selected ProviderModeDefinition signal map. A `pinSelector` mapping is user-editable and preserves authored provider bindings; a fixed `pin` mapping is read-only and discards conflicting authored provider bindings.
 - Render active provider requirements as metadata-labeled, individually connectable target sockets on the component node. When those sockets exist, omit the anonymous target handle so users cannot bypass exact requirement selection.
@@ -34,6 +35,9 @@
 
 ## Resolver Determinism
 
+- Store component, contract, and function definitions in a proper external library/catalog boundary and load them dynamically. Do not keep production definitions embedded in the engine or UI. Use only real, identified components in product/demo data, not generic or fake stand-ins such as `GENERIC_FPGA`.
+- Treat TE Connectivity 1-1734839-4 as the north-star 14-position video FFC connector, not an HDMI receptacle. RP2350A is QFN-60 and RP2354B is QFN-80; derive these device packages from component descriptors instead of hardcoding them in UI fixtures.
+- Demo and test fixtures may be protocol-, feature-, component-, or project-specific data. The engine itself, including resolver, allocation, topology interpretation, projection, layout, hit testing, and rendering, must not know any specific protocol, feature, or north-star identity. Keep component/package/contract mappings in definition data and project-specific wiring in authored fixture bindings; executable engine functions remain general interpreters of that data.
 - Do not pre-reserve bindings from every `intent.provides` edge. Protect hard provider pins only for validated, unambiguous function topology with valid endpoints, modes, signal maps, and overrides. Include fixed mode pins, diagnose collisions between valid provider claims, and let orphan, invalid, or ambiguous provider edges claim nothing.
 - Duplicate edge IDs must invalidate every occurrence rather than selecting a source-order survivor. Canonicalize hard reservation ownership, report conflicts, and test full `ResolvedProject` equality across all source edge-array permutations.
 - Inline topology must be function/package data-driven. For a series interposer, replace the selected logical net with stable provider and connector segments around a generated component, keep authored endpoint bindings unchanged, and project the generated component so neither ratsnest segment disappears.

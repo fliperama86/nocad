@@ -1,0 +1,119 @@
+{
+  "id": "@nocad/video:hdmi_output.v1",
+  "include": {
+    "tmds": {
+      "kind": "boolean",
+      "label": "TMDS",
+      "default": true,
+      "readonly": true
+    },
+    "ddc": {
+      "kind": "boolean",
+      "label": "DDC",
+      "default": true
+    },
+    "hpd": {
+      "kind": "boolean",
+      "label": "HPD",
+      "default": true
+    },
+    "cec": {
+      "kind": "boolean",
+      "label": "CEC",
+      "default": false
+    }
+  },
+  "signalGroups": [
+    {
+      "id": "tmds",
+      "include": "tmds",
+      "label": "TMDS",
+      "signals": [
+        {
+          "id": "tmds2_p",
+          "label": "D2+",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "tmds2_n",
+          "label": "D2-",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "tmds1_p",
+          "label": "D1+",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "tmds1_n",
+          "label": "D1-",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "tmds0_p",
+          "label": "D0+",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "tmds0_n",
+          "label": "D0-",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "clock_p",
+          "label": "CLK+",
+          "pinControl": "custom_only"
+        },
+        {
+          "id": "clock_n",
+          "label": "CLK-",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "ddc",
+      "include": "ddc",
+      "label": "DDC",
+      "signals": [
+        {
+          "id": "ddc_sda",
+          "label": "SDA",
+          "pinControl": "always"
+        },
+        {
+          "id": "ddc_scl",
+          "label": "SCL",
+          "pinControl": "always"
+        }
+      ]
+    },
+    {
+      "id": "hpd",
+      "include": "hpd",
+      "label": "HPD",
+      "signals": [
+        {
+          "id": "hpd",
+          "label": "HPD",
+          "pinControl": "always"
+        }
+      ]
+    },
+    {
+      "id": "cec",
+      "include": "cec",
+      "label": "CEC",
+      "signals": [
+        {
+          "id": "cec",
+          "label": "CEC",
+          "pinControl": "always"
+        }
+      ]
+    }
+  ],
+  "topology": {
+    "contract": "@nocad/video:hdmi_output.v1"
+  }
+}

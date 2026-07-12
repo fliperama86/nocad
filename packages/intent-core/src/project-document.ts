@@ -586,11 +586,17 @@ function requireEdge(source: ProjectSource, edgeId: string) {
 }
 
 function setPlacement(source: ProjectSource, object: string, value: unknown): ProjectSource {
+  const board = source.layout?.board ?? source.board?.id;
+
+  if (!board) {
+    throw new ProjectDocumentError("BOARD_REQUIRED", "A placement requires an authored board identity.");
+  }
+
   return {
     ...source,
     layout: {
       ...(source.layout ?? {}),
-      board: source.layout?.board ?? source.board?.id ?? "main_board",
+      board,
       placements: {
         ...(source.layout?.placements ?? {}),
         [object]: value

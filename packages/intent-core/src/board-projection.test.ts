@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import { applyBoardComponentPlacement, buildBoardProjection } from "./board-projection";
-import { resolveProject } from "./resolver";
+import { fixtureCatalog, resolveFixtureProject as resolveProject } from "./fixture-environment";
 import { createHdmiSliceProject, createHdmiTxSliceProject, hdmiSliceIds, hdmiTxSliceIds } from "./samples";
 
 
 describe("buildBoardProjection", () => {
+  it("requires authored board dimensions instead of inventing a project board", () => {
+    const source = createHdmiSliceProject();
+    const { board: _board, layout: _layout, ...boardless } = source;
+
+    expect(() => buildBoardProjection(boardless, resolveProject(boardless), fixtureCatalog)).toThrow(
+      "A board projection requires authored board dimensions."
+    );
+  });
+
   it("projects board footprint envelopes and ratsnest from resolved nets", () => {
     const source = createHdmiTxSliceProject();
-    const projection = buildBoardProjection(source, resolveProject(source));
+    const projection = buildBoardProjection(source, resolveProject(source), fixtureCatalog);
 
     expect(projection.board).toMatchObject({ widthMm: 60, heightMm: 40, layers: 4 });
     expect(projection.components.slice(0, 3).map((component) => component.id)).toEqual([
@@ -27,9 +36,41 @@ describe("buildBoardProjection", () => {
     expect(projection.stats.drcViolations).toBe(0);
   });
 
+  it("reports approximate geometry when a component has no authored envelope", () => {
+    const source = createHdmiSliceProject();
+    const componentId = source.nodes.find((node) => node.kind === "component")?.id;
+    const componentNode = source.nodes.find((node) => node.id === componentId);
+
+    if (!componentId || componentNode?.kind !== "component") {
+      throw new Error("Missing component fixture.");
+    }
+
+    const definition = fixtureCatalog.components[componentNode.component];
+
+    if (!definition) {
+      throw new Error("Missing component definition fixture.");
+    }
+
+    const { board: _board, ...definitionWithoutBoard } = definition;
+
+    const catalog = {
+      ...fixtureCatalog,
+      components: {
+        ...fixtureCatalog.components,
+        [definition.id]: definitionWithoutBoard
+      }
+    };
+    const projection = buildBoardProjection(source, resolveProject(source), catalog);
+
+    expect(projection.components.find((component) => component.id === componentId)?.geometryApproximate).toBe(true);
+    expect(projection.obligations).toContainEqual(
+      expect.objectContaining({ id: `geometry_${componentId}`, kind: "geometry" })
+    );
+  });
+
   it("projects generated inline components and both split ratsnest segments", () => {
     const source = createHdmiSliceProject();
-    const projection = buildBoardProjection(source, resolveProject(source));
+    const projection = buildBoardProjection(source, resolveProject(source), fixtureCatalog);
     const componentId = `series_${hdmiSliceIds.videoProvider}_tmds2_p`;
     const generatedComponents = projection.components.filter((component) =>
       component.id.startsWith(`series_${hdmiSliceIds.videoProvider}_`)
@@ -84,7 +125,7 @@ describe("buildBoardProjection", () => {
         routingIntent: source.layout?.routingIntent ?? []
       }
     };
-    const projection = buildBoardProjection(placedSource, resolveProject(placedSource));
+    const projection = buildBoardProjection(placedSource, resolveProject(placedSource), fixtureCatalog);
     const tx = projection.components.find((component) => component.id === hdmiTxSliceIds.tx);
 
     expect(tx).toMatchObject({ placed: true, rotationDeg: 90, xMm: 12, yMm: 13 });
@@ -93,7 +134,7 @@ describe("buildBoardProjection", () => {
 
   it("reports footprint overlap DRC for authored placement", () => {
     const source = createHdmiTxSliceProject();
-    const projection = buildBoardProjection(source, resolveProject(source));
+    const projection = buildBoardProjection(source, resolveProject(source), fixtureCatalog);
     const withTxPlaced = applyBoardComponentPlacement(projection, hdmiTxSliceIds.tx, {
       rotationDeg: 0,
       xMm: 20,

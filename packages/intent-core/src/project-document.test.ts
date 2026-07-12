@@ -13,6 +13,19 @@ import type { ProjectPatch } from "./project-document";
 import type { ProjectSource } from "./types";
 
 describe("ProjectDocument", () => {
+  it("does not invent a board identity when authoring placement", () => {
+    const source = createHdmiSliceProject();
+    const { board: _board, layout: _layout, ...boardless } = source;
+
+    expect(() =>
+      applyProjectPatch(boardless, {
+        op: "setBoardPlacement",
+        object: hdmiSliceIds.mcu,
+        value: { x: "10mm", y: "10mm", rotation: "0deg" }
+      })
+    ).toThrowError(new ProjectDocumentError("BOARD_REQUIRED", "A placement requires an authored board identity."));
+  });
+
   it("applies semantic graph patches and exposes exact inverse records", () => {
     const source = createHdmiSliceProject();
     const document = new ProjectDocument(source);

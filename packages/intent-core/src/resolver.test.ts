@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { getComponentPinOptions, getI2cPinPairOptions } from "./assignment";
+import { getComponentPinOptions, getPreferredPinGroupOptions } from "./assignment";
+import {
+  createFixtureResolutionEnvironment,
+  fixtureCatalog,
+  resolveFixtureProject as resolveProject
+} from "./fixture-environment";
 import { components, functions } from "./fixtures";
 import {
   createHdmiSliceProject,
@@ -11,10 +16,32 @@ import {
   hdmiTxSliceIds,
   i2cSliceIds
 } from "./samples";
-import { resolveProject } from "./resolver";
+import { resolveProject as resolveWithEnvironment } from "./resolver";
 import type { ProjectSource } from "./types";
 
 describe("resolveProject", () => {
+  it("uses caller-supplied source provenance and definition environment", () => {
+    const source = createI2cSliceProject();
+    const fixtureEnvironment = createFixtureResolutionEnvironment();
+    const sourceSet = {
+      hash: "source-set:test",
+      files: [
+        {
+          role: "project" as const,
+          path: "caller/project.json",
+          hash: "project:test"
+        }
+      ]
+    };
+    const resolved = resolveWithEnvironment(source, {
+      ...fixtureEnvironment,
+      sourceSet: () => sourceSet
+    });
+
+    expect(resolved.sourceSet).toBe(sourceSet);
+    expect(resolved.diagnostics).toEqual([]);
+  });
+
   it("resolves the I2C slice with deterministic default pins and pullups", () => {
     const resolved = resolveProject(createI2cSliceProject());
 
@@ -170,7 +197,11 @@ describe("resolveProject", () => {
   });
 
   it("exposes compatible I2C pin-pair options for an intent edge", () => {
-    expect(getI2cPinPairOptions(createI2cSliceProject(), i2cSliceIds.sensorBus)).toEqual([
+    expect(
+      getPreferredPinGroupOptions(createI2cSliceProject(), i2cSliceIds.sensorBus, fixtureCatalog).map(
+        (option) => option.pins
+      )
+    ).toEqual([
       { sda: "gpio4", scl: "gpio5" },
       { sda: "gpio8", scl: "gpio9" }
     ]);
@@ -197,7 +228,11 @@ describe("resolveProject", () => {
     try {
       const source = createI2cSliceProject();
 
-      expect(getI2cPinPairOptions(source, i2cSliceIds.sensorBus)).toEqual([
+      expect(
+        getPreferredPinGroupOptions(source, i2cSliceIds.sensorBus, fixtureCatalog).map(
+          (option) => option.pins
+        )
+      ).toEqual([
         { sda: "gpio4", scl: "gpio5" },
         { sda: "gpio8", scl: "gpio9" }
       ]);
@@ -232,7 +267,12 @@ describe("resolveProject", () => {
   });
 
   it("exposes GPIO-capable component pins for custom provider binding", () => {
-    const gpioPins = getComponentPinOptions(createHdmiSliceProject(), hdmiSliceIds.mcu, "gpio");
+    const gpioPins = getComponentPinOptions(
+      createHdmiSliceProject(),
+      hdmiSliceIds.mcu,
+      fixtureCatalog,
+      "gpio"
+    );
 
     expect(gpioPins).toHaveLength(30);
     expect(gpioPins.slice(0, 2)).toEqual([

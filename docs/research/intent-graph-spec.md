@@ -513,7 +513,7 @@ Minimal project:
 ```json
 {
   "schema": "nocad.project.v0",
-  "id": "rp2350-hdmi-demo",
+  "id": "rp2354b-video-ffc-demo",
   "name": "RP2350 HDMI Demo",
   "dependencies": {
     "@nocad/rp2350": "0.1.0",
@@ -584,8 +584,8 @@ Authored source:
     {
       "id": "mcu",
       "kind": "component",
-      "component": "@nocad/rp2350:RP2350A",
-      "package": "QFN80",
+      "component": "@nocad/rp2350:RP2354B",
+      "package": "QFN-80",
       "label": "Main MCU"
     },
     {
@@ -612,10 +612,10 @@ Authored source:
       }
     },
     {
-      "id": "hdmi",
+      "id": "video_ffc",
       "kind": "component",
-      "component": "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE",
-      "label": "HDMI port",
+      "component": "@nocad/connectors:TE_1-1734839-4",
+      "label": "Video FFC connector",
       "role": "video_output"
     }
   ],
@@ -626,12 +626,12 @@ Authored source:
         "region": "center",
         "rotation": "auto"
       },
-      "hdmi": {
+      "video_ffc": {
         "edge": "east",
         "orientation": "outward"
       },
       "hdmi_output": {
-        "near": "hdmi"
+        "near": "video_ffc"
       }
     },
     "routingIntent": [
@@ -678,15 +678,15 @@ Authored source:
       }
     },
     {
-      "id": "hdmi_output_to_connector",
+      "id": "video_output_to_connector",
       "kind": "intent.exposes",
       "from": {
         "node": "hdmi_output",
         "port": "connector"
       },
       "to": {
-        "node": "hdmi",
-        "port": "hdmi_sink"
+        "node": "video_ffc",
+        "port": "hdmi"
       },
       "contract": "@nocad/video:hdmi_output.v1",
       "constraints": [
@@ -1145,12 +1145,12 @@ Example fragment:
     }
   },
   "packages": {
-    "QFN80": {
+    "QFN-60": {
       "symbol": "MCU_RaspberryPi:RP2350A",
-      "footprint": "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP6.8x6.8mm",
+      "footprint": "@nocad/rp2350:RP2350A_QFN-60",
       "pads": {
         "gpio12": {
-          "pad": "13",
+          "pad": "16",
           "side": "east"
         }
       }
@@ -1592,12 +1592,12 @@ Example fragment:
       "id": "mcu",
       "sourceNode": "mcu",
       "component": "@nocad/rp2350:RP2350A",
-      "package": "QFN80",
+      "package": "QFN-60",
       "labels": {
         "refdes": "U1"
       },
       "symbol": "MCU_RaspberryPi:RP2350A",
-      "footprint": "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP6.8x6.8mm"
+      "footprint": "@nocad/rp2350:RP2350A_QFN-60"
     }
   ],
   "nets": [

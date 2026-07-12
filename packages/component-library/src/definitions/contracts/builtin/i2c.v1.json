@@ -1,0 +1,14 @@
+{
+  "id": "builtin:i2c.v1",
+  "label": "I2C",
+  "netNamePrefix": "I2C",
+  "defaultRole": "control_bus",
+  "signals": {
+    "sda": {
+      "direction": "bidirectional"
+    },
+    "scl": {
+      "direction": "bidirectional"
+    }
+  }
+}

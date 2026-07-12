@@ -1,0 +1,7 @@
+{
+  "extends": "@nocad/typescript-config/node.json",
+  "compilerOptions": {
+    "resolveJsonModule": true
+  },
+  "include": ["src", "vitest.config.ts", "eslint.config.mjs"]
+}

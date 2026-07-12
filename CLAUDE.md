@@ -9,7 +9,8 @@ This checkout uses a bare-repo + worktree pattern: the bare repo lives in `.bare
 Monorepo structure:
 
 - `apps/web` — Vite + React 19 + Tailwind v4 web workspace (`@nocad/web`). Runs on `http://127.0.0.1:3000`.
-- `packages/intent-core` - portable intent graph model: types, resolver, contracts/component fixtures, sample projects, tests. No React/Electron imports allowed.
+- `packages/intent-core` - portable intent graph model, resolver, project document, board projection, and tests. Production entrypoints contain no component/contract fixtures or samples. No React/Electron imports allowed.
+- `packages/component-library` - asynchronous data-first catalog for real identified components plus their closed contract/function definitions. Initial component definitions are interface-level, not package-complete.
 - `packages/eslint-config` — shared ESLint flat config (`base.js`, `react.js`).
 - `packages/typescript-config` — shared `tsconfig` presets (`base`, `node`, `react-app`).
 - `packages/vitest-config` — shared Vitest config (jsdom + globals + tsconfig-paths).
@@ -93,4 +94,4 @@ Avoid early effort on: marketing pages, decorative UI, premature autorouting, fu
 
 ## Repo State
 
-`docs/roadmap.md` is the authoritative status document; check it before assuming what exists. As of 2026-07-02: `packages/intent-core` holds the resolver slice (I2C connections, HDMI function with provider chains and TX IC support, generic contract resolution, diagnostics, lockfile-shaped output). `apps/web/src/App.tsx` mounts the intent graph slice UI (`src/features/i2c-slice/`, `@xyflow/react` canvas plus inspectors and resolution/diagnostics/JSON panels, with direct-HDMI, FPGA-via-TX-IC, and RP2350-via-TX-IC sample loaders) under a `ThemeProvider` (`defaultTheme="system"`, `storageKey="nocad-theme"`, implementation in `src/components/`). There is no document API, no undo/redo, no persistence, and no custom editor engine yet; the graph slice mutates React state directly. Key invariants live in the "Architecture Invariants" section of `docs/roadmap.md`.
+`docs/roadmap.md` is the authoritative status document; check it before assuming what exists. As of 2026-07-12, `packages/intent-core` exposes catalog-injected resolver, assignment, board projection, SHA-256 provenance, and project-document APIs. Test/demo definitions live only at `@nocad/intent-core/fixtures`. `packages/component-library` lazily loads and verifies a closed catalog of hashed component, contract, and function JSON. `apps/web/src/App.tsx` mounts the generic `features/workspace` UI with a blank project and that dynamically loaded production catalog. Protocol-specific examples are isolated at `/demo.html`; KiCad parser research is isolated at `/fixture.html`. The workspace owns one patch-based `ProjectDocument` with undo/redo and JSON persistence. Key invariants live in the "Architecture Invariants" section of `docs/roadmap.md`.

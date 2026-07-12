@@ -105,10 +105,23 @@ export type NetBindingEdge = GraphObjectMetadata & {
 };
 
 export type ComponentDefinition = {
+  board?: ComponentBoardDefinition;
   id: string;
   pins: Record<string, PinDefinition>;
   ports: Record<string, PortDefinition>;
   preferredPinGroups?: PreferredPinGroupDefinition[];
+};
+
+export type ComponentBoardDefinition = {
+  envelope: {
+    accuracy: "estimate" | "verified";
+    heightMm: number;
+    source?: {
+      title: string;
+      uri: string;
+    };
+    widthMm: number;
+  };
 };
 
 export type PreferredPinGroupDefinition = {
@@ -121,6 +134,7 @@ export type PreferredPinGroupDefinition = {
 };
 
 export type FunctionDefinition = {
+  dependency?: DefinitionDependency;
   id: string;
   include: Record<string, FunctionIncludeDefinition>;
   signalGroups: FunctionSignalGroup[];
@@ -168,6 +182,7 @@ export type GenericFunctionProviderDefinition = {
 };
 
 export type FunctionGeneratedNetDefinition = {
+  boardKind?: BoardConnectionKind;
   diagnostics: {
     missingFrom: { code: string; message: string };
     missingTo: { code: string; message: string };
@@ -261,8 +276,15 @@ export type PortProvidesDefinition = {
 
 export type ProviderModeDefinition = {
   label?: string;
+  presets?: ProviderPinPresetDefinition[];
   requires?: ProviderModeRequirements;
   signalMap: Record<string, SignalPinMap>;
+};
+
+export type ProviderPinPresetDefinition = {
+  id: string;
+  label: string;
+  pins: Record<string, string>;
 };
 
 export type ProviderModeRequirements = {
@@ -286,6 +308,8 @@ export type SignalPinMap =
     };
 
 export type ConnectionContract = {
+  defaultRole?: string;
+  dependency?: DefinitionDependency;
   id: string;
   label?: string;
   netNamePrefix?: string;
@@ -294,6 +318,11 @@ export type ConnectionContract = {
   signalPlan?: ContractSignalPlanItem[];
   signals: Record<string, ContractSignal>;
   topologyRules?: ConnectionTopologyRuleDefinition[];
+};
+
+export type DefinitionDependency = {
+  name: string;
+  version: string;
 };
 
 export type ConnectionTopologyRuleDefinition = {
@@ -364,7 +393,34 @@ export type ContractSignalPlanItem =
     };
 
 export type ContractSignal = {
+  boardKind?: BoardConnectionKind;
   direction: "bidirectional" | "from_to_to" | "to_to_from";
+};
+
+export type BoardConnectionKind = "highSpeed" | "power" | "signal";
+
+export type DefinitionCatalog = {
+  components: Readonly<Record<string, ComponentDefinition>>;
+  contracts: Readonly<Record<string, ConnectionContract>>;
+  functions: Readonly<Record<string, FunctionDefinition>>;
+};
+
+export type ResolvedSourceSet = {
+  hash: string;
+  files: Array<{
+    role: "project";
+    path: string;
+    hash: string;
+  }>;
+};
+
+export type ResolutionEnvironment = {
+  catalog: DefinitionCatalog;
+  resolveDependency: (
+    name: string,
+    requestedVersion?: string
+  ) => ResolvedDependency | undefined;
+  sourceSet: (source: ProjectSource) => ResolvedSourceSet;
 };
 
 export type DiagnosticSeverity = "error" | "warning" | "info";
@@ -403,14 +459,7 @@ export type Suggestion = {
 
 export type ResolvedProject = {
   schema: "nocad.lock.v0";
-  sourceSet: {
-    hash: string;
-    files: Array<{
-      role: "project";
-      path: string;
-      hash: string;
-    }>;
-  };
+  sourceSet: ResolvedSourceSet;
   resolver: {
     name: "nocad-resolver";
     version: string;
@@ -444,6 +493,7 @@ export type ResolvedChoice = {
 };
 
 export type ResolvedNet = {
+  boardKind?: BoardConnectionKind;
   id: string;
   name: string;
   endpoints: Record<EndpointRole, EndpointRef>;

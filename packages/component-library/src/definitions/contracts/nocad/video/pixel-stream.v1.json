@@ -1,0 +1,296 @@
+{
+  "id": "@nocad/video:pixel_stream.v1",
+  "label": "Pixel stream",
+  "netNamePrefix": "PIXEL",
+  "defaultRole": "video_stream",
+  "params": {
+    "transport": {
+      "kind": "enum",
+      "label": "Transport",
+      "default": "parallel_rgb",
+      "options": [
+        {
+          "label": "Parallel RGB",
+          "value": "parallel_rgb"
+        }
+      ]
+    },
+    "redBits": {
+      "kind": "integer",
+      "label": "Red bits",
+      "default": 8,
+      "options": [
+        {
+          "label": "3",
+          "value": 3
+        },
+        {
+          "label": "5",
+          "value": 5
+        },
+        {
+          "label": "6",
+          "value": 6
+        },
+        {
+          "label": "8",
+          "value": 8
+        }
+      ]
+    },
+    "greenBits": {
+      "kind": "integer",
+      "label": "Green bits",
+      "default": 8,
+      "options": [
+        {
+          "label": "3",
+          "value": 3
+        },
+        {
+          "label": "5",
+          "value": 5
+        },
+        {
+          "label": "6",
+          "value": 6
+        },
+        {
+          "label": "8",
+          "value": 8
+        }
+      ]
+    },
+    "blueBits": {
+      "kind": "integer",
+      "label": "Blue bits",
+      "default": 8,
+      "options": [
+        {
+          "label": "2",
+          "value": 2
+        },
+        {
+          "label": "5",
+          "value": 5
+        },
+        {
+          "label": "6",
+          "value": 6
+        },
+        {
+          "label": "8",
+          "value": 8
+        }
+      ]
+    },
+    "hsync": {
+      "kind": "boolean",
+      "label": "HSYNC",
+      "default": true
+    },
+    "vsync": {
+      "kind": "boolean",
+      "label": "VSYNC",
+      "default": true
+    },
+    "de": {
+      "kind": "boolean",
+      "label": "Data enable",
+      "default": true
+    }
+  },
+  "presets": [
+    {
+      "label": "RGB332",
+      "value": "rgb332",
+      "params": {
+        "redBits": 3,
+        "greenBits": 3,
+        "blueBits": 2
+      }
+    },
+    {
+      "label": "RGB565",
+      "value": "rgb565",
+      "params": {
+        "redBits": 5,
+        "greenBits": 6,
+        "blueBits": 5
+      }
+    },
+    {
+      "label": "RGB666",
+      "value": "rgb666",
+      "params": {
+        "redBits": 6,
+        "greenBits": 6,
+        "blueBits": 6
+      }
+    },
+    {
+      "label": "RGB888",
+      "value": "rgb888",
+      "params": {
+        "redBits": 8,
+        "greenBits": 8,
+        "blueBits": 8
+      }
+    }
+  ],
+  "signalPlan": [
+    {
+      "kind": "fixed",
+      "signals": [
+        "pclk"
+      ]
+    },
+    {
+      "kind": "conditional",
+      "param": "hsync",
+      "signal": "hsync"
+    },
+    {
+      "kind": "conditional",
+      "param": "vsync",
+      "signal": "vsync"
+    },
+    {
+      "kind": "conditional",
+      "param": "de",
+      "signal": "de"
+    },
+    {
+      "kind": "bus",
+      "prefix": "r",
+      "widthParam": "redBits",
+      "maxWidth": 8
+    },
+    {
+      "kind": "bus",
+      "prefix": "g",
+      "widthParam": "greenBits",
+      "maxWidth": 8
+    },
+    {
+      "kind": "bus",
+      "prefix": "b",
+      "widthParam": "blueBits",
+      "maxWidth": 8
+    }
+  ],
+  "signals": {
+    "pclk": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "hsync": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "vsync": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "de": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r0": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r1": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r2": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r3": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r4": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r5": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r6": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "r7": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g0": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g1": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g2": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g3": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g4": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g5": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g6": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "g7": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b0": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b1": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b2": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b3": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b4": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b5": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b6": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "b7": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    }
+  }
+}

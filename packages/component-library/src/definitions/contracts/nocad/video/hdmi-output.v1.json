@@ -1,0 +1,52 @@
+{
+  "id": "@nocad/video:hdmi_output.v1",
+  "label": "HDMI output",
+  "netNamePrefix": "HDMI",
+  "defaultRole": "video_output",
+  "signals": {
+    "tmds2_p": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "tmds2_n": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "tmds1_p": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "tmds1_n": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "tmds0_p": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "tmds0_n": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "clock_p": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "clock_n": {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to"
+    },
+    "ddc_sda": {
+      "direction": "bidirectional"
+    },
+    "ddc_scl": {
+      "direction": "bidirectional"
+    },
+    "hpd": {
+      "direction": "to_to_from"
+    },
+    "cec": {
+      "direction": "bidirectional"
+    }
+  }
+}

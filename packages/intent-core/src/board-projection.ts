@@ -1,5 +1,12 @@
-import { components } from "./fixtures";
-import type { GeneratedObject, ProjectNode, ProjectSource, ResolvedNet, ResolvedProject } from "./types";
+import type {
+  ComponentDefinition,
+  DefinitionCatalog,
+  GeneratedObject,
+  ProjectNode,
+  ProjectSource,
+  ResolvedNet,
+  ResolvedProject
+} from "./types";
 
 export type BoardProjection = {
   board: {
@@ -23,6 +30,7 @@ export type BoardProjection = {
 export type BoardComponentProjection = {
   id: string;
   component: string;
+  geometryApproximate: boolean;
   heightMm: number;
   label: string;
   package?: string;
@@ -75,7 +83,7 @@ export type BoardDrcViolation = {
 
 export type BoardObligation = {
   id: string;
-  kind: "drc" | "placement" | "routing";
+  kind: "drc" | "geometry" | "placement" | "routing";
   message: string;
   severity: "error" | "info" | "warning";
   sourceId: string;
@@ -94,24 +102,23 @@ type PlacementHint = {
   y?: number | string;
 };
 
-const defaultBoard = {
-  id: "main_board",
-  layers: 2,
-  widthMm: 50,
-  heightMm: 30
-};
-
-export function buildBoardProjection(source: ProjectSource, resolved: ResolvedProject): BoardProjection {
-  const board = {
-    id: source.board?.id ?? source.layout?.board ?? defaultBoard.id,
-    layers: source.board?.layers ?? defaultBoard.layers,
-    widthMm: parseLengthMm(source.board?.size.width) ?? defaultBoard.widthMm,
-    heightMm: parseLengthMm(source.board?.size.height) ?? defaultBoard.heightMm
-  };
+export function buildBoardProjection(
+  source: ProjectSource,
+  resolved: ResolvedProject,
+  catalog: DefinitionCatalog
+): BoardProjection {
+  const board = projectBoard(source);
   const componentNodes = source.nodes.filter((node): node is ProjectNode & { kind: "component" } => node.kind === "component");
   const componentsById = new Map<string, BoardComponentProjection>();
   const projectedComponents = componentNodes.map((node, index) => {
-    const projected = projectComponent(node, index, componentNodes.length, board, source.layout?.placements[node.id]);
+    const projected = projectComponent(
+      node,
+      index,
+      componentNodes.length,
+      board,
+      source.layout?.placements[node.id],
+      catalog
+    );
 
     componentsById.set(node.id, projected);
     return projected;
@@ -123,7 +130,8 @@ export function buildBoardProjection(source: ProjectSource, resolved: ResolvedPr
       board,
       source,
       componentsById,
-      source.layout?.placements[generated.id]
+      source.layout?.placements[generated.id],
+      catalog
     );
 
     componentsById.set(generated.id, projected);
@@ -132,6 +140,33 @@ export function buildBoardProjection(source: ProjectSource, resolved: ResolvedPr
   const ratsnest = resolved.nets.flatMap((net) => projectRatsnest(net, source, componentsById));
 
   return completeBoardProjection(board, [...projectedComponents, ...projectedGeneratedComponents], ratsnest);
+}
+
+function projectBoard(source: ProjectSource): BoardProjection["board"] {
+  if (!source.board) {
+    throw new Error("A board projection requires authored board dimensions.");
+  }
+
+  const widthMm = parseLengthMm(source.board.size.width);
+  const heightMm = parseLengthMm(source.board.size.height);
+
+  if (
+    widthMm === undefined ||
+    heightMm === undefined ||
+    widthMm <= 0 ||
+    heightMm <= 0 ||
+    !Number.isInteger(source.board.layers) ||
+    source.board.layers <= 0
+  ) {
+    throw new Error("A board projection requires valid authored board dimensions.");
+  }
+
+  return {
+    id: source.board.id,
+    layers: source.board.layers,
+    widthMm,
+    heightMm
+  };
 }
 
 export function applyBoardComponentPlacement(
@@ -199,6 +234,23 @@ function completeBoardProjection(
           }
         ]
   );
+  const geometryObligations = componentsWithViolations.flatMap((component) =>
+    component.geometryApproximate
+      ? [
+          {
+            id: `geometry_${component.id}`,
+            kind: "geometry" as const,
+            message: `Add an authored footprint envelope for ${component.label}`,
+            severity: "warning" as const,
+            sourceId: component.id,
+            target: {
+              id: component.id,
+              kind: "component" as const
+            }
+          }
+        ]
+      : []
+  );
   const drcObligations = drcViolations.map((violation) => ({
     id: violation.id,
     kind: "drc" as const,
@@ -223,7 +275,7 @@ function completeBoardProjection(
     board,
     components: componentsWithViolations,
     drcViolations,
-    obligations: [...drcObligations, ...placementObligations, ...routingObligations],
+    obligations: [...drcObligations, ...geometryObligations, ...placementObligations, ...routingObligations],
     ratsnest,
     stats: {
       drcViolations: drcViolations.length,
@@ -239,17 +291,20 @@ function projectComponent(
   index: number,
   componentCount: number,
   board: BoardProjection["board"],
-  placement: unknown
+  placement: unknown,
+  catalog: DefinitionCatalog
 ): BoardComponentProjection {
-  const footprint = footprintEnvelope(node);
+  const definition = catalog.components[node.component];
+  const footprint = footprintEnvelope(definition);
   const authored = authoredPlacement(placement);
-  const hinted = authored ? undefined : hintedPlacement(node, index, componentCount, board, footprint);
+  const hinted = authored ? undefined : hintedPlacement(index, componentCount, board);
   const xMm = clampCenter(authored?.xMm ?? hinted?.xMm ?? board.widthMm / 2, footprint.widthMm, board.widthMm);
   const yMm = clampCenter(authored?.yMm ?? hinted?.yMm ?? board.heightMm / 2, footprint.heightMm, board.heightMm);
 
   return {
     id: node.id,
     component: node.component,
+    geometryApproximate: footprint.approximate,
     heightMm: footprint.heightMm,
     label: node.label ?? componentLabel(node.component),
     package: node.package,
@@ -270,7 +325,8 @@ function projectGeneratedComponent(
   board: BoardProjection["board"],
   source: ProjectSource,
   componentsById: Map<string, BoardComponentProjection>,
-  placement: unknown
+  placement: unknown,
+  catalog: DefinitionCatalog
 ): BoardComponentProjection {
   const node: ProjectNode & { kind: "component" } = {
     id: generated.id,
@@ -279,7 +335,7 @@ function projectGeneratedComponent(
     label: generated.value ? `${componentLabel(generated.component)} ${generated.value}` : componentLabel(generated.component),
     role: "generated"
   };
-  const footprint = footprintEnvelope(node);
+  const footprint = footprintEnvelope(catalog.components[generated.component]);
   const authored = authoredPlacement(placement);
   const anchorId = generatedPlacementAnchor(generated, source);
   const anchor = anchorId ? componentsById.get(anchorId) : undefined;
@@ -298,6 +354,7 @@ function projectGeneratedComponent(
   return {
     id: generated.id,
     component: generated.component,
+    geometryApproximate: footprint.approximate,
     heightMm: footprint.heightMm,
     label: node.label ?? componentLabel(generated.component),
     placed: Boolean(authored),
@@ -362,44 +419,10 @@ function authoredPlacement(placement: unknown) {
 }
 
 function hintedPlacement(
-  node: ProjectNode & { kind: "component" },
   index: number,
   componentCount: number,
-  board: BoardProjection["board"],
-  footprint: { heightMm: number; widthMm: number }
+  board: BoardProjection["board"]
 ) {
-  if (node.role === "hdmi_port" || node.component.includes("CONNECTOR")) {
-    return {
-      rotationDeg: 0,
-      xMm: board.widthMm - footprint.widthMm / 2 - 1.5,
-      yMm: board.heightMm / 2
-    };
-  }
-
-  if (node.role === "hdmi_tx") {
-    return {
-      rotationDeg: 0,
-      xMm: board.widthMm * 0.62,
-      yMm: board.heightMm / 2
-    };
-  }
-
-  if (node.role === "mcu" || node.role === "video_source") {
-    return {
-      rotationDeg: 0,
-      xMm: board.widthMm * 0.28,
-      yMm: board.heightMm / 2
-    };
-  }
-
-  if (node.role?.includes("sensor") === true) {
-    return {
-      rotationDeg: 0,
-      xMm: board.widthMm * 0.52,
-      yMm: board.heightMm * 0.7
-    };
-  }
-
   const columns = Math.max(1, Math.ceil(Math.sqrt(componentCount)));
   const column = index % columns;
   const row = Math.floor(index / columns);
@@ -448,46 +471,21 @@ function contractForEdge(source: ProjectSource, edgeId: string) {
 }
 
 function ratsnestKind(net: ResolvedNet): BoardRatsnestEdge["kind"] {
-  if (net.sourceMap.signal === "source5v" || net.name.includes("5v")) {
-    return "power";
-  }
-
-  if (
-    net.sourceMap.signal.startsWith("tmds") ||
-    net.sourceMap.signal.startsWith("clock") ||
-    net.name.includes("pixel")
-  ) {
-    return "highSpeed";
-  }
-
-  return "signal";
+  return net.boardKind ?? "signal";
 }
 
-function footprintEnvelope(node: ProjectNode & { kind: "component" }) {
-  if (node.role === "hdmi_port" || node.component.includes("HDMI_TYPE_A")) {
-    return { widthMm: 14, heightMm: 12 };
+function footprintEnvelope(definition: ComponentDefinition | undefined) {
+  if (definition?.board?.envelope) {
+    return {
+      ...definition.board.envelope,
+      approximate: definition.board.envelope.accuracy !== "verified"
+    };
   }
 
-  if (node.component.includes("RP2350")) {
-    return { widthMm: 10, heightMm: 10 };
-  }
-
-  if (node.component.includes("GENERIC_FPGA")) {
-    return { widthMm: 16, heightMm: 16 };
-  }
-
-  if (node.component.includes("IT66121")) {
-    return { widthMm: 9, heightMm: 9 };
-  }
-
-  if (node.component.includes("TEMP_SENSOR")) {
-    return { widthMm: 3, heightMm: 3 };
-  }
-
-  const pinCount = Object.keys(components[node.component]?.pins ?? {}).length;
+  const pinCount = Object.keys(definition?.pins ?? {}).length;
   const side = Math.max(3, Math.min(14, Math.sqrt(Math.max(pinCount, 4)) * 1.4));
 
-  return { widthMm: side, heightMm: side };
+  return { widthMm: side, heightMm: side, approximate: true };
 }
 
 function findCourtyardOverlaps(components: BoardComponentProjection[]): BoardDrcViolation[] {

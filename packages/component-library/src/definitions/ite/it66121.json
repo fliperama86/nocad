@@ -1,0 +1,441 @@
+{
+  "board": {
+    "envelope": {
+      "widthMm": 9,
+      "heightMm": 9,
+      "accuracy": "estimate"
+    }
+  },
+  "id": "@nocad/hdmi-tx:IT66121",
+  "pins": {
+    "pclk": {
+      "name": "PIXEL PCLK",
+      "capabilities": [
+        "pclk"
+      ]
+    },
+    "hsync": {
+      "name": "PIXEL HSYNC",
+      "capabilities": [
+        "hsync"
+      ]
+    },
+    "vsync": {
+      "name": "PIXEL VSYNC",
+      "capabilities": [
+        "vsync"
+      ]
+    },
+    "de": {
+      "name": "PIXEL DE",
+      "capabilities": [
+        "de"
+      ]
+    },
+    "r0": {
+      "name": "PIXEL R0",
+      "capabilities": [
+        "r0"
+      ]
+    },
+    "r1": {
+      "name": "PIXEL R1",
+      "capabilities": [
+        "r1"
+      ]
+    },
+    "r2": {
+      "name": "PIXEL R2",
+      "capabilities": [
+        "r2"
+      ]
+    },
+    "r3": {
+      "name": "PIXEL R3",
+      "capabilities": [
+        "r3"
+      ]
+    },
+    "r4": {
+      "name": "PIXEL R4",
+      "capabilities": [
+        "r4"
+      ]
+    },
+    "r5": {
+      "name": "PIXEL R5",
+      "capabilities": [
+        "r5"
+      ]
+    },
+    "r6": {
+      "name": "PIXEL R6",
+      "capabilities": [
+        "r6"
+      ]
+    },
+    "r7": {
+      "name": "PIXEL R7",
+      "capabilities": [
+        "r7"
+      ]
+    },
+    "g0": {
+      "name": "PIXEL G0",
+      "capabilities": [
+        "g0"
+      ]
+    },
+    "g1": {
+      "name": "PIXEL G1",
+      "capabilities": [
+        "g1"
+      ]
+    },
+    "g2": {
+      "name": "PIXEL G2",
+      "capabilities": [
+        "g2"
+      ]
+    },
+    "g3": {
+      "name": "PIXEL G3",
+      "capabilities": [
+        "g3"
+      ]
+    },
+    "g4": {
+      "name": "PIXEL G4",
+      "capabilities": [
+        "g4"
+      ]
+    },
+    "g5": {
+      "name": "PIXEL G5",
+      "capabilities": [
+        "g5"
+      ]
+    },
+    "g6": {
+      "name": "PIXEL G6",
+      "capabilities": [
+        "g6"
+      ]
+    },
+    "g7": {
+      "name": "PIXEL G7",
+      "capabilities": [
+        "g7"
+      ]
+    },
+    "b0": {
+      "name": "PIXEL B0",
+      "capabilities": [
+        "b0"
+      ]
+    },
+    "b1": {
+      "name": "PIXEL B1",
+      "capabilities": [
+        "b1"
+      ]
+    },
+    "b2": {
+      "name": "PIXEL B2",
+      "capabilities": [
+        "b2"
+      ]
+    },
+    "b3": {
+      "name": "PIXEL B3",
+      "capabilities": [
+        "b3"
+      ]
+    },
+    "b4": {
+      "name": "PIXEL B4",
+      "capabilities": [
+        "b4"
+      ]
+    },
+    "b5": {
+      "name": "PIXEL B5",
+      "capabilities": [
+        "b5"
+      ]
+    },
+    "b6": {
+      "name": "PIXEL B6",
+      "capabilities": [
+        "b6"
+      ]
+    },
+    "b7": {
+      "name": "PIXEL B7",
+      "capabilities": [
+        "b7"
+      ]
+    },
+    "ctrl_sda": {
+      "name": "Control SDA",
+      "capabilities": [
+        "i2c.sda"
+      ]
+    },
+    "ctrl_scl": {
+      "name": "Control SCL",
+      "capabilities": [
+        "i2c.scl"
+      ]
+    },
+    "tmds2_p": {
+      "name": "TMDS Data2+",
+      "capabilities": [
+        "hdmi.tmds.data2.p"
+      ]
+    },
+    "tmds2_n": {
+      "name": "TMDS Data2-",
+      "capabilities": [
+        "hdmi.tmds.data2.n"
+      ]
+    },
+    "tmds1_p": {
+      "name": "TMDS Data1+",
+      "capabilities": [
+        "hdmi.tmds.data1.p"
+      ]
+    },
+    "tmds1_n": {
+      "name": "TMDS Data1-",
+      "capabilities": [
+        "hdmi.tmds.data1.n"
+      ]
+    },
+    "tmds0_p": {
+      "name": "TMDS Data0+",
+      "capabilities": [
+        "hdmi.tmds.data0.p"
+      ]
+    },
+    "tmds0_n": {
+      "name": "TMDS Data0-",
+      "capabilities": [
+        "hdmi.tmds.data0.n"
+      ]
+    },
+    "clock_p": {
+      "name": "TMDS Clock+",
+      "capabilities": [
+        "hdmi.tmds.clock.p"
+      ]
+    },
+    "clock_n": {
+      "name": "TMDS Clock-",
+      "capabilities": [
+        "hdmi.tmds.clock.n"
+      ]
+    },
+    "ddc_sda": {
+      "name": "DDC SDA",
+      "capabilities": [
+        "i2c.sda",
+        "hdmi.ddc.sda"
+      ]
+    },
+    "ddc_scl": {
+      "name": "DDC SCL",
+      "capabilities": [
+        "i2c.scl",
+        "hdmi.ddc.scl"
+      ]
+    },
+    "hpd": {
+      "name": "Hot Plug Detect",
+      "capabilities": [
+        "hdmi.hpd"
+      ]
+    },
+    "cec": {
+      "name": "CEC",
+      "capabilities": [
+        "hdmi.cec"
+      ]
+    }
+  },
+  "ports": {
+    "video_in": {
+      "kind": "fixed_port",
+      "contractMaps": {
+        "@nocad/video:pixel_stream.v1": {
+          "role": "to",
+          "signalMap": {
+            "pclk": {
+              "pin": "pclk"
+            },
+            "hsync": {
+              "pin": "hsync"
+            },
+            "vsync": {
+              "pin": "vsync"
+            },
+            "de": {
+              "pin": "de"
+            },
+            "r0": {
+              "pin": "r0"
+            },
+            "r1": {
+              "pin": "r1"
+            },
+            "r2": {
+              "pin": "r2"
+            },
+            "r3": {
+              "pin": "r3"
+            },
+            "r4": {
+              "pin": "r4"
+            },
+            "r5": {
+              "pin": "r5"
+            },
+            "r6": {
+              "pin": "r6"
+            },
+            "r7": {
+              "pin": "r7"
+            },
+            "g0": {
+              "pin": "g0"
+            },
+            "g1": {
+              "pin": "g1"
+            },
+            "g2": {
+              "pin": "g2"
+            },
+            "g3": {
+              "pin": "g3"
+            },
+            "g4": {
+              "pin": "g4"
+            },
+            "g5": {
+              "pin": "g5"
+            },
+            "g6": {
+              "pin": "g6"
+            },
+            "g7": {
+              "pin": "g7"
+            },
+            "b0": {
+              "pin": "b0"
+            },
+            "b1": {
+              "pin": "b1"
+            },
+            "b2": {
+              "pin": "b2"
+            },
+            "b3": {
+              "pin": "b3"
+            },
+            "b4": {
+              "pin": "b4"
+            },
+            "b5": {
+              "pin": "b5"
+            },
+            "b6": {
+              "pin": "b6"
+            },
+            "b7": {
+              "pin": "b7"
+            }
+          }
+        }
+      }
+    },
+    "ctrl": {
+      "kind": "fixed_port",
+      "contractMaps": {
+        "builtin:i2c.v1": {
+          "role": "to",
+          "signalMap": {
+            "sda": {
+              "pin": "ctrl_sda"
+            },
+            "scl": {
+              "pin": "ctrl_scl"
+            }
+          }
+        }
+      }
+    },
+    "hdmi_tx": {
+      "kind": "fixed_port",
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "hdmi_1v4": {
+              "label": "HDMI 1.4",
+              "requires": {
+                "ports": {
+                  "video_in": {
+                    "contract": "@nocad/video:pixel_stream.v1",
+                    "label": "Video In"
+                  },
+                  "ctrl": {
+                    "contract": "builtin:i2c.v1",
+                    "label": "I2C Control"
+                  }
+                }
+              },
+              "signalMap": {
+                "tmds2_p": {
+                  "pin": "tmds2_p"
+                },
+                "tmds2_n": {
+                  "pin": "tmds2_n"
+                },
+                "tmds1_p": {
+                  "pin": "tmds1_p"
+                },
+                "tmds1_n": {
+                  "pin": "tmds1_n"
+                },
+                "tmds0_p": {
+                  "pin": "tmds0_p"
+                },
+                "tmds0_n": {
+                  "pin": "tmds0_n"
+                },
+                "clock_p": {
+                  "pin": "clock_p"
+                },
+                "clock_n": {
+                  "pin": "clock_n"
+                },
+                "ddc_sda": {
+                  "pin": "ddc_sda"
+                },
+                "ddc_scl": {
+                  "pin": "ddc_scl"
+                },
+                "hpd": {
+                  "pin": "hpd"
+                },
+                "cec": {
+                  "pin": "cec"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

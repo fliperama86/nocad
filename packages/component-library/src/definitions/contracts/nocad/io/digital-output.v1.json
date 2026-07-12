@@ -1,0 +1,11 @@
+{
+  "id": "@nocad/io:digital_output.v1",
+  "label": "Digital output",
+  "netNamePrefix": "DIGITAL",
+  "defaultRole": "digital_output",
+  "signals": {
+    "signal": {
+      "direction": "from_to_to"
+    }
+  }
+}

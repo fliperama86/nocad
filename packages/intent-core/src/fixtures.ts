@@ -4,9 +4,55 @@ const PIXEL_STREAM_CONTRACT = "@nocad/video:pixel_stream.v1";
 const DIGITAL_OUTPUT_CONTRACT = "@nocad/io:digital_output.v1";
 const BIASED_SIGNAL_CONTRACT = "@nocad/io:biased_signal.v1";
 const pixelStreamSignals = createPixelStreamSignals();
+const hdmiSignalIds = [
+  "tmds2_p",
+  "tmds2_n",
+  "tmds1_p",
+  "tmds1_n",
+  "tmds0_p",
+  "tmds0_n",
+  "clock_p",
+  "clock_n",
+  "ddc_sda",
+  "ddc_scl",
+  "hpd",
+  "cec"
+];
+const rp2350HstxSignalMap: Record<string, SignalPinMap> = {
+  clock_n: { pin: "gpio19" },
+  clock_p: { pin: "gpio18" },
+  tmds0_n: { pin: "gpio17" },
+  tmds0_p: { pin: "gpio16" },
+  tmds1_n: { pin: "gpio15" },
+  tmds1_p: { pin: "gpio14" },
+  tmds2_n: { pin: "gpio13" },
+  tmds2_p: { pin: "gpio12" },
+  ddc_sda: { pinSelector: { capabilities: ["i2c.sda", "gpio"] } },
+  ddc_scl: { pinSelector: { capabilities: ["i2c.scl", "gpio"] } },
+  hpd: { pinSelector: { capabilities: ["gpio"] } },
+  cec: { pinSelector: { capabilities: ["gpio"] } }
+};
+const rp2354bCustomHdmiSignalMap: Record<string, SignalPinMap> = Object.fromEntries(
+  hdmiSignalIds.map((signal) => [
+    signal,
+    {
+      pinSelector: {
+        capabilities:
+          signal.startsWith("tmds") || signal.startsWith("clock")
+            ? ["hstx", "gpio"]
+            : signal === "ddc_sda"
+              ? ["i2c.sda", "gpio"]
+              : signal === "ddc_scl"
+                ? ["i2c.scl", "gpio"]
+                : ["gpio"]
+      }
+    }
+  ])
+);
 
 export const contracts: Record<string, ConnectionContract> = {
   "builtin:i2c.v1": {
+    defaultRole: "control_bus",
     id: "builtin:i2c.v1",
     label: "I2C",
     netNamePrefix: "I2C",
@@ -35,18 +81,20 @@ export const contracts: Record<string, ConnectionContract> = {
     ]
   },
   "@nocad/video:hdmi_output.v1": {
+    defaultRole: "video_output",
+    dependency: { name: "@nocad/video", version: "0.1.0" },
     id: "@nocad/video:hdmi_output.v1",
     label: "HDMI output",
     netNamePrefix: "HDMI",
     signals: {
-      tmds2_p: { direction: "from_to_to" },
-      tmds2_n: { direction: "from_to_to" },
-      tmds1_p: { direction: "from_to_to" },
-      tmds1_n: { direction: "from_to_to" },
-      tmds0_p: { direction: "from_to_to" },
-      tmds0_n: { direction: "from_to_to" },
-      clock_p: { direction: "from_to_to" },
-      clock_n: { direction: "from_to_to" },
+      tmds2_p: { boardKind: "highSpeed", direction: "from_to_to" },
+      tmds2_n: { boardKind: "highSpeed", direction: "from_to_to" },
+      tmds1_p: { boardKind: "highSpeed", direction: "from_to_to" },
+      tmds1_n: { boardKind: "highSpeed", direction: "from_to_to" },
+      tmds0_p: { boardKind: "highSpeed", direction: "from_to_to" },
+      tmds0_n: { boardKind: "highSpeed", direction: "from_to_to" },
+      clock_p: { boardKind: "highSpeed", direction: "from_to_to" },
+      clock_n: { boardKind: "highSpeed", direction: "from_to_to" },
       ddc_sda: { direction: "bidirectional" },
       ddc_scl: { direction: "bidirectional" },
       hpd: { direction: "to_to_from" },
@@ -54,6 +102,8 @@ export const contracts: Record<string, ConnectionContract> = {
     }
   },
   [PIXEL_STREAM_CONTRACT]: {
+    defaultRole: "video_stream",
+    dependency: { name: "@nocad/video", version: "0.1.0" },
     id: PIXEL_STREAM_CONTRACT,
     label: "Pixel stream",
     netNamePrefix: "PIXEL",
@@ -131,12 +181,15 @@ export const contracts: Record<string, ConnectionContract> = {
     signals: pixelStreamSignals
   },
   "builtin:dpi.v1": {
+    defaultRole: "video_stream",
     id: "builtin:dpi.v1",
     label: "DPI",
     netNamePrefix: "PIXEL",
     signals: pixelStreamSignals
   },
   [DIGITAL_OUTPUT_CONTRACT]: {
+    defaultRole: "digital_output",
+    dependency: { name: "@nocad/io", version: "0.1.0" },
     id: DIGITAL_OUTPUT_CONTRACT,
     label: "Digital output",
     netNamePrefix: "DIGITAL",
@@ -145,6 +198,8 @@ export const contracts: Record<string, ConnectionContract> = {
     }
   },
   [BIASED_SIGNAL_CONTRACT]: {
+    defaultRole: "biased_signal",
+    dependency: { name: "@nocad/io", version: "0.1.0" },
     id: BIASED_SIGNAL_CONTRACT,
     label: "Biased signal",
     netNamePrefix: "BIASED",
@@ -175,6 +230,7 @@ export const contracts: Record<string, ConnectionContract> = {
 
 export const functions: Record<string, FunctionDefinition> = {
   "@nocad/video:hdmi_output.v1": {
+    dependency: { name: "@nocad/video", version: "0.1.0" },
     id: "@nocad/video:hdmi_output.v1",
     include: {
       tmds: {
@@ -297,6 +353,7 @@ export const functions: Record<string, FunctionDefinition> = {
       ],
       generatedNets: [
         {
+          boardKind: "power",
           diagnostics: {
             missingFrom: {
               code: "MISSING_HDMI_5V_POWER",
@@ -318,6 +375,7 @@ export const functions: Record<string, FunctionDefinition> = {
     }
   },
   [DIGITAL_OUTPUT_CONTRACT]: {
+    dependency: { name: "@nocad/io", version: "0.1.0" },
     id: DIGITAL_OUTPUT_CONTRACT,
     include: {
       seriesProtection: {
@@ -372,8 +430,20 @@ export const functions: Record<string, FunctionDefinition> = {
 
 export const components: Record<string, ComponentDefinition> = {
   "@nocad/rp2350:RP2350A": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 7, heightMm: 7 }
+    },
     id: "@nocad/rp2350:RP2350A",
-    pins: createRp2350Pins(),
+    pins: createIndexedPins({
+      count: 30,
+      idPrefix: "gpio",
+      labelPrefix: "GPIO",
+      capabilityRules: [
+        { capabilities: ["i2c.sda"], indices: [4, 8] },
+        { capabilities: ["i2c.scl"], indices: [5, 9] },
+        { capabilities: ["hstx"], indices: [12, 13, 14, 15, 16, 17, 18, 19] }
+      ]
+    }),
     ports: {
       i2c: {
         kind: "derived_port",
@@ -404,19 +474,35 @@ export const components: Record<string, ComponentDefinition> = {
             modes: {
               auto: {
                 label: "Auto",
-                signalMap: createRp2350HdmiSignalMap()
+                signalMap: rp2350HstxSignalMap
               },
               hstx: {
                 label: "HSTX",
-                signalMap: createRp2350HdmiSignalMap()
+                signalMap: rp2350HstxSignalMap
               },
               pio_gpio: {
                 label: "PIO GPIO",
-                signalMap: createRp2350HdmiSignalMap()
+                signalMap: rp2350HstxSignalMap
               },
               custom_gpio: {
                 label: "Custom GPIO",
-                signalMap: createRp2350HdmiCustomSignalMap()
+                presets: [
+                  {
+                    id: "gpio12_19",
+                    label: "GPIO12-19",
+                    pins: {
+                      tmds2_p: "gpio12",
+                      tmds2_n: "gpio13",
+                      tmds1_p: "gpio14",
+                      tmds1_n: "gpio15",
+                      tmds0_p: "gpio16",
+                      tmds0_n: "gpio17",
+                      clock_p: "gpio18",
+                      clock_n: "gpio19"
+                    }
+                  }
+                ],
+                signalMap: createSelectableSignalMap(hdmiSignalIds, ["gpio"])
               }
             }
           }
@@ -471,9 +557,68 @@ export const components: Record<string, ComponentDefinition> = {
       }
     ]
   },
+  "@nocad/rp2350:RP2354B": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 10, heightMm: 10 }
+    },
+    id: "@nocad/rp2350:RP2354B",
+    pins: createIndexedPins({
+      count: 48,
+      idPrefix: "gpio",
+      labelPrefix: "GPIO",
+      capabilityRules: [
+        { capabilities: ["i2c.sda"], indices: [8] },
+        { capabilities: ["i2c.scl"], indices: [9] },
+        { capabilities: ["hstx"], indices: [12, 13, 14, 15, 16, 17, 18, 19] }
+      ]
+    }),
+    ports: {
+      video_out: {
+        kind: "derived_port",
+        provides: {
+          "@nocad/video:hdmi_output.v1": {
+            role: "provider",
+            modes: {
+              custom_gpio: {
+                label: "Custom GPIO",
+                presets: [
+                  {
+                    id: "gpio12_19",
+                    label: "GPIO12-19",
+                    pins: {
+                      tmds2_p: "gpio12",
+                      tmds2_n: "gpio13",
+                      tmds1_p: "gpio14",
+                      tmds1_n: "gpio15",
+                      tmds0_p: "gpio16",
+                      tmds0_n: "gpio17",
+                      clock_p: "gpio18",
+                      clock_n: "gpio19"
+                    }
+                  }
+                ],
+                signalMap: rp2354bCustomHdmiSignalMap
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "@nocad/fpga:GENERIC_FPGA": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 16, heightMm: 16 }
+    },
     id: "@nocad/fpga:GENERIC_FPGA",
-    pins: createGenericFpgaPins(),
+    pins: createIndexedPins({
+      count: 64,
+      idPrefix: "io",
+      labelPrefix: "IO",
+      capabilityRules: [
+        { capabilities: ["i2c.sda"], indices: [60, 62] },
+        { capabilities: ["i2c.scl"], indices: [61, 63] }
+      ]
+    }),
     ports: {
       i2c: {
         kind: "derived_port",
@@ -511,6 +656,9 @@ export const components: Record<string, ComponentDefinition> = {
     ]
   },
   "@nocad/hdmi-tx:IT66121": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 9, heightMm: 9 }
+    },
     id: "@nocad/hdmi-tx:IT66121",
     pins: {
       ...createFixedPins(Object.keys(contracts[PIXEL_STREAM_CONTRACT].signals), "PIXEL"),
@@ -622,6 +770,9 @@ export const components: Record<string, ComponentDefinition> = {
     }
   },
   "@nocad/sensors:I2C_TEMP_SENSOR": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 3, heightMm: 3 }
+    },
     id: "@nocad/sensors:I2C_TEMP_SENSOR",
     pins: {
       sda: {
@@ -649,6 +800,9 @@ export const components: Record<string, ComponentDefinition> = {
     }
   },
   "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 14, heightMm: 12 }
+    },
     id: "@nocad/connectors:HDMI_TYPE_A_RECEPTACLE",
     pins: {
       tmds2_p: {
@@ -707,6 +861,52 @@ export const components: Record<string, ComponentDefinition> = {
         name: "Shield",
         capabilities: ["chassis"]
       }
+    },
+    ports: {
+      hdmi: {
+        kind: "fixed_port",
+        contractMaps: {
+          "@nocad/video:hdmi_output.v1": {
+            role: "to",
+            signalMap: {
+              tmds2_p: { pin: "tmds2_p" },
+              tmds2_n: { pin: "tmds2_n" },
+              tmds1_p: { pin: "tmds1_p" },
+              tmds1_n: { pin: "tmds1_n" },
+              tmds0_p: { pin: "tmds0_p" },
+              tmds0_n: { pin: "tmds0_n" },
+              clock_p: { pin: "clock_p" },
+              clock_n: { pin: "clock_n" },
+              ddc_sda: { pin: "ddc_sda" },
+              ddc_scl: { pin: "ddc_scl" },
+              hpd: { pin: "hpd" },
+              cec: { pin: "cec" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "@nocad/connectors:TE_1-1734839-4": {
+    board: {
+      envelope: { accuracy: "estimate", widthMm: 14, heightMm: 12 }
+    },
+    id: "@nocad/connectors:TE_1-1734839-4",
+    pins: {
+      source_5v: { name: "Pin 1 / HDMI 5V", capabilities: ["power.5v"] },
+      hpd: { name: "Pin 2 / HPD candidate", capabilities: ["hdmi.hpd"] },
+      ground: { name: "Pin 3 / Ground", capabilities: ["power.ground"] },
+      ddc_sda: { name: "Pin 4 / DDC SDA", capabilities: ["i2c.sda", "hdmi.ddc.sda"] },
+      ddc_scl: { name: "Pin 5 / DDC SCL", capabilities: ["i2c.scl", "hdmi.ddc.scl"] },
+      cec: { name: "Pin 6 / CEC", capabilities: ["hdmi.cec"] },
+      clock_n: { name: "Pin 7 / TMDS Clock-", capabilities: ["hdmi.tmds.clock.n"] },
+      clock_p: { name: "Pin 8 / TMDS Clock+", capabilities: ["hdmi.tmds.clock.p"] },
+      tmds0_n: { name: "Pin 9 / TMDS Data0-", capabilities: ["hdmi.tmds.data0.n"] },
+      tmds0_p: { name: "Pin 10 / TMDS Data0+", capabilities: ["hdmi.tmds.data0.p"] },
+      tmds1_n: { name: "Pin 11 / TMDS Data1-", capabilities: ["hdmi.tmds.data1.n"] },
+      tmds1_p: { name: "Pin 12 / TMDS Data1+", capabilities: ["hdmi.tmds.data1.p"] },
+      tmds2_n: { name: "Pin 13 / TMDS Data2-", capabilities: ["hdmi.tmds.data2.n"] },
+      tmds2_p: { name: "Pin 14 / TMDS Data2+", capabilities: ["hdmi.tmds.data2.p"] }
     },
     ports: {
       hdmi: {
@@ -797,52 +997,27 @@ export const packageVersions: Record<string, string> = {
   "@nocad/passives": "0.1.0"
 };
 
-function createRp2350Pins(): Record<string, PinDefinition> {
+function createIndexedPins(options: {
+  capabilityRules?: Array<{ capabilities: string[]; indices: number[] }>;
+  count: number;
+  idPrefix: string;
+  labelPrefix: string;
+}): Record<string, PinDefinition> {
   return Object.fromEntries(
-    Array.from({ length: 30 }, (_, index) => {
+    Array.from({ length: options.count }, (_, index) => {
       const capabilities = ["gpio"];
 
-      if (index === 4 || index === 8) {
-        capabilities.push("i2c.sda");
-      }
-
-      if (index === 5 || index === 9) {
-        capabilities.push("i2c.scl");
-      }
-
-      if (index >= 12 && index <= 19) {
-        capabilities.push("hstx");
-      }
-
-      return [
-        `gpio${index}`,
-        {
-          name: `GPIO${index}`,
-          capabilities
+      for (const rule of options.capabilityRules ?? []) {
+        if (rule.indices.includes(index)) {
+          capabilities.push(...rule.capabilities);
         }
-      ];
-    })
-  );
-}
-
-function createGenericFpgaPins(): Record<string, PinDefinition> {
-  return Object.fromEntries(
-    Array.from({ length: 64 }, (_, index) => {
-      const capabilities = ["gpio"];
-
-      if (index === 60 || index === 62) {
-        capabilities.push("i2c.sda");
-      }
-
-      if (index === 61 || index === 63) {
-        capabilities.push("i2c.scl");
       }
 
       return [
-        `io${index}`,
+        `${options.idPrefix}${index}`,
         {
-          name: `IO${index}`,
-          capabilities
+          name: `${options.labelPrefix}${index}`,
+          capabilities: [...new Set(capabilities)]
         }
       ];
     })
@@ -859,29 +1034,8 @@ function createPixelStreamSignals(): ConnectionContract["signals"] {
       ...Array.from({ length: 8 }, (_, index) => `r${index}`),
       ...Array.from({ length: 8 }, (_, index) => `g${index}`),
       ...Array.from({ length: 8 }, (_, index) => `b${index}`)
-    ].map((signal) => [signal, { direction: "from_to_to" }])
+    ].map((signal) => [signal, { boardKind: "highSpeed", direction: "from_to_to" }])
   );
-}
-
-function createRp2350HdmiSignalMap(): Record<string, SignalPinMap> {
-  return {
-    clock_n: { pin: "gpio19" },
-    clock_p: { pin: "gpio18" },
-    tmds0_n: { pin: "gpio17" },
-    tmds0_p: { pin: "gpio16" },
-    tmds1_n: { pin: "gpio15" },
-    tmds1_p: { pin: "gpio14" },
-    tmds2_n: { pin: "gpio13" },
-    tmds2_p: { pin: "gpio12" },
-    ddc_sda: { pinSelector: { capabilities: ["i2c.sda", "gpio"] } },
-    ddc_scl: { pinSelector: { capabilities: ["i2c.scl", "gpio"] } },
-    hpd: { pinSelector: { capabilities: ["gpio"] } },
-    cec: { pinSelector: { capabilities: ["gpio"] } }
-  };
-}
-
-function createRp2350HdmiCustomSignalMap(): Record<string, SignalPinMap> {
-  return createSelectableSignalMap(Object.keys(contracts["@nocad/video:hdmi_output.v1"].signals), ["gpio"]);
 }
 
 function createSelectableSignalMap(signals: string[], capabilities: string[]): Record<string, SignalPinMap> {

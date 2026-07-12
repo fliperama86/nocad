@@ -59,7 +59,7 @@ export function createHdmiSliceProject(): ProjectSource {
         label: "Main MCU",
         role: "mcu",
         component: "@nocad/rp2350:RP2350A",
-        package: "QFN80",
+        package: "QFN-60",
         refdesHint: "U?"
       },
       {
@@ -330,7 +330,7 @@ export function createRp2350HdmiTxSliceProject(
           label: "Main MCU",
           role: "mcu",
           component: "@nocad/rp2350:RP2350A",
-          package: "QFN80"
+          package: "QFN-60"
         };
       }
 
@@ -398,7 +398,7 @@ export function createI2cSliceProject(options: { conflict?: boolean } = {}): Pro
         label: "Main MCU",
         role: "mcu",
         component: "@nocad/rp2350:RP2350A",
-        package: "QFN80",
+        package: "QFN-60",
         refdesHint: "U?"
       },
       {

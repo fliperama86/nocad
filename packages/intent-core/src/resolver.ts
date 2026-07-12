@@ -1,4 +1,3 @@
-import { components, contracts, functions, packageVersions } from "./fixtures";
 import type {
   ComponentDefinition,
   ComponentNode,
@@ -26,6 +25,7 @@ import type {
   ResolvedDependency,
   ResolvedNet,
   ResolvedProject,
+  ResolutionEnvironment,
   SignalPinMap,
   SignalBindings
 } from "./types";
@@ -72,18 +72,27 @@ type ResolutionContext = {
   boundPorts: Map<string, BoundPort[]>;
   nodeById: Map<string, ProjectNode>;
   componentByNodeId: Map<string, ComponentContext>;
+  environment: ResolutionEnvironment;
   reservedPins: Map<string, ReservedPin>;
 };
 
-export function resolveProject(source: ProjectSource): ResolvedProject {
+export function resolveProject(source: ProjectSource, environment: ResolutionEnvironment): ResolvedProject {
   const diagnostics: Diagnostic[] = [];
   const nodeById = indexNodes(source.nodes, diagnostics);
-  const componentByNodeId = indexComponentContexts(source.nodes, diagnostics);
+  const componentByNodeId = indexComponentContexts(
+    source.nodes,
+    environment.catalog.components,
+    diagnostics
+  );
   const boundPorts = new Map<string, BoundPort[]>();
-  const dependencies = createResolvedDependencies(source.dependencies);
+  const dependencies = createResolvedDependencies(source.dependencies, environment, diagnostics);
   const validEdges = collectUniqueEdges(source.edges, diagnostics);
   const canonicalSource = { ...source, edges: validEdges };
-  const functionRequests = collectFunctionResolutionRequests(canonicalSource, diagnostics);
+  const functionRequests = collectFunctionResolutionRequests(
+    canonicalSource,
+    environment.catalog.functions,
+    diagnostics
+  );
   const reservedPins = collectInitialReservations(validEdges, functionRequests, componentByNodeId, diagnostics);
   const context: ResolutionContext = {
     authoredPorts: collectAuthoredPortBindings(validEdges),
@@ -91,6 +100,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
     boundPorts,
     nodeById,
     componentByNodeId,
+    environment,
     reservedPins
   };
   const resolvedChoices: ResolvedProject["resolvedChoices"] = [];
@@ -130,16 +140,7 @@ export function resolveProject(source: ProjectSource): ResolvedProject {
 
   return {
     schema: "nocad.lock.v0",
-    sourceSet: {
-      hash: "sha256:fixture-source",
-      files: [
-        {
-          role: "project",
-          path: "project.nocad.json",
-          hash: "sha256:fixture-project"
-        }
-      ]
-    },
+    sourceSet: environment.sourceSet(source),
     resolver: {
       name: "nocad-resolver",
       version: RESOLVER_VERSION
@@ -160,7 +161,7 @@ function applyConnectionTopologyRules(
   generated: ResolvedProject["generated"],
   context: ResolutionContext
 ) {
-  const contract = contracts[edge.contract];
+  const contract = context.environment.catalog.contracts[edge.contract];
   const activeSignals = new Set(resolved.nets.map((net) => net.sourceMap.signal));
 
   for (const rule of contract?.topologyRules ?? []) {
@@ -168,7 +169,9 @@ function applyConnectionTopologyRules(
       continue;
     }
 
-    recordGeneratedDependency(dependencies, rule.dependency, edge.id, rule.id);
+    if (!recordGeneratedDependency(dependencies, rule.dependency, edge.id, rule.id, context)) {
+      continue;
+    }
 
     const rail = findPowerDomain(nodes, rule.rail);
 
@@ -192,20 +195,34 @@ function recordGeneratedDependency(
   dependencies: Record<string, ResolvedDependency>,
   dependency: string,
   edge: string,
-  feature: string
+  feature: string,
+  context: ResolutionContext
 ) {
-  const dependencyVersion = packageVersions[dependency];
+  const resolved = dependencies[dependency] ?? context.environment.resolveDependency(dependency);
+
+  if (!resolved) {
+    context.diagnostics.push({
+      severity: "error",
+      code: "GENERATED_DEPENDENCY_NOT_FOUND",
+      message: `Generated topology feature "${feature}" requires unavailable dependency "${dependency}".`,
+      targets: [{ kind: "edge", id: edge }]
+    });
+    return false;
+  }
+
   const introducedBy = { edge, feature };
   const previousIntroduction = dependencies[dependency]?.introducedBy;
 
   dependencies[dependency] = {
-    version: dependencyVersion,
-    hash: stablePackageHash(dependency, dependencyVersion),
+    version: resolved.version,
+    hash: resolved.hash,
     introducedBy:
       !previousIntroduction || compareDependencyIntroduction(introducedBy, previousIntroduction) < 0
         ? introducedBy
         : previousIntroduction
   };
+
+  return true;
 }
 
 function compareDependencyIntroduction(
@@ -250,7 +267,7 @@ function sortIntentConnectionEdges(edges: IntentConnectionEdge[], context: Resol
 }
 
 function connectionPinFlexibilityScore(edge: IntentConnectionEdge, context: ResolutionContext) {
-  const contract = contracts[edge.contract];
+  const contract = context.environment.catalog.contracts[edge.contract];
   const from = context.componentByNodeId.get(edge.from.node);
   const to = context.componentByNodeId.get(edge.to.node);
   const fromMap = from?.definition.ports[edge.from.port ?? ""]?.contractMaps?.[edge.contract];
@@ -371,7 +388,7 @@ function applyFunctionInlineRules(
   const rulesBySignal = new Map<string, FunctionInlineRuleDefinition[]>();
 
   for (const rule of activeRules) {
-    const inlineComponent = components[rule.component];
+    const inlineComponent = context.environment.catalog.components[rule.component];
 
     if (!inlineComponent) {
       context.diagnostics.push({
@@ -442,7 +459,15 @@ function applyFunctionInlineRules(
     }
 
     if (!appliedRuleIds.has(rule.id)) {
-      recordGeneratedDependency(dependencies, rule.dependency, providerEdge.id, rule.id);
+      if (!recordGeneratedDependency(
+        dependencies,
+        rule.dependency,
+        providerEdge.id,
+        rule.id,
+        context
+      )) {
+        return [net];
+      }
       appliedRuleIds.add(rule.id);
     }
 
@@ -542,6 +567,7 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 
 function collectFunctionResolutionRequests(
   source: ProjectSource,
+  functionDefinitions: ResolutionEnvironment["catalog"]["functions"],
   diagnostics: Diagnostic[]
 ): FunctionResolutionRequest[] {
   const requests: FunctionResolutionRequest[] = [];
@@ -551,7 +577,7 @@ function collectFunctionResolutionRequests(
       continue;
     }
 
-    const definition = functions[functionNode.function];
+    const definition = functionDefinitions[functionNode.function];
 
     if (!definition) {
       continue;
@@ -761,10 +787,19 @@ function resolveFunctionProvider(
   }
 
   const contractId = definition.topology.contract;
+  const contract = context.environment.catalog.contracts[contractId];
   const connectorMap = connector.definition.ports[connectorEdge.to.port ?? ""]?.contractMaps?.[contractId];
   const providerModeChoice = resolveProviderMode(providerEdge, provider, definition, context);
 
-  if (!providerModeChoice) {
+  if (!contract || !providerModeChoice) {
+    if (!contract) {
+      context.diagnostics.push({
+        severity: "error",
+        code: "UNKNOWN_CONTRACT",
+        message: `Unknown contract "${contractId}".`,
+        targets: [{ kind: "edge", id: providerEdge.id }]
+      });
+    }
     return null;
   }
 
@@ -842,7 +877,7 @@ function resolveFunctionProvider(
       },
       reason: `Resolved enabled ${definition.id} signals using provider mode "${providerModeChoice.id}" and exposed pins.`
     },
-    nets: Object.keys(bindings).map((signal) => createContractNet(contractId, signal, bindings, providerEdge.id))
+    nets: Object.keys(bindings).map((signal) => createContractNet(contract, signal, bindings, providerEdge.id))
   };
 }
 
@@ -1010,6 +1045,7 @@ function resolveFunctionGeneratedNets(
     }
 
     nets.push({
+      boardKind: generatedNet.boardKind,
       id: `net_${functionNode.id}_${generatedNet.id}`,
       name: generatedNet.name,
       endpoints: {
@@ -1278,19 +1314,25 @@ function pinSatisfiesCapabilities(definition: ComponentDefinition, pin: string, 
   return Boolean(candidate && capabilities.every((capability) => candidate.capabilities.includes(capability)));
 }
 
-function createContractNet(contractId: string, signal: string, bindings: SignalBindings, edgeId: string): ResolvedNet {
+function createContractNet(
+  contract: ConnectionContract,
+  signal: string,
+  bindings: SignalBindings,
+  edgeId: string
+): ResolvedNet {
   const binding = bindings[signal];
   const from = binding?.from;
   const to = binding?.to;
-  const contractSignal = contracts[contractId]?.signals[signal] as ContractSignal | undefined;
+  const contractSignal = contract.signals[signal] as ContractSignal | undefined;
 
   if (!from?.pin || !to?.pin || !contractSignal) {
-    throw new Error(`Resolved ${contractId} ${signal} binding is incomplete.`);
+    throw new Error(`Resolved ${contract.id} ${signal} binding is incomplete.`);
   }
 
   return {
+    boardKind: contractSignal.boardKind,
     id: createNetId(edgeId, signal),
-    name: formatNetName(contractId, signal),
+    name: formatNetName(contract, signal),
     endpoints: {
       from,
       to
@@ -1304,10 +1346,10 @@ function createContractNet(contractId: string, signal: string, bindings: SignalB
   };
 }
 
-function formatNetName(contractId: string, signal: string): string {
-  const prefix = contracts[contractId]?.netNamePrefix;
+function formatNetName(contract: ConnectionContract, signal: string): string {
+  const prefix = contract.netNamePrefix;
 
-  return `${prefix ?? contractId.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
+  return `${prefix ?? contract.id.replaceAll(/[^A-Z0-9]+/gi, "_").toUpperCase()}_${signal.toUpperCase()}`;
 }
 
 function normalizeContractParams(
@@ -1432,7 +1474,7 @@ function resolveIntentConnection(
     return null;
   }
 
-  const contract = contracts[edge.contract];
+  const contract = context.environment.catalog.contracts[edge.contract];
 
   if (!contract) {
     context.diagnostics.push({
@@ -1494,7 +1536,7 @@ function resolveIntentConnection(
           ? `Used source-provided bindings for ${edge.contract}.`
           : `Resolved ${edge.contract} against endpoint signal maps.`
     },
-    nets: Object.keys(signals).map((signal) => createContractNet(edge.contract, signal, bindings, edge.id))
+    nets: Object.keys(signals).map((signal) => createContractNet(contract, signal, bindings, edge.id))
   };
 }
 
@@ -1889,7 +1931,11 @@ function indexNodes(nodes: ProjectNode[], diagnostics: Diagnostic[]): Map<string
   return nodeById;
 }
 
-function indexComponentContexts(nodes: ProjectNode[], diagnostics: Diagnostic[]): Map<string, ComponentContext> {
+function indexComponentContexts(
+  nodes: ProjectNode[],
+  componentDefinitions: ResolutionEnvironment["catalog"]["components"],
+  diagnostics: Diagnostic[]
+): Map<string, ComponentContext> {
   const componentByNodeId = new Map<string, ComponentContext>();
 
   for (const node of nodes) {
@@ -1897,7 +1943,7 @@ function indexComponentContexts(nodes: ProjectNode[], diagnostics: Diagnostic[])
       continue;
     }
 
-    const definition = components[node.component];
+    const definition = componentDefinitions[node.component];
 
     if (!definition) {
       diagnostics.push({
@@ -2063,18 +2109,26 @@ function pinKey(endpoint: EndpointRef): string {
   return `${endpoint.node}.${endpoint.pin ?? ""}`;
 }
 
-function createResolvedDependencies(dependencies: Record<string, string>): Record<string, ResolvedDependency> {
+function createResolvedDependencies(
+  dependencies: Record<string, string>,
+  environment: ResolutionEnvironment,
+  diagnostics: Diagnostic[]
+): Record<string, ResolvedDependency> {
   return Object.fromEntries(
-    Object.entries(dependencies).map(([name, version]) => [
-      name,
-      {
-        version,
-        hash: stablePackageHash(name, version)
-      }
-    ])
-  );
-}
+    Object.entries(dependencies).flatMap(([name, requestedVersion]) => {
+      const resolved = environment.resolveDependency(name, requestedVersion);
 
-function stablePackageHash(name: string, version: string): string {
-  return `sha256:fixture:${name}@${version}`;
+      if (!resolved || resolved.version !== requestedVersion) {
+        diagnostics.push({
+          severity: "error",
+          code: "DEPENDENCY_NOT_FOUND",
+          message: `Dependency "${name}" at version "${requestedVersion}" is unavailable.`,
+          targets: []
+        });
+        return [];
+      }
+
+      return [[name, resolved]];
+    })
+  );
 }

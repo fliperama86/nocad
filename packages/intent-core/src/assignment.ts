@@ -1,9 +1,18 @@
-import { components } from "./fixtures";
-import type { IntentConnectionEdge, ProjectSource } from "./types";
+import type {
+  ComponentDefinition,
+  DefinitionCatalog,
+  EndpointRole,
+  IntentConnectionEdge,
+  ProjectSource,
+  SignalPinMap
+} from "./types";
 
-export type I2cPinPairOption = {
-  sda: string;
-  scl: string;
+export type PreferredPinGroupOption = {
+  endpointRole: EndpointRole;
+  id: string;
+  label: string;
+  node: string;
+  pins: Record<string, string>;
 };
 
 export type ComponentPinOption = {
@@ -12,44 +21,30 @@ export type ComponentPinOption = {
   name: string;
 };
 
-export function getI2cPinPairOptions(source: ProjectSource, edgeId: string): I2cPinPairOption[] {
-  const edge = source.edges.find((candidate): candidate is IntentConnectionEdge => candidate.id === edgeId && candidate.kind === "intent.connection");
+export function getPreferredPinGroupOptions(
+  source: ProjectSource,
+  edgeId: string,
+  catalog: DefinitionCatalog
+): PreferredPinGroupOption[] {
+  const edge = source.edges.find(
+    (candidate): candidate is IntentConnectionEdge =>
+      candidate.id === edgeId && candidate.kind === "intent.connection"
+  );
 
-  if (!edge || edge.contract !== "builtin:i2c.v1") {
+  if (!edge) {
     return [];
   }
 
-  const fromNode = source.nodes.find((node) => node.id === edge.from.node);
-
-  if (!fromNode || fromNode.kind !== "component") {
-    return [];
-  }
-
-  const definition = components[fromNode.component];
-
-  return (definition?.preferredPinGroups ?? [])
-    .filter(
-      (group) =>
-        group.contract === edge.contract &&
-        (group.port === undefined || group.port === edge.from.port)
-    )
-    .flatMap((group) => {
-      const sda = group.pins.sda;
-      const scl = group.pins.scl;
-
-      return sda &&
-        scl &&
-        definition.pins[sda]?.capabilities.includes("i2c.sda") === true &&
-        definition.pins[scl]?.capabilities.includes("i2c.scl") === true
-        ? [{ sda, scl }]
-        : [];
-    });
+  return (["from", "to"] as const).flatMap((endpointRole) =>
+    preferredOptionsForEndpoint(source, edge, endpointRole, catalog)
+  );
 }
 
 export function getComponentPinOptions(
   source: ProjectSource,
   nodeId: string,
-  capability?: string
+  catalog: DefinitionCatalog,
+  capabilities: string | string[] = []
 ): ComponentPinOption[] {
   const node = source.nodes.find((candidate) => candidate.id === nodeId);
 
@@ -57,17 +52,98 @@ export function getComponentPinOptions(
     return [];
   }
 
-  const definition = components[node.component];
+  const definition = catalog.components[node.component];
+  const required = Array.isArray(capabilities) ? capabilities : [capabilities];
 
   if (!definition) {
     return [];
   }
 
   return Object.entries(definition.pins)
-    .filter(([, pin]) => !capability || pin.capabilities.includes(capability))
+    .filter(([, pin]) => required.every((capability) => pin.capabilities.includes(capability)))
     .map(([id, pin]) => ({
       capabilities: pin.capabilities,
       id,
       name: pin.name
     }));
+}
+
+function preferredOptionsForEndpoint(
+  source: ProjectSource,
+  edge: IntentConnectionEdge,
+  endpointRole: EndpointRole,
+  catalog: DefinitionCatalog
+): PreferredPinGroupOption[] {
+  const endpoint = edge[endpointRole];
+  const node = source.nodes.find((candidate) => candidate.id === endpoint.node);
+
+  if (!node || node.kind !== "component") {
+    return [];
+  }
+
+  const definition = catalog.components[node.component];
+
+  if (!definition) {
+    return [];
+  }
+
+  return (definition.preferredPinGroups ?? [])
+    .filter(
+      (group) =>
+        group.contract === edge.contract &&
+        (group.port === undefined || group.port === endpoint.port) &&
+        preferredPinsAreValid(definition, endpoint.port, edge.contract, endpointRole, group.pins, catalog)
+    )
+    .map((group, index) => ({
+      endpointRole,
+      id: `${endpointRole}:${group.port ?? "pins"}:${index}`,
+      label: group.suggestion?.title ?? Object.entries(group.pins).map(([signal, pin]) => `${signal}: ${pin}`).join(", "),
+      node: node.id,
+      pins: { ...group.pins }
+    }));
+}
+
+function preferredPinsAreValid(
+  definition: ComponentDefinition,
+  portId: string | undefined,
+  contractId: string,
+  endpointRole: EndpointRole,
+  pins: Record<string, string>,
+  catalog: DefinitionCatalog
+): boolean {
+  const contract = catalog.contracts[contractId];
+
+  if (!contract || Object.keys(pins).length === 0) {
+    return false;
+  }
+
+  const contractMap = portId ? definition.ports[portId]?.contractMaps?.[contractId] : undefined;
+
+  if (portId && !contractMap) {
+    return false;
+  }
+
+  if (contractMap && contractMap.role !== endpointRole) {
+    return false;
+  }
+
+  return Object.entries(pins).every(([signal, pin]) => {
+    if (!contract.signals[signal] || !definition.pins[pin]) {
+      return false;
+    }
+
+    const signalMap = contractMap?.signalMap[signal];
+    return !signalMap || pinMatchesSignalMap(definition, pin, signalMap);
+  });
+}
+
+function pinMatchesSignalMap(definition: ComponentDefinition, pin: string, signalMap: SignalPinMap): boolean {
+  if ("pin" in signalMap) {
+    return signalMap.pin === pin;
+  }
+
+  const candidate = definition.pins[pin];
+  return signalMap.pinSelector.capabilities.every(
+    (capability) => candidate?.capabilities.includes(capability) === true
+  );
 }

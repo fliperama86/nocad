@@ -1,0 +1,776 @@
+{
+  "board": {
+    "envelope": {
+      "widthMm": 7,
+      "heightMm": 7,
+      "accuracy": "estimate"
+    }
+  },
+  "id": "@nocad/rp2350:RP2350A",
+  "pins": {
+    "gpio0": {
+      "name": "GPIO0",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio1": {
+      "name": "GPIO1",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio2": {
+      "name": "GPIO2",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio3": {
+      "name": "GPIO3",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio4": {
+      "name": "GPIO4",
+      "capabilities": [
+        "gpio",
+        "i2c.sda"
+      ]
+    },
+    "gpio5": {
+      "name": "GPIO5",
+      "capabilities": [
+        "gpio",
+        "i2c.scl"
+      ]
+    },
+    "gpio6": {
+      "name": "GPIO6",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio7": {
+      "name": "GPIO7",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio8": {
+      "name": "GPIO8",
+      "capabilities": [
+        "gpio",
+        "i2c.sda"
+      ]
+    },
+    "gpio9": {
+      "name": "GPIO9",
+      "capabilities": [
+        "gpio",
+        "i2c.scl"
+      ]
+    },
+    "gpio10": {
+      "name": "GPIO10",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio11": {
+      "name": "GPIO11",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio12": {
+      "name": "GPIO12",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio13": {
+      "name": "GPIO13",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio14": {
+      "name": "GPIO14",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio15": {
+      "name": "GPIO15",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio16": {
+      "name": "GPIO16",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio17": {
+      "name": "GPIO17",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio18": {
+      "name": "GPIO18",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio19": {
+      "name": "GPIO19",
+      "capabilities": [
+        "gpio",
+        "hstx"
+      ]
+    },
+    "gpio20": {
+      "name": "GPIO20",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio21": {
+      "name": "GPIO21",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio22": {
+      "name": "GPIO22",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio23": {
+      "name": "GPIO23",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio24": {
+      "name": "GPIO24",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio25": {
+      "name": "GPIO25",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio26": {
+      "name": "GPIO26",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio27": {
+      "name": "GPIO27",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio28": {
+      "name": "GPIO28",
+      "capabilities": [
+        "gpio"
+      ]
+    },
+    "gpio29": {
+      "name": "GPIO29",
+      "capabilities": [
+        "gpio"
+      ]
+    }
+  },
+  "ports": {
+    "i2c": {
+      "kind": "derived_port",
+      "contractMaps": {
+        "builtin:i2c.v1": {
+          "role": "from",
+          "signalMap": {
+            "sda": {
+              "pinSelector": {
+                "capabilities": [
+                  "i2c.sda",
+                  "gpio"
+                ]
+              }
+            },
+            "scl": {
+              "pinSelector": {
+                "capabilities": [
+                  "i2c.scl",
+                  "gpio"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "dpi_out": {
+      "kind": "derived_port",
+      "contractMaps": {
+        "@nocad/video:pixel_stream.v1": {
+          "role": "from",
+          "signalMap": {
+            "pclk": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "hsync": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "vsync": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "de": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r0": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r1": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r2": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r3": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r4": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r5": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r6": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "r7": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g0": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g1": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g2": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g3": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g4": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g5": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g6": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "g7": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b0": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b1": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b2": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b3": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b4": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b5": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b6": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            },
+            "b7": {
+              "pinSelector": {
+                "capabilities": [
+                  "gpio"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "video_out": {
+      "kind": "derived_port",
+      "provides": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "provider",
+          "modes": {
+            "auto": {
+              "label": "Auto",
+              "signalMap": {
+                "clock_n": {
+                  "pin": "gpio19"
+                },
+                "clock_p": {
+                  "pin": "gpio18"
+                },
+                "tmds0_n": {
+                  "pin": "gpio17"
+                },
+                "tmds0_p": {
+                  "pin": "gpio16"
+                },
+                "tmds1_n": {
+                  "pin": "gpio15"
+                },
+                "tmds1_p": {
+                  "pin": "gpio14"
+                },
+                "tmds2_n": {
+                  "pin": "gpio13"
+                },
+                "tmds2_p": {
+                  "pin": "gpio12"
+                },
+                "ddc_sda": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.sda",
+                      "gpio"
+                    ]
+                  }
+                },
+                "ddc_scl": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.scl",
+                      "gpio"
+                    ]
+                  }
+                },
+                "hpd": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "cec": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                }
+              }
+            },
+            "hstx": {
+              "label": "HSTX",
+              "signalMap": {
+                "clock_n": {
+                  "pin": "gpio19"
+                },
+                "clock_p": {
+                  "pin": "gpio18"
+                },
+                "tmds0_n": {
+                  "pin": "gpio17"
+                },
+                "tmds0_p": {
+                  "pin": "gpio16"
+                },
+                "tmds1_n": {
+                  "pin": "gpio15"
+                },
+                "tmds1_p": {
+                  "pin": "gpio14"
+                },
+                "tmds2_n": {
+                  "pin": "gpio13"
+                },
+                "tmds2_p": {
+                  "pin": "gpio12"
+                },
+                "ddc_sda": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.sda",
+                      "gpio"
+                    ]
+                  }
+                },
+                "ddc_scl": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.scl",
+                      "gpio"
+                    ]
+                  }
+                },
+                "hpd": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "cec": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                }
+              }
+            },
+            "pio_gpio": {
+              "label": "PIO GPIO",
+              "signalMap": {
+                "clock_n": {
+                  "pin": "gpio19"
+                },
+                "clock_p": {
+                  "pin": "gpio18"
+                },
+                "tmds0_n": {
+                  "pin": "gpio17"
+                },
+                "tmds0_p": {
+                  "pin": "gpio16"
+                },
+                "tmds1_n": {
+                  "pin": "gpio15"
+                },
+                "tmds1_p": {
+                  "pin": "gpio14"
+                },
+                "tmds2_n": {
+                  "pin": "gpio13"
+                },
+                "tmds2_p": {
+                  "pin": "gpio12"
+                },
+                "ddc_sda": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.sda",
+                      "gpio"
+                    ]
+                  }
+                },
+                "ddc_scl": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "i2c.scl",
+                      "gpio"
+                    ]
+                  }
+                },
+                "hpd": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "cec": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                }
+              }
+            },
+            "custom_gpio": {
+              "label": "Custom GPIO",
+              "presets": [
+                {
+                  "id": "gpio12_19",
+                  "label": "GPIO12-19",
+                  "pins": {
+                    "tmds2_p": "gpio12",
+                    "tmds2_n": "gpio13",
+                    "tmds1_p": "gpio14",
+                    "tmds1_n": "gpio15",
+                    "tmds0_p": "gpio16",
+                    "tmds0_n": "gpio17",
+                    "clock_p": "gpio18",
+                    "clock_n": "gpio19"
+                  }
+                }
+              ],
+              "signalMap": {
+                "tmds2_p": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "tmds2_n": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "tmds1_p": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "tmds1_n": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "tmds0_p": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "tmds0_n": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "clock_p": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "clock_n": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "ddc_sda": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "ddc_scl": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "hpd": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                },
+                "cec": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "digital_out": {
+      "kind": "derived_port",
+      "provides": {
+        "@nocad/io:digital_output.v1": {
+          "role": "provider",
+          "modes": {
+            "auto": {
+              "label": "Auto",
+              "signalMap": {
+                "signal": {
+                  "pinSelector": {
+                    "capabilities": [
+                      "gpio"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "preferredPinGroups": [
+    {
+      "contract": "builtin:i2c.v1",
+      "pins": {
+        "sda": "gpio4",
+        "scl": "gpio5"
+      },
+      "port": "i2c",
+      "suggestion": {
+        "title": "Move I2C to GPIO4/GPIO5"
+      }
+    },
+    {
+      "contract": "builtin:i2c.v1",
+      "pins": {
+        "sda": "gpio8",
+        "scl": "gpio9"
+      },
+      "port": "i2c",
+      "suggestion": {
+        "title": "Move I2C to GPIO8/GPIO9"
+      }
+    }
+  ]
+}

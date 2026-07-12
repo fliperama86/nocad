@@ -1,0 +1,146 @@
+{
+  "board": {
+    "envelope": {
+      "widthMm": 14,
+      "heightMm": 12,
+      "accuracy": "estimate"
+    }
+  },
+  "id": "@nocad/connectors:TE_1-1734839-4",
+  "pins": {
+    "source_5v": {
+      "name": "Pin 1 / HDMI 5V",
+      "capabilities": [
+        "power.5v"
+      ]
+    },
+    "hpd": {
+      "name": "Pin 2 / HPD candidate",
+      "capabilities": [
+        "hdmi.hpd"
+      ]
+    },
+    "ground": {
+      "name": "Pin 3 / Ground",
+      "capabilities": [
+        "power.ground"
+      ]
+    },
+    "ddc_sda": {
+      "name": "Pin 4 / DDC SDA",
+      "capabilities": [
+        "i2c.sda",
+        "hdmi.ddc.sda"
+      ]
+    },
+    "ddc_scl": {
+      "name": "Pin 5 / DDC SCL",
+      "capabilities": [
+        "i2c.scl",
+        "hdmi.ddc.scl"
+      ]
+    },
+    "cec": {
+      "name": "Pin 6 / CEC",
+      "capabilities": [
+        "hdmi.cec"
+      ]
+    },
+    "clock_n": {
+      "name": "Pin 7 / TMDS Clock-",
+      "capabilities": [
+        "hdmi.tmds.clock.n"
+      ]
+    },
+    "clock_p": {
+      "name": "Pin 8 / TMDS Clock+",
+      "capabilities": [
+        "hdmi.tmds.clock.p"
+      ]
+    },
+    "tmds0_n": {
+      "name": "Pin 9 / TMDS Data0-",
+      "capabilities": [
+        "hdmi.tmds.data0.n"
+      ]
+    },
+    "tmds0_p": {
+      "name": "Pin 10 / TMDS Data0+",
+      "capabilities": [
+        "hdmi.tmds.data0.p"
+      ]
+    },
+    "tmds1_n": {
+      "name": "Pin 11 / TMDS Data1-",
+      "capabilities": [
+        "hdmi.tmds.data1.n"
+      ]
+    },
+    "tmds1_p": {
+      "name": "Pin 12 / TMDS Data1+",
+      "capabilities": [
+        "hdmi.tmds.data1.p"
+      ]
+    },
+    "tmds2_n": {
+      "name": "Pin 13 / TMDS Data2-",
+      "capabilities": [
+        "hdmi.tmds.data2.n"
+      ]
+    },
+    "tmds2_p": {
+      "name": "Pin 14 / TMDS Data2+",
+      "capabilities": [
+        "hdmi.tmds.data2.p"
+      ]
+    }
+  },
+  "ports": {
+    "hdmi": {
+      "kind": "fixed_port",
+      "contractMaps": {
+        "@nocad/video:hdmi_output.v1": {
+          "role": "to",
+          "signalMap": {
+            "tmds2_p": {
+              "pin": "tmds2_p"
+            },
+            "tmds2_n": {
+              "pin": "tmds2_n"
+            },
+            "tmds1_p": {
+              "pin": "tmds1_p"
+            },
+            "tmds1_n": {
+              "pin": "tmds1_n"
+            },
+            "tmds0_p": {
+              "pin": "tmds0_p"
+            },
+            "tmds0_n": {
+              "pin": "tmds0_n"
+            },
+            "clock_p": {
+              "pin": "clock_p"
+            },
+            "clock_n": {
+              "pin": "clock_n"
+            },
+            "ddc_sda": {
+              "pin": "ddc_sda"
+            },
+            "ddc_scl": {
+              "pin": "ddc_scl"
+            },
+            "hpd": {
+              "pin": "hpd"
+            },
+            "cec": {
+              "pin": "cec"
+            }
+          }
+        }
+      }
+    }
+  }
+}
