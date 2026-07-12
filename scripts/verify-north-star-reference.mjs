@@ -15,14 +15,15 @@ let failed = false;
 
 for (const referenceDirectory of referenceDirectories) {
   try {
-    const { inventory, manifest } = await loadReference(referenceDirectory);
-    verifyReference(manifest, inventory, path.basename(referenceDirectory));
-    runMutationChecks(manifest, inventory);
+    const { connectivity, inventory, manifest } = await loadReference(referenceDirectory);
+    verifyReference(manifest, inventory, connectivity, path.basename(referenceDirectory));
+    runMutationChecks(manifest, inventory, connectivity);
     await verifyNoSourceCopies(referenceDirectory);
     console.log(
       `PASS ${path.relative(repositoryRoot, referenceDirectory)}: ` +
         `${inventory.components.length} components, ${inventory.sourceFacts.counts.boardFootprints} footprints, ` +
-        `${inventory.sourceFacts.counts.pads} pads, ${inventory.nets.length} nets`
+        `${inventory.sourceFacts.counts.pads} pads, ${inventory.nets.length} nets, ` +
+        `${connectivity.objects.virtualPowerSymbols.length} virtual power symbols`
     );
   } catch (error) {
     failed = true;
@@ -43,18 +44,38 @@ async function loadReference(referenceDirectory) {
   const manifestPath = path.join(referenceDirectory, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const inventoryPath = safeReferencePath(referenceDirectory, manifest.inventory?.path);
-  const [inventoryContents, inventoryStat] = await Promise.all([readFile(inventoryPath), stat(inventoryPath)]);
+  const connectivityPath = safeReferencePath(
+    referenceDirectory,
+    manifest.schematicConnectivity?.path
+  );
+  const [inventoryContents, inventoryStat, connectivityContents, connectivityStat] = await Promise.all([
+    readFile(inventoryPath),
+    stat(inventoryPath),
+    readFile(connectivityPath),
+    stat(connectivityPath)
+  ]);
 
   assertEqual(inventoryStat.size, manifest.inventory?.bytes, "inventory byte size");
   assertEqual(sha256(inventoryContents), manifest.inventory?.sha256, "inventory SHA-256");
+  assertEqual(
+    connectivityStat.size,
+    manifest.schematicConnectivity?.bytes,
+    "schematic-connectivity byte size"
+  );
+  assertEqual(
+    sha256(connectivityContents),
+    manifest.schematicConnectivity?.sha256,
+    "schematic-connectivity SHA-256"
+  );
 
   return {
+    connectivity: JSON.parse(connectivityContents.toString("utf8")),
     inventory: JSON.parse(inventoryContents.toString("utf8")),
     manifest
   };
 }
 
-function verifyReference(manifest, inventory, directoryId) {
+function verifyReference(manifest, inventory, connectivity, directoryId) {
   assertEqual(manifest.schema, "nocad.north-star-reference.v1", "manifest schema");
   assertEqual(inventory.schema, "nocad.north-star-inventory.v1", "inventory schema");
   assertEqual(manifest.id, directoryId, "manifest id and directory");
@@ -68,6 +89,7 @@ function verifyReference(manifest, inventory, directoryId) {
   verifyPin(manifest.pin);
   verifyRightsAndQualification(manifest);
   verifyInventory(inventory);
+  verifySchematicConnectivity(connectivity, inventory, manifest);
 }
 
 function verifyPin(pin) {
@@ -254,12 +276,17 @@ function verifyInventory(inventory) {
   );
   assertEqual(
     inventory.sourceFacts.schematicConnectivity?.powerSymbolCoverage,
-    "counted-not-individually-normalized",
+    "individually-normalized",
     "schematic power-symbol coverage status"
   );
   assertEqual(inventory.sourceFacts.schematicConnectivity?.ercStatus, "unknown", "ERC status");
-  if (!inventory.unsupportedOrUnknown.some((item) => item.id === "schematic-power-symbol-closure")) {
-    throw new Error("unsupported/unknown register omits schematic power-symbol closure");
+  assertEqual(
+    inventory.sourceFacts.schematicConnectivity?.comparisonStatus,
+    "equivalent-with-exact-waiver",
+    "schematic/board comparison status"
+  );
+  if (inventory.unsupportedOrUnknown.some((item) => item.id === "schematic-power-symbol-closure")) {
+    throw new Error("closed schematic power-symbol work remains in unsupported/unknown register");
   }
 }
 
@@ -512,35 +539,756 @@ function verifyStatusRegister(items) {
   }
 }
 
-function runMutationChecks(manifest, inventory) {
+function verifySchematicConnectivity(connectivity, inventory, manifest) {
+  assertEqual(
+    connectivity.schema,
+    "nocad.north-star-schematic-connectivity.v1",
+    "schematic-connectivity schema"
+  );
+  assertEqual(connectivity.referenceId, manifest.id, "schematic-connectivity reference id");
+  assertEqual(
+    connectivity.capture?.sourceFile,
+    "pico-retrodigital.kicad_sch",
+    "schematic-connectivity source file"
+  );
+  const pinnedSchematic = manifest.pin.files.find(
+    (file) => file.path === "pico-retrodigital.kicad_sch" && file.role === "schematic-source"
+  );
+  if (!pinnedSchematic) {
+    throw new Error("manifest has no exact pinned schematic source");
+  }
+  assertEqual(
+    connectivity.capture?.sourceSha256,
+    pinnedSchematic.sha256,
+    "schematic-connectivity source pin"
+  );
+  assertEqual(
+    inventory.sourceFacts.schematicConnectivity?.artifact,
+    manifest.schematicConnectivity?.path,
+    "inventory schematic-connectivity artifact path"
+  );
+  assertEqual(connectivity.capture?.netlistFormat, "kicadsexpr", "schematic netlist format");
+  assertText(connectivity.capture?.method, "schematic capture method");
+  assertText(connectivity.capture?.tool, "schematic capture tool");
+  if (!connectivity.capture?.verificationScope?.includes("does not re-run KiCad")) {
+    throw new Error("schematic capture must state the source-free verification boundary");
+  }
+  assertUuid(connectivity.capture?.sourceScope?.rootUuid, "schematic root UUID");
+  assertEqual(connectivity.capture?.sourceScope?.rootSheetInstances, 1, "root sheet-instance count");
+  assertEqual(connectivity.capture?.sourceScope?.childSheets, 0, "child schematic-sheet count");
+  assertEqual(connectivity.capture?.sourceScope?.hierarchicalLabels, 0, "hierarchical-label count");
+  assertEqual(connectivity.capture?.sourceScope?.buses, 0, "schematic bus count");
+  assertEqual(connectivity.capture?.sourceScope?.busEntries, 0, "schematic bus-entry count");
+
+  const objects = connectivity.objects;
+  const counts = connectivity.counts;
+  const inventoryCounts = inventory.sourceFacts.counts;
+  const netNames = new Set(connectivity.nets.map((net) => net.name));
+  const physicalPins = new Map();
+  const physicalPinsByComponentAndNumber = new Map();
+  const componentByUuid = new Map(inventory.components.map((component) => [component.schematicUuid, component]));
+  const physicalComponentPairs = [];
+  let markerNoConnectCount = 0;
+  let intrinsicNoConnectCount = 0;
+
+  assertCanonicalObjects(objects.physicalComponents, "schematicUuid", "schematic physical components");
+  for (const component of objects.physicalComponents) {
+    assertUuid(component.schematicUuid, `${component.reference} schematic UUID`);
+    assertText(component.reference, `${component.schematicUuid} schematic reference`);
+    const inventoryComponent = componentByUuid.get(component.schematicUuid);
+    assertEqual(component.reference, inventoryComponent?.referenceAtCapture, `${component.schematicUuid} reference mapping`);
+    physicalComponentPairs.push(`${component.schematicUuid}\0${component.reference}`);
+    assertCanonicalObjects(component.pins, "pinUuid", `${component.reference} schematic pins`);
+    const pinNumbers = new Set();
+    for (const pin of component.pins) {
+      assertUuid(pin.pinUuid, `${component.reference}.${pin.number} pin UUID`);
+      assertText(pin.number, `${component.reference}.${pin.pinUuid} pin number`);
+      assertText(pin.name, `${component.reference}.${pin.number} pin name`, { allowEmpty: true });
+      assertText(pin.electricalType, `${component.reference}.${pin.number} electrical type`);
+      assertEqual(typeof pin.hidden, "boolean", `${component.reference}.${pin.number} hidden state`);
+      assertPoint(pin.at, `${component.reference}.${pin.number} coordinate`);
+      assertText(pin.net, `${component.reference}.${pin.number} schematic net`);
+      if (!netNames.has(pin.net)) {
+        throw new Error(`${component.reference}.${pin.number} refers to unknown schematic net ${pin.net}`);
+      }
+      if (physicalPins.has(pin.pinUuid)) {
+        throw new Error(`schematic physical pin UUID is duplicated: ${pin.pinUuid}`);
+      }
+      if (pinNumbers.has(pin.number)) {
+        throw new Error(`${component.reference} has duplicated placed pin number ${pin.number}`);
+      }
+      pinNumbers.add(pin.number);
+      physicalPins.set(pin.pinUuid, { ...pin, component });
+      physicalPinsByComponentAndNumber.set(`${component.schematicUuid}\0${pin.number}`, pin);
+      if (pin.intentionalNoConnect === "marker") {
+        markerNoConnectCount += 1;
+      } else if (pin.intentionalNoConnect === "intrinsic-pin-type") {
+        intrinsicNoConnectCount += 1;
+        assertEqual(pin.electricalType, "no_connect", `${component.reference}.${pin.number} intrinsic no-connect type`);
+      } else {
+        assertEqual(pin.intentionalNoConnect, null, `${component.reference}.${pin.number} no-connect classification`);
+      }
+    }
+  }
+  assertEqual(
+    physicalComponentPairs,
+    inventory.components.map((component) => `${component.schematicUuid}\0${component.referenceAtCapture}`),
+    "schematic/inventory physical-component closure"
+  );
+
+  verifySchematicObjectArray(objects.wires, "uuid", "schematic wires", netNames, (wire) => {
+    assertEqual(wire.endpoints?.length, 2, `${wire.uuid} wire endpoint count`);
+    wire.endpoints.forEach((point, index) => assertPoint(point, `${wire.uuid} endpoint ${index}`));
+  });
+  verifySchematicObjectArray(objects.junctions, "uuid", "schematic junctions", netNames, (junction) => {
+    assertPoint(junction.at, `${junction.uuid} junction coordinate`);
+  });
+  verifySchematicObjectArray(objects.labels, "uuid", "schematic labels", netNames, (label) => {
+    assertEnum(label.kind, new Set(["global", "local"]), `${label.uuid} label kind`);
+    assertText(label.text, `${label.uuid} label text`);
+    assertPoint(label.at, `${label.uuid} label coordinate`);
+    if (!Number.isFinite(label.orientation)) {
+      throw new Error(`${label.uuid} label orientation must be finite`);
+    }
+    if (label.kind === "global") {
+      assertText(label.shape, `${label.uuid} global-label shape`);
+    } else {
+      assertEqual(label.shape, null, `${label.uuid} local-label shape`);
+    }
+  });
+  verifySchematicObjectArray(objects.noConnects, "uuid", "schematic no-connects", netNames, (marker) => {
+    assertPoint(marker.at, `${marker.uuid} no-connect coordinate`);
+    assertUuid(marker.pinUuid, `${marker.uuid} no-connect pin UUID`);
+    const pin = physicalPins.get(marker.pinUuid);
+    assertEqual(pin?.intentionalNoConnect, "marker", `${marker.uuid} no-connect target`);
+    assertEqual(marker.net, pin?.net, `${marker.uuid} no-connect net`);
+  });
+
+  assertCanonicalObjects(
+    objects.virtualPowerSymbols,
+    "schematicUuid",
+    "schematic virtual power symbols"
+  );
+  const virtualPowerByUuid = new Map();
+  const allPinUuids = new Set(physicalPins.keys());
+  for (const symbol of objects.virtualPowerSymbols) {
+    assertUuid(symbol.schematicUuid, `${symbol.reference} virtual symbol UUID`);
+    assertUuid(symbol.pinUuid, `${symbol.reference} virtual pin UUID`);
+    assertText(symbol.reference, `${symbol.schematicUuid} virtual reference`);
+    assertText(symbol.value, `${symbol.reference} virtual value`);
+    assertText(symbol.libId, `${symbol.reference} virtual library id`);
+    if (!symbol.libId.startsWith("power:")) {
+      throw new Error(`${symbol.reference} is not a power-library symbol`);
+    }
+    assertEnum(
+      symbol.classification,
+      new Set(["erc-power-flag", "global-power"]),
+      `${symbol.reference} virtual classification`
+    );
+    if (symbol.classification === "erc-power-flag") {
+      assertEqual(symbol.libId, "power:PWR_FLAG", `${symbol.reference} ERC flag library identity`);
+      assertEqual(symbol.electricalType, "power_out", `${symbol.reference} ERC flag electrical type`);
+    } else {
+      if (symbol.libId === "power:PWR_FLAG") {
+        throw new Error(`${symbol.reference} PWR_FLAG must be classified as an ERC power flag`);
+      }
+      assertEqual(symbol.electricalType, "power_in", `${symbol.reference} global-power electrical type`);
+      assertEqual(symbol.value, symbol.net, `${symbol.reference} global-power net name`);
+    }
+    assertPoint(symbol.at, `${symbol.reference} virtual coordinate`);
+    if (!netNames.has(symbol.net)) {
+      throw new Error(`${symbol.reference} refers to unknown schematic net ${symbol.net}`);
+    }
+    if (virtualPowerByUuid.has(symbol.schematicUuid) || allPinUuids.has(symbol.pinUuid)) {
+      throw new Error(`${symbol.reference} has duplicated virtual identity`);
+    }
+    virtualPowerByUuid.set(symbol.schematicUuid, symbol);
+    allPinUuids.add(symbol.pinUuid);
+  }
+
+  assertCanonicalObjects(connectivity.nets, "name", "schematic nets");
+  const seenMemberPins = new Set();
+  for (const net of connectivity.nets) {
+    assertUniqueStrings(net.memberPinUuids, `${net.name} schematic members`);
+    assertEqual(net.memberPinUuids, [...net.memberPinUuids].sort(), `${net.name} member order`);
+    const derivedMembers = [...physicalPins.entries()]
+      .filter(([, pin]) => pin.net === net.name)
+      .map(([uuid]) => uuid)
+      .sort();
+    assertEqual(net.memberPinUuids, derivedMembers, `${net.name} physical-pin closure`);
+    for (const pinUuid of net.memberPinUuids) {
+      if (seenMemberPins.has(pinUuid)) {
+        throw new Error(`schematic pin occurs in more than one net: ${pinUuid}`);
+      }
+      seenMemberPins.add(pinUuid);
+    }
+    assertEqual(
+      net.membershipSha256,
+      sha256(Buffer.from(`${net.memberPinUuids.join("\n")}\n`)),
+      `${net.name} schematic membership digest`
+    );
+    verifyObjectMembership(net, "wires", objects.wires, "uuid");
+    verifyObjectMembership(net, "junctions", objects.junctions, "uuid");
+    verifyObjectMembership(net, "labels", objects.labels, "uuid");
+    verifyObjectMembership(net, "noConnects", objects.noConnects, "uuid");
+    verifyObjectMembership(
+      net,
+      "virtualPowerSymbols",
+      objects.virtualPowerSymbols,
+      "schematicUuid"
+    );
+    const topologyRecords = [
+      ...net.junctions.map((uuid) => `junction\0${uuid}\n`),
+      ...net.labels.map((uuid) => `label\0${uuid}\n`),
+      ...net.noConnects.map((uuid) => `no-connect\0${uuid}\n`),
+      ...net.virtualPowerSymbols.map((uuid) => `power-symbol\0${uuid}\n`),
+      ...net.wires.map((uuid) => `wire\0${uuid}\n`)
+    ].sort();
+    assertEqual(
+      net.topologyEvidenceSha256,
+      sha256(Buffer.from(topologyRecords.join(""))),
+      `${net.name} topology-evidence digest`
+    );
+  }
+  assertEqual(seenMemberPins.size, physicalPins.size, "schematic physical-pin net closure");
+  const aggregateCanonical = connectivity.nets
+    .map((net) => `${net.name}\0${net.membershipSha256}\0${net.topologyEvidenceSha256}\n`)
+    .join("");
+  assertText(
+    connectivity.aggregates?.schematicConnectivityEncoding,
+    "schematic connectivity aggregate encoding"
+  );
+  assertEqual(
+    connectivity.aggregates?.schematicConnectivitySha256,
+    sha256(Buffer.from(aggregateCanonical)),
+    "schematic connectivity aggregate SHA-256"
+  );
+  assertEqual(
+    connectivity.aggregates?.schematicConnectivitySha256,
+    manifest.schematicConnectivity?.aggregateSha256,
+    "manifest schematic connectivity aggregate"
+  );
+  assertEqual(
+    connectivity.aggregates?.schematicConnectivitySha256,
+    inventory.sourceFacts.schematicConnectivity?.aggregateSha256,
+    "inventory schematic connectivity aggregate"
+  );
+
+  assertEqual(counts.physicalComponents, objects.physicalComponents.length, "schematic component count");
+  assertEqual(counts.physicalPins, physicalPins.size, "schematic pin count");
+  assertEqual(
+    counts.hiddenPhysicalPins,
+    [...physicalPins.values()].filter((pin) => pin.hidden).length,
+    "hidden schematic pin count"
+  );
+  assertEqual(counts.hiddenPhysicalPins, 17, "captured hidden schematic pin count");
+  assertEqual(counts.virtualPowerSymbols, objects.virtualPowerSymbols.length, "virtual power-symbol count");
+  assertEqual(counts.wires, objects.wires.length, "schematic wire count");
+  assertEqual(counts.junctions, objects.junctions.length, "schematic junction count");
+  assertEqual(counts.localLabels, objects.labels.filter((label) => label.kind === "local").length, "local label count");
+  assertEqual(counts.globalLabels, objects.labels.filter((label) => label.kind === "global").length, "global label count");
+  assertEqual(counts.noConnects, objects.noConnects.length, "schematic no-connect count");
+  assertEqual(counts.nets, connectivity.nets.length, "schematic net count");
+  assertEqual(counts.netMembers, physicalPins.size, "schematic net-member count");
+  assertEqual(markerNoConnectCount, counts.noConnects, "marker no-connect pin closure");
+  assertEqual(intrinsicNoConnectCount, 3, "intrinsic no-connect pin count");
+  assertEqual(counts.physicalComponents, inventoryCounts.schematicComponents, "inventory schematic component count");
+  assertEqual(counts.physicalPins, inventoryCounts.schematicPhysicalPins, "inventory schematic pin count");
+  assertEqual(
+    counts.hiddenPhysicalPins,
+    inventoryCounts.schematicHiddenPhysicalPins,
+    "inventory hidden schematic pin count"
+  );
+  assertEqual(
+    intrinsicNoConnectCount,
+    inventoryCounts.schematicIntrinsicNoConnectPins,
+    "inventory intrinsic no-connect pin count"
+  );
+  assertEqual(counts.virtualPowerSymbols, inventoryCounts.schematicVirtualPowerSymbols, "inventory virtual symbol count");
+  assertEqual(counts.wires, inventoryCounts.schematicWires, "inventory schematic wire count");
+  assertEqual(counts.junctions, inventoryCounts.schematicJunctions, "inventory schematic junction count");
+  assertEqual(counts.noConnects, inventoryCounts.schematicNoConnectMarkers, "inventory no-connect marker count");
+  assertEqual(counts.localLabels, inventoryCounts.schematicLocalLabels, "inventory local label count");
+  assertEqual(counts.globalLabels, inventoryCounts.schematicGlobalLabels, "inventory global label count");
+  assertEqual(counts.nets, inventoryCounts.boardNets, "schematic/board net count");
+  assertEqual(counts.nets, inventoryCounts.schematicNets, "inventory schematic net count");
+
+  verifyNormalizedSchematicTopology(objects);
+  verifySchematicBoardComparison(connectivity, inventory, physicalPinsByComponentAndNumber);
+  assertEqual(
+    connectivity.boardComparison.status,
+    manifest.schematicConnectivity?.comparisonStatus,
+    "manifest schematic/board comparison status"
+  );
+}
+
+function verifyNormalizedSchematicTopology(objects) {
+  const physicalPins = objects.physicalComponents.flatMap((component) => component.pins);
+  const points = new Map();
+  const parent = new Map();
+  const ensurePoint = (point) => {
+    const key = normalizedPointKey(point);
+    if (!points.has(key)) {
+      points.set(key, point);
+      parent.set(key, key);
+    }
+    return key;
+  };
+  const find = (key) => {
+    let root = key;
+    while (parent.get(root) !== root) {
+      root = parent.get(root);
+    }
+    let current = key;
+    while (parent.get(current) !== root) {
+      const next = parent.get(current);
+      parent.set(current, root);
+      current = next;
+    }
+    return root;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot === rightRoot) {
+      return;
+    }
+    const root = leftRoot < rightRoot ? leftRoot : rightRoot;
+    parent.set(leftRoot, root);
+    parent.set(rightRoot, root);
+  };
+  const allObjectPoints = [
+    ...physicalPins.map((pin) => pin.at),
+    ...objects.virtualPowerSymbols.map((symbol) => symbol.at),
+    ...objects.wires.flatMap((wire) => wire.endpoints),
+    ...objects.junctions.map((junction) => junction.at),
+    ...objects.labels.map((label) => label.at),
+    ...objects.noConnects.map((marker) => marker.at)
+  ];
+  allObjectPoints.forEach(ensurePoint);
+  const connectionAnchors = [
+    ...objects.wires.flatMap((wire) => wire.endpoints),
+    ...objects.junctions.map((junction) => junction.at),
+    ...objects.labels.map((label) => label.at),
+    ...objects.virtualPowerSymbols.map((symbol) => symbol.at),
+    ...physicalPins.map((pin) => pin.at)
+  ];
+
+  for (const wire of objects.wires) {
+    const [start, end] = wire.endpoints;
+    const startKey = ensurePoint(start);
+    union(startKey, ensurePoint(end));
+    for (const anchor of connectionAnchors) {
+      if (normalizedPointOnSegment(anchor, start, end)) {
+        union(startKey, ensurePoint(anchor));
+      }
+    }
+  }
+
+  const namesByRoot = new Map();
+  const addName = (point, name) => {
+    const root = find(ensurePoint(point));
+    if (!namesByRoot.has(root)) {
+      namesByRoot.set(root, new Set());
+    }
+    namesByRoot.get(root).add(name);
+  };
+  for (const pin of physicalPins) {
+    addName(pin.at, pin.net);
+  }
+  for (const label of objects.labels) {
+    addName(label.at, label.text);
+  }
+  for (const symbol of objects.virtualPowerSymbols) {
+    if (symbol.classification === "global-power") {
+      addName(symbol.at, symbol.value);
+    }
+  }
+  const netAt = (point, label) => {
+    const names = [...(namesByRoot.get(find(ensurePoint(point))) ?? [])].sort();
+    if (names.length !== 1) {
+      throw new Error(`${label} has ambiguous normalized topology: ${names.join(", ")}`);
+    }
+    return names[0];
+  };
+
+  for (const wire of objects.wires) {
+    assertEqual(wire.net, netAt(wire.endpoints[0], `wire ${wire.uuid}`), `${wire.uuid} geometric net`);
+  }
+  for (const junction of objects.junctions) {
+    const incidentWires = objects.wires.filter((wire) =>
+      normalizedPointOnSegment(junction.at, wire.endpoints[0], wire.endpoints[1])
+    );
+    if (incidentWires.length === 0) {
+      throw new Error(`junction ${junction.uuid} is orphaned`);
+    }
+    assertEqual(junction.net, netAt(junction.at, `junction ${junction.uuid}`), `${junction.uuid} geometric net`);
+  }
+  for (const label of objects.labels) {
+    assertEqual(label.net, netAt(label.at, `label ${label.uuid}`), `${label.uuid} geometric net`);
+  }
+  for (const symbol of objects.virtualPowerSymbols) {
+    assertEqual(
+      symbol.net,
+      netAt(symbol.at, `virtual power symbol ${symbol.schematicUuid}`),
+      `${symbol.schematicUuid} geometric net`
+    );
+  }
+  for (const marker of objects.noConnects) {
+    const targetPins = physicalPins.filter(
+      (pin) => normalizedPointKey(pin.at) === normalizedPointKey(marker.at)
+    );
+    assertEqual(targetPins.length, 1, `${marker.uuid} geometric no-connect target count`);
+    assertEqual(marker.pinUuid, targetPins[0].pinUuid, `${marker.uuid} geometric no-connect target`);
+    assertEqual(marker.net, targetPins[0].net, `${marker.uuid} geometric no-connect net`);
+  }
+}
+
+function verifySchematicBoardComparison(connectivity, inventory, physicalPinsByComponentAndNumber) {
+  const comparison = connectivity.boardComparison;
+  const matchedBoardPads = [];
+  const excludedBoardPads = [];
+  const unmatchedElectricalPads = [];
+  const logicalBoardMembers = new Map();
+  const duplicateImplementations = [];
+
+  for (const component of inventory.components) {
+    const padsByNumber = new Map();
+    for (const footprint of component.boardFootprints) {
+      for (const pad of footprint.pins) {
+        if (!padsByNumber.has(pad.number)) {
+          padsByNumber.set(pad.number, []);
+        }
+        padsByNumber.get(pad.number).push({ footprint, pad });
+      }
+    }
+
+    for (const [number, pads] of padsByNumber) {
+      const schematicPin = physicalPinsByComponentAndNumber.get(`${component.schematicUuid}\0${number}`);
+      if (!schematicPin) {
+        for (const { footprint, pad } of pads) {
+          const captured = {
+            footprintReference: footprint.referenceAtCapture,
+            footprintUuid: footprint.uuid,
+            net: pad.net,
+            number: pad.number,
+            padUuid: pad.uuid,
+            reason:
+              (pad.number === "" || pad.number === "MP") && pad.net === null
+                ? "mechanical-or-footprint-only"
+                : "no-schematic-pin"
+          };
+          (captured.reason === "mechanical-or-footprint-only"
+            ? excludedBoardPads
+            : unmatchedElectricalPads
+          ).push(captured);
+        }
+        continue;
+      }
+
+      const padNets = [...new Set(pads.map(({ pad }) => pad.net))].sort(compareNullableText);
+      assertEqual(padNets, [schematicPin.net], `${component.referenceAtCapture}.${number} PCB net closure`);
+      if (!logicalBoardMembers.has(schematicPin.net)) {
+        logicalBoardMembers.set(schematicPin.net, new Set());
+      }
+      logicalBoardMembers.get(schematicPin.net).add(schematicPin.pinUuid);
+      for (const { pad } of pads) {
+        matchedBoardPads.push({ padUuid: pad.uuid, pinUuid: schematicPin.pinUuid });
+      }
+      if (component.boardFootprints.length > 1) {
+        duplicateImplementations.push({
+          boardPads: pads.map(({ pad }) => pad.uuid).sort(),
+          footprintUuids: [...new Set(pads.map(({ footprint }) => footprint.uuid))].sort(),
+          net: schematicPin.net,
+          pinNumber: number,
+          pinUuid: schematicPin.pinUuid,
+          reference: component.referenceAtCapture,
+          schematicUuid: component.schematicUuid,
+          reviewedIssue: "duplicate-c5-footprint"
+        });
+      }
+    }
+  }
+
+  matchedBoardPads.sort(compareByKey("padUuid"));
+  excludedBoardPads.sort(compareByKey("padUuid"));
+  unmatchedElectricalPads.sort(compareByKey("padUuid"));
+  duplicateImplementations.sort(compareByKey("pinUuid"));
+  assertEqual(comparison.matchedBoardPads, matchedBoardPads, "schematic/board pad crosswalk");
+  assertEqual(comparison.excludedBoardPads, excludedBoardPads, "non-electrical board-pad exclusions");
+  assertEqual(comparison.duplicateImplementations, duplicateImplementations, "duplicate-footprint comparison");
+  assertEqual(excludedBoardPads.length, 22, "exact non-electrical board-pad exclusion count");
+  assertEqual(
+    sha256(Buffer.from(`${excludedBoardPads.map((pad) => pad.padUuid).join("\n")}\n`)),
+    "d42db0afbd6d1c78c470e355a12f982519916b5d4424cf1501dd88ffa7a91213",
+    "exact non-electrical board-pad exclusion UUID digest"
+  );
+
+  for (const net of connectivity.nets) {
+    assertEqual(
+      [...(logicalBoardMembers.get(net.name) ?? [])].sort(),
+      net.memberPinUuids,
+      `${net.name} schematic/PCB logical partition`
+    );
+  }
+  assertEqual(
+    [...logicalBoardMembers.keys()].sort(),
+    connectivity.nets.map((net) => net.name),
+    "schematic/PCB named-net closure"
+  );
+
+  assertEqual(
+    unmatchedElectricalPads.map((pad) => ({
+      net: pad.net,
+      number: pad.number,
+      padUuid: pad.padUuid,
+      reference: pad.footprintReference
+    })),
+    [
+      {
+        net: null,
+        number: "A8",
+        padUuid: "3ae45182-b4b8-4610-bb0d-0e237ee03ce7",
+        reference: "J5"
+      },
+      {
+        net: null,
+        number: "B8",
+        padUuid: "46918cf2-1e2c-465d-8390-5c811d6f8b43",
+        reference: "J5"
+      }
+    ],
+    "exact J5 SBU discrepancy pads"
+  );
+  const discrepancy = {
+    detail:
+      "The USB-C footprint has unconnected A8 and B8 SBU pads, while the captured USB2-only schematic symbol has no corresponding pins.",
+    id: "j5-sbu-footprint-only-pads",
+    kind: "board-pads-without-schematic-pins",
+    padUuids: unmatchedElectricalPads.map((pad) => pad.padUuid),
+    references: [...new Set(unmatchedElectricalPads.map((pad) => pad.footprintReference))].sort()
+  };
+  const expectedDiscrepancies = [{
+    ...discrepancy,
+    fingerprint: sha256(Buffer.from(`${canonicalJson(discrepancy)}\n`))
+  }];
+  expectedDiscrepancies.sort(compareByKey("id"));
+  assertCanonicalObjects(comparison.discrepancies, "id", "schematic/board discrepancies");
+  assertEqual(comparison.discrepancies, expectedDiscrepancies, "schematic/board discrepancy closure");
+  assertCanonicalObjects(comparison.waivers, "id", "schematic/board waivers");
+  assertEqual(comparison.waivers.length, 1, "exact schematic/board waiver count");
+  assertEqual(
+    comparison.waivers[0]?.id,
+    "waive-j5-sbu-footprint-only-pads",
+    "exact schematic/board waiver id"
+  );
+  const discrepancyFingerprints = new Set(comparison.discrepancies.map((item) => item.fingerprint));
+  const waivedFingerprints = new Set();
+  for (const waiver of comparison.waivers) {
+    assertText(waiver.justification, `${waiver.id} justification`);
+    assertSha256(waiver.discrepancyFingerprint, `${waiver.id} discrepancy fingerprint`);
+    if (!discrepancyFingerprints.has(waiver.discrepancyFingerprint)) {
+      throw new Error(`${waiver.id} refers to a stale or unknown discrepancy`);
+    }
+    if (waivedFingerprints.has(waiver.discrepancyFingerprint)) {
+      throw new Error(`${waiver.id} duplicates a discrepancy waiver`);
+    }
+    waivedFingerprints.add(waiver.discrepancyFingerprint);
+  }
+  const openDiscrepancyCount = comparison.discrepancies.filter(
+    (item) => !waivedFingerprints.has(item.fingerprint)
+  ).length;
+  assertEqual(openDiscrepancyCount, 0, "open schematic/board discrepancy count");
+  assertEqual(comparison.status, "equivalent-with-exact-waiver", "schematic/board comparison status");
+  assertEqual(
+    comparison.summary.openDiscrepancyCount,
+    openDiscrepancyCount,
+    "schematic/board open discrepancy summary"
+  );
+  assertEqual(
+    comparison.summary.openDiscrepancyCount,
+    inventory.sourceFacts.schematicConnectivity?.comparisonOpenDiscrepancies,
+    "inventory open schematic/board discrepancy count"
+  );
+  assertEqual(
+    comparison.waivers.length,
+    inventory.sourceFacts.schematicConnectivity?.comparisonExactWaivers,
+    "inventory exact schematic/board waiver count"
+  );
+  assertEqual(comparison.summary, {
+    discrepancyCount: comparison.discrepancies.length,
+    duplicateImplementationPinCount: duplicateImplementations.length,
+    excludedBoardPadCount: excludedBoardPads.length,
+    matchedBoardPadCount: matchedBoardPads.length,
+    openDiscrepancyCount,
+    schematicPinCount: connectivity.counts.physicalPins
+  }, "schematic/board comparison summary");
+}
+
+function verifySchematicObjectArray(items, key, label, netNames, verifyObject) {
+  assertCanonicalObjects(items, key, label);
+  for (const item of items) {
+    assertUuid(item[key], `${label} ${key}`);
+    if (!netNames.has(item.net)) {
+      throw new Error(`${label} ${item[key]} refers to unknown net ${item.net}`);
+    }
+    verifyObject(item);
+  }
+}
+
+function verifyObjectMembership(net, field, objects, objectKey) {
+  assertUniqueStrings(net[field], `${net.name} ${field}`);
+  assertEqual(net[field], [...net[field]].sort(), `${net.name} ${field} order`);
+  assertEqual(
+    net[field],
+    objects.filter((item) => item.net === net.name).map((item) => item[objectKey]).sort(),
+    `${net.name} ${field} closure`
+  );
+}
+
+function assertPoint(value, label) {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    value.some((coordinate) => typeof coordinate !== "number" || !Number.isFinite(coordinate))
+  ) {
+    throw new Error(`${label} must be a finite [x, y] point`);
+  }
+}
+
+function normalizedPointKey(point) {
+  return `${point[0].toFixed(6)},${point[1].toFixed(6)}`;
+}
+
+function normalizedPointOnSegment(point, start, end) {
+  const cross =
+    (point[0] - start[0]) * (end[1] - start[1]) -
+    (point[1] - start[1]) * (end[0] - start[0]);
+  return (
+    Math.abs(cross) <= 1e-6 &&
+    point[0] >= Math.min(start[0], end[0]) - 1e-6 &&
+    point[0] <= Math.max(start[0], end[0]) + 1e-6 &&
+    point[1] >= Math.min(start[1], end[1]) - 1e-6 &&
+    point[1] <= Math.max(start[1], end[1]) + 1e-6
+  );
+}
+
+function compareByKey(key) {
+  return (left, right) =>
+    String(left[key]) < String(right[key]) ? -1 : String(left[key]) > String(right[key]) ? 1 : 0;
+}
+
+function compareNullableText(left, right) {
+  return String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function runMutationChecks(manifest, inventory, connectivity) {
   const mutations = [
-    ["component canonical order", (copy) => copy.components.reverse()],
-    ["net membership digest", (copy) => {
-      copy.components[0].boardFootprints[0].pins[0].net = "mutation-net";
+    ["component canonical order", (inventoryCopy) => inventoryCopy.components.reverse()],
+    ["net membership digest", (inventoryCopy) => {
+      inventoryCopy.components[0].boardFootprints[0].pins[0].net = "mutation-net";
     }],
-    ["cross-subsystem closure", (copy) => copy.crossSubsystemNets.pop()],
-    ["boundary declaration membership", (copy) => {
-      copy.crossSubsystemNets.find((item) => item.net === "AUD_CLK").declaration.id = "usb-device";
+    ["cross-subsystem closure", (inventoryCopy) => inventoryCopy.crossSubsystemNets.pop()],
+    ["boundary declaration membership", (inventoryCopy) => {
+      inventoryCopy.crossSubsystemNets.find((item) => item.net === "AUD_CLK").declaration.id = "usb-device";
     }],
-    ["package status closure", (copy) => {
-      copy.components[0].nocad.status = "invented";
+    ["package status closure", (inventoryCopy) => {
+      inventoryCopy.components[0].nocad.status = "invented";
     }],
-    ["package mapping identity", (copy) => {
-      const mapped = copy.components.find((component) => component.nocad.status === "partial");
+    ["package mapping identity", (inventoryCopy) => {
+      const mapped = inventoryCopy.components.find((component) => component.nocad.status === "partial");
       mapped.nocad.packageId = null;
     }],
-    ["contract mapping identity", (copy) => {
-      const mapped = copy.interfaces.find((item) => item.nocad.status === "partial");
+    ["contract mapping identity", (inventoryCopy) => {
+      const mapped = inventoryCopy.interfaces.find((item) => item.nocad.status === "partial");
       mapped.nocad.contractId = null;
+    }],
+    ["schematic pin reassignment", (_inventoryCopy, connectivityCopy) => {
+      const pin = connectivityCopy.objects.physicalComponents[0].pins[0];
+      pin.net = pin.net === "+1V1" ? "+3V3" : "+1V1";
+    }],
+    ["schematic pin canonical order", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.objects.physicalComponents.find((component) => component.pins.length > 1).pins.reverse();
+    }],
+    ["schematic net canonical order", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.nets.reverse();
+    }],
+    ["schematic source identity", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.capture.sourceFile = "unknown.kicad_sch";
+      connectivityCopy.capture.sourceSha256 = undefined;
+    }],
+    ["schematic no-connect coordinate", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.objects.noConnects[0].at[0] += 1;
+    }],
+    ["schematic junction removal", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.objects.junctions.pop();
+    }],
+    ["power flag global merge", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.objects.virtualPowerSymbols.find(
+        (symbol) => symbol.classification === "erc-power-flag"
+      ).classification = "global-power";
+    }],
+    ["power flag library identity", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.objects.virtualPowerSymbols.find(
+        (symbol) => symbol.classification === "erc-power-flag"
+      ).libId = "power:GND";
+    }],
+    ["duplicate footprint net conflict", (inventoryCopy) => {
+      const component = inventoryCopy.components.find((item) => item.referenceAtCapture === "C5");
+      component.boardFootprints[1].pins.find((pin) => pin.number === "1").net = "GND";
+    }],
+    ["missing exact waiver", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.waivers.pop();
+    }],
+    ["stale exact waiver", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.waivers[0].discrepancyFingerprint = "0".repeat(64);
+    }],
+    ["renamed exact waiver", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.waivers[0].id = "generic-waiver";
+    }],
+    ["removed exact SBU discrepancy", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.discrepancies = [];
+      connectivityCopy.boardComparison.waivers = [];
+      connectivityCopy.boardComparison.summary.discrepancyCount = 0;
+      connectivityCopy.boardComparison.summary.openDiscrepancyCount = 0;
+    }],
+    ["missing mechanical exclusion", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.excludedBoardPads.pop();
+    }],
+    ["netted mechanical exclusion", (_inventoryCopy, connectivityCopy) => {
+      connectivityCopy.boardComparison.excludedBoardPads[0].net = "GND";
+    }],
+    ["widened exact waiver", (_inventoryCopy, connectivityCopy) => {
+      const discrepancy = connectivityCopy.boardComparison.discrepancies[0];
+      discrepancy.padUuids.push(connectivityCopy.boardComparison.excludedBoardPads[0].padUuid);
+      discrepancy.padUuids.sort();
+      const withoutFingerprint = { ...discrepancy };
+      delete withoutFingerprint.fingerprint;
+      discrepancy.fingerprint = sha256(Buffer.from(`${canonicalJson(withoutFingerprint)}\n`));
+      connectivityCopy.boardComparison.waivers[0].discrepancyFingerprint = discrepancy.fingerprint;
     }]
   ];
 
   for (const [label, mutate] of mutations) {
-    const copy = structuredClone(inventory);
-    mutate(copy);
+    const inventoryCopy = structuredClone(inventory);
+    const connectivityCopy = structuredClone(connectivity);
+    mutate(inventoryCopy, connectivityCopy);
     let rejected = false;
     try {
-      verifyReference(manifest, copy, manifest.id);
+      verifyReference(manifest, inventoryCopy, connectivityCopy, manifest.id);
     } catch {
       rejected = true;
     }
@@ -552,7 +1300,12 @@ function runMutationChecks(manifest, inventory) {
 
 async function verifyNoSourceCopies(referenceDirectory) {
   const entries = await readdir(referenceDirectory, { withFileTypes: true });
-  const allowed = new Set(["README.md", "inventory.json", "manifest.json"]);
+  const allowed = new Set([
+    "README.md",
+    "inventory.json",
+    "manifest.json",
+    "schematic-connectivity.json"
+  ]);
 
   for (const entry of entries) {
     if (!entry.isFile() || !allowed.has(entry.name)) {
@@ -649,7 +1402,7 @@ function verifyImplementationMapping(mapping, identityField, statuses, label) {
 }
 
 function assertEqual(actual, expected, label) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  if (canonicalJson(actual) !== canonicalJson(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);
   }
 }

@@ -29,6 +29,8 @@
 - A reference with no explicit license, current DRC/ERC, fabrication linkage, or hardware-test evidence is `NOASSERTION`, non-golden, and unqualified even if source and production artifacts exist. Stale reports must say they do not apply to the pinned design.
 - Preserve schematic UUID, footprint UUID, and pad UUID as separate identity levels. Keep 1:N and display-reference anomalies explicit, use pad UUID for net membership, and require one subsystem owner plus closed package/contract/power status for every normalized object.
 - Source-free reference verification must read no external project path and must not claim to re-prove extraction. Validate repository-local hashes, canonical order, internal closure, constraints, and deliberate mutations; record omitted schematic-wire or power-symbol membership as first-class remaining work.
+- The G1 schematic capture uses KiCad's canonical netlist for named physical-pin membership and embedded library geometry for wire, label, junction, power-symbol, and no-connect evidence. In KiCad screen coordinates, rotate library pins first, then apply placed-symbol mirror: mirror x flips the resulting y coordinate and mirror y flips the resulting x coordinate.
+- The normalized north-star schematic and PCB have exact logical connectivity for all 337 represented physical pins. Keep 22 blank/mounting/thermal pads as exact non-electrical exclusions, J5 A8/B8 as one fingerprinted SBU waiver, and duplicate C5 as a separately validated physical-identity issue.
 
 ## Resolver Determinism
 

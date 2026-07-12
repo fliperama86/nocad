@@ -1,7 +1,7 @@
 {
   "schema": "nocad.north-star-inventory.v1",
   "referenceId": "pico-retrodigital-main",
-  "captureBasis": "Derived facts were recorded from the pinned local working-tree files, but the source files are intentionally omitted. Repository verification validates this normalized record and does not re-prove extraction.",
+  "captureBasis": "Normalized facts were extracted from the content-pinned KiCad schematic and PCB working-tree files. Repository verification is source-free and validates local hashes, canonical identity, schematic topology closure, and the schematic-to-PCB comparison; it does not re-prove extraction from the omitted source.",
   "sourceFacts": {
     "kicad": {
       "schematic": {
@@ -39,15 +39,24 @@
       "schematicNoConnectMarkers": 20,
       "schematicLocalLabels": 24,
       "schematicGlobalLabels": 134,
-      "schematicHierarchicalSheets": 0
+      "schematicHierarchicalSheets": 0,
+      "schematicPhysicalPins": 337,
+      "schematicHiddenPhysicalPins": 17,
+      "schematicIntrinsicNoConnectPins": 3,
+      "schematicNets": 123
     },
     "outline": {
       "widthMm": 50,
       "heightMm": 38
     },
     "schematicConnectivity": {
-      "scope": "Physical component identity and board-pad connectivity are normalized exhaustively. Virtual power symbols are counted but not individually normalized, and schematic wire geometry/connectivity was not converted to stable endpoint membership in this capture.",
-      "powerSymbolCoverage": "counted-not-individually-normalized",
+      "scope": "All placed physical pins, virtual power symbols, wires, junctions, labels, and explicit no-connect markers are normalized for the single root sheet. Logical pin partitions are compared against PCB pad membership.",
+      "artifact": "schematic-connectivity.json",
+      "aggregateSha256": "6541d756246bc6a887407ef7d468b10b41d16420532f6cf91540ad14547caff9",
+      "powerSymbolCoverage": "individually-normalized",
+      "comparisonStatus": "equivalent-with-exact-waiver",
+      "comparisonOpenDiscrepancies": 0,
+      "comparisonExactWaivers": 1,
       "ercStatus": "unknown",
       "ercEvidenceFound": false
     },
@@ -6261,11 +6270,6 @@
       "id": "procurement",
       "status": "partial",
       "detail": "Some fields and stale BOM outputs exist, but completeness and current-source linkage are not established."
-    },
-    {
-      "id": "schematic-power-symbol-closure",
-      "status": "partial",
-      "detail": "Sixty virtual power symbols are counted, but their individual identities and schematic-wire memberships are not normalized in this capture."
     }
   ],
   "supportCircuits": [

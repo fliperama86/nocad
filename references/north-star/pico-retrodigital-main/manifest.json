@@ -158,8 +158,8 @@
   },
   "inventory": {
     "path": "inventory.json",
-    "bytes": 195217,
-    "sha256": "b2e5119c46aacfd85e2151bb367529133503fbde7620a6c07af1e047d4e9a958"
+    "bytes": 195441,
+    "sha256": "507a877057e11de50b0674d4a87196b466da6e381daf5f05ae125b5801f3f73e"
   },
   "rights": {
     "sourceOrigin": "user-provided local repository",
@@ -199,7 +199,6 @@
       "hardware-test status is unknown",
       "license is NOASSERTION",
       "one untracked footprint exists beside the project",
-      "schematic wire and virtual power-symbol membership is not normalized",
       "stale production and DRC outputs do not qualify the pinned board",
       "the primary PCB differs from repository HEAD"
     ]
@@ -221,9 +220,9 @@
       "detail": "The external rpi-lib-kicad-rp235x revision used for the captured RP2354B source is unavailable."
     },
     {
-      "id": "schematic-connectivity-not-normalized",
+      "id": "j5-sbu-footprint-only-pads",
       "severity": "info",
-      "detail": "PCB pad membership is the normalized manufacturing connectivity view; schematic wires and virtual power-symbol memberships are not individually normalized."
+      "detail": "J5 footprint pads A8 and B8 are unconnected SBU contacts omitted by the USB2-only schematic symbol; the exact discrepancy is fingerprinted and waived in schematic-connectivity.json."
     },
     {
       "id": "stale-drc",
@@ -245,5 +244,12 @@
       "severity": "info",
       "detail": "An untracked TDP158 footprint was present but is not referenced by the captured board."
     }
-  ]
+  ],
+  "schematicConnectivity": {
+    "path": "schematic-connectivity.json",
+    "bytes": 382098,
+    "sha256": "508229948271c7ab016f2f386922a481842058bb16a9feb425a3aa6edbd502c6",
+    "aggregateSha256": "6541d756246bc6a887407ef7d468b10b41d16420532f6cf91540ad14547caff9",
+    "comparisonStatus": "equivalent-with-exact-waiver"
+  }
 }
