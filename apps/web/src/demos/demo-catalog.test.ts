@@ -1,5 +1,5 @@
 import { builtInComponentLibrary } from "@nocad/component-library";
-import { resolveProject, type DefinitionCatalog } from "@nocad/intent-core";
+import { ProjectDocument, resolveProject, type DefinitionCatalog } from "@nocad/intent-core";
 import {
   createFixtureResolutionEnvironment,
   fixtureCatalog
@@ -24,6 +24,7 @@ describe("demo catalog boundary", () => {
 
     for (const example of createDemoProjectExamples(descriptors)) {
       const source = example.createSource();
+      expect(() => new ProjectDocument(source), example.id).not.toThrow();
       const authoredComponents = source.nodes.flatMap((node) =>
         node.kind === "component" ? [node.component] : []
       );

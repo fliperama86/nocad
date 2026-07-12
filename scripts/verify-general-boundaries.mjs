@@ -31,7 +31,9 @@ const libraryInterpreterFiles = (await sourceFiles("packages/component-library/s
 );
 
 await rejectPatterns(engineFiles, specificBehaviorPatterns, "portable engine");
-await rejectPatterns(["apps/web/src/App.tsx", ...workspaceFiles], specificBehaviorPatterns, "production workspace");
+const productionUiFiles = ["apps/web/src/App.tsx", "apps/web/src/catalog-templates.ts", ...workspaceFiles];
+
+await rejectPatterns(productionUiFiles, specificBehaviorPatterns, "production workspace");
 await rejectPatterns(libraryInterpreterFiles, specificBehaviorPatterns, "definition-library interpreter");
 await rejectPatterns(
   await sourceFiles("packages/component-library/src"),
@@ -45,7 +47,7 @@ await rejectPatterns(
 );
 
 await rejectPatterns(
-  ["apps/web/src/App.tsx", ...workspaceFiles],
+  productionUiFiles,
   [/@nocad\/intent-core\/fixtures/, /(?:^|["'])\.\.\/.*demos\//m, /kicad-fixture/i],
   "production UI import boundary"
 );

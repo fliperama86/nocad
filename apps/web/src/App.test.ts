@@ -1,11 +1,35 @@
 import { loadBuiltInDefinitionCatalog } from "@nocad/component-library";
-import { createProjectSourceSet, resolveProject } from "@nocad/intent-core";
+import { createProjectSourceSet, ProjectDocument, resolveProject } from "@nocad/intent-core";
 import type { ProjectSource, ResolutionEnvironment } from "@nocad/intent-core";
 import { describe, expect, it } from "vitest";
 
+import { componentTemplate } from "./catalog-templates";
 import { matchFunctionComponentConnection } from "./features/workspace/function-connection-intent";
 
 describe("production definition catalog", () => {
+  it("authors every real component template without undefined optional fields", async () => {
+    const catalog = await loadBuiltInDefinitionCatalog();
+
+    for (const [index, descriptor] of catalog.library.componentDescriptors.entries()) {
+      const template = componentTemplate(descriptor);
+      const document = new ProjectDocument({
+        schema: "nocad.project.v0",
+        id: `template-${index}`,
+        name: "Template test",
+        dependencies: {},
+        nodes: [],
+        edges: []
+      });
+
+      expect(() =>
+        document.apply({
+          op: "addNode",
+          node: { ...template.node, id: `node-${index}` }
+        })
+      ).not.toThrow();
+    }
+  });
+
   it("supports a real RP2354B to video FFC semantic path", async () => {
     const catalog = await loadBuiltInDefinitionCatalog();
     const source = directVideoProject();

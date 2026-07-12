@@ -102,7 +102,7 @@ export function createDemoNodeTemplates(
           descriptor.id === "@nocad/connectors:TE_1-1734839-4"
             ? "Video FFC connector"
             : descriptor.partNumber,
-        package: descriptor.devicePackage,
+        ...(descriptor.devicePackage ? { package: descriptor.devicePackage } : {}),
         refdesHint: descriptor.id === "@nocad/connectors:TE_1-1734839-4" ? "J?" : "U?"
       }
     })),
@@ -142,16 +142,26 @@ function replaceFixtureVideoParts(
     ...source,
     nodes: source.nodes.map((node) => {
       if (node.kind === "component" && node.role === "hdmi_port") {
+        const { package: _package, ...nodeWithoutPackage } = node;
+        const devicePackage = packageFor("@nocad/connectors:TE_1-1734839-4");
+
         return {
-          ...node,
+          ...nodeWithoutPackage,
           component: "@nocad/connectors:TE_1-1734839-4",
           label: "Video FFC connector",
-          package: packageFor("@nocad/connectors:TE_1-1734839-4")
+          ...(devicePackage ? { package: devicePackage } : {})
         };
       }
 
       if (node.kind === "component" && (node.role === "mcu" || node.role === "video_source")) {
-        return { ...node, component: sourceComponent, package: packageFor(sourceComponent) };
+        const { package: _package, ...nodeWithoutPackage } = node;
+        const devicePackage = packageFor(sourceComponent);
+
+        return {
+          ...nodeWithoutPackage,
+          component: sourceComponent,
+          ...(devicePackage ? { package: devicePackage } : {})
+        };
       }
 
       return node.kind === "intent.function" ? disableUncatalogedGeneratedParts(node) : node;

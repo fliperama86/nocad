@@ -47,6 +47,7 @@
 
 ## Project Documents
 
+- Omit absent optional fields when constructing project nodes, edges, and patches. Never author properties with `undefined`; `ProjectDocument` correctly rejects them as `PROJECT_JSON_LOSSY` because JSON cannot preserve the distinction.
 - Public document patches target stable node/edge IDs. Array indices belong only to generated inverse operations used to restore exact ordering.
 - Keep `getSnapshot()` frozen and identity-stable until a real document change so external-store consumers are safe. Reject no-ops without history changes, make batches atomic, deep-clone exposed records/copies, and restore absent optional containers exactly during undo.
 - Validate JSON-only data at source and patch ingress without reconstructing known fields, so unknown future keys survive save/load while undefined, non-finite and negative-zero numbers, BigInt, functions, symbols, cycles, sparse/noncanonical arrays, accessors, and hidden data are rejected.

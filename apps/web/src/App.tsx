@@ -1,15 +1,12 @@
 import { loadBuiltInDefinitionCatalog } from "@nocad/component-library";
-import type {
-  ComponentDescriptor,
-  FunctionAuthoringDescriptor,
-  LoadedDefinitionCatalog
-} from "@nocad/component-library";
+import type { LoadedDefinitionCatalog } from "@nocad/component-library";
 import {
   createProjectSourceSet,
   type ResolutionEnvironment
 } from "@nocad/intent-core";
 import { useEffect, useMemo, useState } from "react";
 
+import { componentTemplate, functionTemplate } from "./catalog-templates";
 import {
   ProjectWorkspaceApp,
   type WorkspaceNodeTemplate
@@ -92,55 +89,13 @@ function LoadedWorkspace({ catalog }: { catalog: LoadedDefinitionCatalog }) {
   );
   const nodeTemplates = useMemo<WorkspaceNodeTemplate[]>(
     () => [
-      ...catalog.library.componentDescriptors.map((descriptor) => ({
-        dependency: {
-          name: descriptor.package.name,
-          version: descriptor.package.version
-        },
-        description: descriptorDescription(descriptor),
-        id: descriptor.id,
-        label: `${descriptor.manufacturer} ${descriptor.partNumber}`,
-        node: {
-          kind: "component" as const,
-          component: descriptor.id,
-          label: descriptor.partNumber,
-          package: descriptor.devicePackage
-        }
-      })),
+      ...catalog.library.componentDescriptors.map(componentTemplate),
       ...catalog.library.functionDescriptors.map(functionTemplate)
     ],
     [catalog]
   );
 
   return <ProjectWorkspaceApp environment={environment} nodeTemplates={nodeTemplates} />;
-}
-
-function functionTemplate(descriptor: FunctionAuthoringDescriptor): WorkspaceNodeTemplate {
-  return {
-    dependency: {
-      name: descriptor.package.name,
-      version: descriptor.package.version
-    },
-    description: `Semantic function from ${descriptor.package.name}.`,
-    id: `function:${descriptor.id}`,
-    label: descriptor.label,
-    node: {
-      kind: "intent.function",
-      function: descriptor.id,
-      label: descriptor.label,
-      ...(descriptor.defaultInclude ? { include: { ...descriptor.defaultInclude } } : {}),
-      ...(descriptor.defaultRequirements ? { requirements: { ...descriptor.defaultRequirements } } : {})
-    }
-  };
-}
-
-function descriptorDescription(descriptor: ComponentDescriptor) {
-  const coverage =
-    descriptor.coverage === "complete"
-      ? "Complete component definition."
-      : "Interface definition, not package-complete.";
-
-  return `${descriptor.description}. ${coverage}`;
 }
 
 function WorkspaceStatus({ message, tone = "default" }: { message: string; tone?: "default" | "error" }) {
