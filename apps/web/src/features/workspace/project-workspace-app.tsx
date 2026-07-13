@@ -44,8 +44,9 @@ import {
   providerRequirementPortFromHandle
 } from "./provider-requirement-handles";
 import { ResolutionPanel } from "./resolution-panel";
+import { SchematicPanel } from "./schematic-panel";
 
-type WorkspaceTab = "graph" | "pcb" | "resolution" | "diagnostics" | "json";
+type WorkspaceTab = "graph" | "schematic" | "pcb" | "resolution" | "diagnostics" | "json";
 type NodePositions = Record<string, XYPosition>;
 type GraphIdPrefix = "edge" | "node";
 type WithoutId<T> = T extends { id: string } ? Omit<T, "id"> : never;
@@ -95,6 +96,7 @@ function createEmptyProjectSource(): ProjectSource {
 
 const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "graph", label: "Graph" },
+  { id: "schematic", label: "Schematic" },
   { id: "pcb", label: "PCB" },
   { id: "resolution", label: "Resolution" },
   { id: "diagnostics", label: "Diagnostics" },
@@ -750,6 +752,8 @@ export function ProjectWorkspaceApp({
                   onSelectedNodeChange={setSelectedGraphNode}
                   positions={positions}
                   resolved={resolved}
+                  selectedEdgeId={selectedEdgeId}
+                  selectedNodeId={selectedNodeId}
                   source={source}
                 />
                 {propertiesCollapsed ? (
@@ -796,6 +800,21 @@ export function ProjectWorkspaceApp({
                     />
                   </div>
                 )}
+              </div>
+            ) : null}
+
+            {activeTab === "schematic" ? (
+              <div aria-labelledby="schematic-tab" className="h-full min-h-0" id="schematic-panel" role="tabpanel">
+                <SchematicPanel
+                  onSelectionChange={({ edgeId, nodeId }) => {
+                    setSelectedGraphEdge(edgeId);
+                    setSelectedGraphNode(nodeId);
+                  }}
+                  resolved={resolved}
+                  selectedEdgeId={selectedEdgeId}
+                  selectedNodeId={selectedNodeId}
+                  source={source}
+                />
               </div>
             ) : null}
 

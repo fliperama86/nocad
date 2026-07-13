@@ -1,0 +1,4 @@
+{
+  "extends": "@nocad/typescript-config/node.json",
+  "include": ["src", "vitest.config.ts", "eslint.config.mjs"]
+}

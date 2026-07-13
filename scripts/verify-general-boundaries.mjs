@@ -29,8 +29,17 @@ const libraryInterpreterFiles = (await sourceFiles("packages/component-library/s
   !file.includes("/definitions/") &&
   !["built-in-manifest.ts", "catalog-manifest.ts"].includes(path.basename(file))
 );
+const editorCoreFiles = (await sourceFiles("packages/editor-core/src")).filter(
+  (file) => !file.endsWith(".test.ts")
+);
 
 await rejectPatterns(engineFiles, specificBehaviorPatterns, "portable engine");
+await rejectPatterns(editorCoreFiles, specificBehaviorPatterns, "portable editor core");
+await rejectPatterns(
+  editorCoreFiles,
+  [/from\s+["'](?:react|react-dom|electron|@xyflow\/)/],
+  "portable editor core runtime boundary"
+);
 const productionUiFiles = ["apps/web/src/App.tsx", "apps/web/src/catalog-templates.ts", ...workspaceFiles];
 
 await rejectPatterns(productionUiFiles, specificBehaviorPatterns, "production workspace");
@@ -63,7 +72,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `General boundaries verified across ${engineFiles.length} engine, ${workspaceFiles.length} workspace, and ${libraryInterpreterFiles.length} library interpreter files.`
+  `General boundaries verified across ${engineFiles.length} engine, ${editorCoreFiles.length} editor-core, ${workspaceFiles.length} workspace, and ${libraryInterpreterFiles.length} library interpreter files.`
 );
 
 async function rejectPatterns(files, patterns, boundary) {

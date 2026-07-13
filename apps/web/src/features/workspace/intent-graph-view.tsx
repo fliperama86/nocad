@@ -27,6 +27,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Panel } from "./panel";
+import { reconcileControlledSelection } from "./selection-reconciliation";
 import {
   providerRequirementHandlesForNode,
   providerRequirementTargetHandle,
@@ -79,6 +80,8 @@ export function IntentGraphView({
   onSelectedNodeChange,
   positions,
   resolved,
+  selectedEdgeId,
+  selectedNodeId,
   source
 }: {
   catalog: DefinitionCatalog;
@@ -98,35 +101,60 @@ export function IntentGraphView({
   onSelectedNodeChange: (nodeId: string | undefined) => void;
   positions: NodePositions;
   resolved: ResolvedProject;
+  selectedEdgeId?: string;
+  selectedNodeId?: string;
   source: ProjectSource;
 }) {
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [flowReady, setFlowReady] = useState(false);
   const flowContainerRef = useRef<HTMLDivElement>(null);
-  const flowModel = useMemo(() => buildFlowModel(source, resolved, positions, catalog), [catalog, positions, source, resolved]);
+  const flowModel = useMemo(
+    () => buildFlowModel(source, resolved, positions, catalog, selectedNodeId, selectedEdgeId),
+    [catalog, positions, resolved, selectedEdgeId, selectedNodeId, source]
+  );
   const [flowNodes, setFlowNodes] = useState<IntentFlowNode[]>(flowModel.nodes);
   const [flowEdges, setFlowEdges] = useState<Edge[]>(flowModel.edges);
   const previousGraphRevisionRef = useRef(graphRevision);
+  const localSelectionRef = useRef({
+    edgeIds: selectedEdgeId ? [selectedEdgeId] : [],
+    nodeIds: selectedNodeId ? [selectedNodeId] : []
+  });
+  const selectedNodeIds = flowNodes.filter((node) => node.selected).map((node) => node.id);
+  const selectedEdgeIds = flowEdges.filter((edge) => edge.selected && edge.deletable !== false).map((edge) => edge.id);
   const hasSelection = selectedNodeIds.length > 0 || selectedEdgeIds.length > 0;
 
   useEffect(() => {
     const shouldResetGraphState = previousGraphRevisionRef.current !== graphRevision;
-    const nextNodeIds = new Set(flowModel.nodes.map((node) => node.id));
-    const nextEdgeIds = new Set(flowModel.edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id));
+    const controlledSelection = selectedEdgeId
+      ? `edge:${selectedEdgeId}`
+      : selectedNodeId
+        ? `node:${selectedNodeId}`
+        : undefined;
+    const localSelection = [
+      ...localSelectionRef.current.nodeIds.map((id) => `node:${id}`),
+      ...localSelectionRef.current.edgeIds.map((id) => `edge:${id}`)
+    ];
+    const reconciledSelection = shouldResetGraphState
+      ? new Set(controlledSelection ? [controlledSelection] : [])
+      : reconcileControlledSelection(localSelection, controlledSelection);
+    const reconciledNodeIds = new Set(
+      [...reconciledSelection].filter((id) => id.startsWith("node:")).map((id) => id.slice(5))
+    );
+    const reconciledEdgeIds = new Set(
+      [...reconciledSelection].filter((id) => id.startsWith("edge:")).map((id) => id.slice(5))
+    );
 
     previousGraphRevisionRef.current = graphRevision;
-    setFlowNodes((currentNodes) => reconcileNodes(currentNodes, flowModel.nodes, shouldResetGraphState));
-    setFlowEdges((currentEdges) => reconcileEdges(currentEdges, flowModel.edges, shouldResetGraphState));
-    setSelectedNodeIds((currentIds) => {
-      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextNodeIds.has(id));
-      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
-    });
-    setSelectedEdgeIds((currentIds) => {
-      const nextIds = shouldResetGraphState ? [] : currentIds.filter((id) => nextEdgeIds.has(id));
-      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
-    });
-  }, [flowModel.edges, flowModel.nodes, graphRevision]);
+    localSelectionRef.current = {
+      edgeIds: [...reconciledEdgeIds],
+      nodeIds: [...reconciledNodeIds]
+    };
+    setFlowNodes((currentNodes) =>
+      reconcileNodes(currentNodes, flowModel.nodes, shouldResetGraphState, reconciledNodeIds)
+    );
+    setFlowEdges((currentEdges) =>
+      reconcileEdges(currentEdges, flowModel.edges, shouldResetGraphState, reconciledEdgeIds)
+    );
+  }, [flowModel.edges, flowModel.nodes, graphRevision, selectedEdgeId, selectedNodeId]);
 
   useEffect(() => {
     const container = flowContainerRef.current;
@@ -147,9 +175,8 @@ export function IntentGraphView({
   const updateSelection = useCallback<OnSelectionChangeFunc<IntentFlowNode, Edge>>(({ edges, nodes }) => {
     const nextNodeIds = nodes.map((node) => node.id);
     const nextEdgeIds = edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
+    localSelectionRef.current = { edgeIds: nextEdgeIds, nodeIds: nextNodeIds };
 
-    setSelectedNodeIds((currentNodeIds) => (sameStringList(currentNodeIds, nextNodeIds) ? currentNodeIds : nextNodeIds));
-    setSelectedEdgeIds((currentEdgeIds) => (sameStringList(currentEdgeIds, nextEdgeIds) ? currentEdgeIds : nextEdgeIds));
     if (nextEdgeIds.length > 0) {
       onSelectedEdgeChange(nextEdgeIds[0]);
       onSelectedNodeChange(undefined);
@@ -171,8 +198,9 @@ export function IntentGraphView({
   }, []);
 
   const clearSelection = useCallback(() => {
-    setSelectedEdgeIds([]);
-    setSelectedNodeIds([]);
+    localSelectionRef.current = { edgeIds: [], nodeIds: [] };
+    setFlowEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: false })));
+    setFlowNodes((currentNodes) => currentNodes.map((node) => ({ ...node, selected: false })));
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
     onCanvasPaneClick?.();
@@ -191,10 +219,9 @@ export function IntentGraphView({
     }
 
     onRemoveSelection({ edgeIds: selectedEdgeIds, nodeIds: selectedNodeIds });
+    localSelectionRef.current = { edgeIds: [], nodeIds: [] };
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
-    setSelectedEdgeIds([]);
-    setSelectedNodeIds([]);
   }, [hasSelection, onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange, selectedEdgeIds, selectedNodeIds]);
 
   const removeDeletedSelection = useCallback(({ edges, nodes }: { edges: Edge[]; nodes: IntentFlowNode[] }) => {
@@ -202,10 +229,9 @@ export function IntentGraphView({
       edgeIds: edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id),
       nodeIds: nodes.map((node) => node.id)
     });
+    localSelectionRef.current = { edgeIds: [], nodeIds: [] };
     onSelectedEdgeChange(undefined);
     onSelectedNodeChange(undefined);
-    setSelectedEdgeIds([]);
-    setSelectedNodeIds([]);
   }, [onRemoveSelection, onSelectedEdgeChange, onSelectedNodeChange]);
 
   const finishConnection = useCallback((_: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
@@ -294,17 +320,14 @@ export function IntentGraphView({
   );
 }
 
-function sameStringList(left: string[], right: string[]) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 function reconcileNodes(
   currentNodes: IntentFlowNode[],
   nextNodes: IntentFlowNode[],
-  resetGraphState: boolean
+  resetGraphState: boolean,
+  selectedIds: ReadonlySet<string>
 ) {
   if (resetGraphState) {
-    return nextNodes;
+    return nextNodes.map((node) => ({ ...node, selected: selectedIds.has(node.id) }));
   }
 
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
@@ -317,15 +340,20 @@ function reconcileNodes(
           ...nextNode,
           dragging: currentNode.dragging,
           position: currentNode.position,
-          selected: currentNode.selected
+          selected: selectedIds.has(nextNode.id)
         }
       : nextNode;
   });
 }
 
-function reconcileEdges(currentEdges: Edge[], nextEdges: Edge[], resetGraphState: boolean) {
+function reconcileEdges(
+  currentEdges: Edge[],
+  nextEdges: Edge[],
+  resetGraphState: boolean,
+  selectedIds: ReadonlySet<string>
+) {
   if (resetGraphState) {
-    return nextEdges;
+    return nextEdges.map((edge) => ({ ...edge, selected: selectedIds.has(edge.id) }));
   }
 
   const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
@@ -336,7 +364,7 @@ function reconcileEdges(currentEdges: Edge[], nextEdges: Edge[], resetGraphState
     return currentEdge
       ? {
           ...nextEdge,
-          selected: currentEdge.selected
+          selected: selectedIds.has(nextEdge.id)
         }
       : nextEdge;
   });
@@ -460,7 +488,9 @@ function buildFlowModel(
   source: ProjectSource,
   resolved: ResolvedProject,
   positions: NodePositions,
-  catalog: DefinitionCatalog
+  catalog: DefinitionCatalog,
+  selectedNodeId?: string,
+  selectedEdgeId?: string
 ): { edges: Edge[]; nodes: IntentFlowNode[] } {
   const reservations = collectReservations(source);
   const providerRequirementsByNode = new Map(
@@ -489,6 +519,7 @@ function buildFlowModel(
       },
       deletable: true,
       position: positions[node.id] ?? { x: 120 + index * 300, y: 160 },
+      selected: node.id === selectedNodeId,
       type: "intent"
     };
   });
@@ -520,6 +551,7 @@ function buildFlowModel(
         markerEnd: {
           type: MarkerType.ArrowClosed
         },
+        selected: edge.id === selectedEdgeId,
         source: edge.from.node,
         style: {
           stroke,

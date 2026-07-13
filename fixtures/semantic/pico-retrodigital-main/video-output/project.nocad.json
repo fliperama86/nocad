@@ -1,0 +1,139 @@
+{
+  "schema": "nocad.project.v0",
+  "id": "pico-retrodigital-main-video-output-logical-interface",
+  "name": "Pico RetroDigital main video output logical interface",
+  "dependencies": {
+    "@nocad/connectors": "0.1.0",
+    "@nocad/rp2350": "0.1.0",
+    "@nocad/video": "0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+      "kind": "component",
+      "component": "@nocad/rp2350:RP2354B",
+      "package": "QFN-80",
+      "label": "RP2354B",
+      "refdesHint": "U3"
+    },
+    {
+      "id": "video-output",
+      "kind": "intent.function",
+      "function": "@nocad/video:hdmi_output.v1",
+      "label": "HDMI-side FFC output",
+      "include": {
+        "tmds": true,
+        "ddc": true,
+        "hpd": false,
+        "cec": true
+      }
+    },
+    {
+      "id": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+      "kind": "component",
+      "component": "@nocad/connectors:TE_1-1734839-4",
+      "label": "HDMI-side FFC",
+      "refdesHint": "J3"
+    }
+  ],
+  "edges": [
+    {
+      "id": "video-provider",
+      "kind": "intent.provides",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "port": "video_out"
+      },
+      "to": {
+        "node": "video-output",
+        "port": "source"
+      },
+      "contract": "@nocad/video:hdmi_output.v1",
+      "strategy": {
+        "pinAssignment": "manual",
+        "providerMode": "custom_gpio"
+      },
+      "bindings": {
+        "clock_n": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio12"
+          }
+        },
+        "clock_p": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio13"
+          }
+        },
+        "tmds0_n": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio14"
+          }
+        },
+        "tmds0_p": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio15"
+          }
+        },
+        "tmds1_n": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio16"
+          }
+        },
+        "tmds1_p": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio17"
+          }
+        },
+        "tmds2_n": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio18"
+          }
+        },
+        "tmds2_p": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio19"
+          }
+        },
+        "ddc_sda": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio8"
+          }
+        },
+        "ddc_scl": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio9"
+          }
+        },
+        "cec": {
+          "from": {
+            "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+            "pin": "gpio10"
+          }
+        }
+      }
+    },
+    {
+      "id": "video-exposure",
+      "kind": "intent.exposes",
+      "from": {
+        "node": "video-output",
+        "port": "connector"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "port": "hdmi"
+      },
+      "contract": "@nocad/video:hdmi_output.v1"
+    }
+  ]
+}

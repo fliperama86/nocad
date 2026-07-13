@@ -1,0 +1,78 @@
+{
+  "schema": "nocad.semantic-fixture-manifest.v1",
+  "id": "pico-retrodigital-main-video-output-logical-interface",
+  "project": "project.nocad.json",
+  "expectation": "expected-resolution.json",
+  "status": {
+    "scope": "logical-interface-core",
+    "exactPhysicalParity": false,
+    "golden": false,
+    "hardwareQualified": false,
+    "license": "NOASSERTION"
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "role": "documentation",
+      "bytes": 1147,
+      "sha256": "dbab9a7338bdab939afe3a3489def8610ed5beb669c1a60726db05bcae9de95b"
+    },
+    {
+      "path": "expected-resolution.json",
+      "role": "expectation",
+      "bytes": 3165,
+      "sha256": "e55af36e2342b08b3fdbb68f1b25375045b7dc7d95f2d4968a2bcc9bdd8b8d7c"
+    },
+    {
+      "path": "project.nocad.json",
+      "role": "project",
+      "bytes": 3504,
+      "sha256": "f42a9802923f70d572e15393edd5f57ec794b401f3ce7a0b5e0c323344cddabb"
+    }
+  ],
+  "provenance": {
+    "sourceFree": true,
+    "reprovesExtraction": false,
+    "derivation": "manual-from-normalized-records",
+    "referenceId": "pico-retrodigital-main",
+    "artifacts": [
+      {
+        "path": "references/north-star/pico-retrodigital-main/inventory.json",
+        "role": "normalized-inventory",
+        "sha256": "507a877057e11de50b0674d4a87196b466da6e381daf5f05ae125b5801f3f73e"
+      },
+      {
+        "path": "references/north-star/pico-retrodigital-main/manifest.json",
+        "role": "reference-manifest",
+        "sha256": "d94903fb0df7671c39037af0d684eff693ba6e4cf1c5e3b06a2be86b0861528c"
+      },
+      {
+        "path": "references/north-star/pico-retrodigital-main/schematic-connectivity.json",
+        "role": "normalized-connectivity",
+        "sha256": "508229948271c7ab016f2f386922a481842058bb16a9feb425a3aa6edbd502c6"
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "id": "auxiliary-power-and-bias",
+      "status": "omitted",
+      "detail": "The source 5 V diode and decoupling path, CEC bias/protection path, and connector ground are outside this logical interface fixture."
+    },
+    {
+      "id": "hpd",
+      "status": "unverified-omitted",
+      "detail": "J3 pin 2 is auto-named in the pinned reference and its HPD role is unverified. HPD and the R2 10K pull-up branch to +5V are explicitly omitted."
+    },
+    {
+      "id": "physical-series-bank",
+      "status": "omitted",
+      "detail": "The eight captured 220 ohm 0402 series resistors have no qualified MPN and are not represented as generated or physical components."
+    },
+    {
+      "id": "physical-parity",
+      "status": "not-claimed",
+      "detail": "The fixture does not claim exact schematic, footprint, placement, routing, fabrication, or as-built parity."
+    }
+  ]
+}

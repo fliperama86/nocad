@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@nocad/component-library": "workspace:*",
+    "@nocad/editor-core": "workspace:*",
     "@nocad/intent-core": "workspace:*",
     "@xyflow/react": "^12.10.2",
     "clsx": "^2.1.1",

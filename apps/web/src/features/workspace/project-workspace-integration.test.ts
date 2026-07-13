@@ -34,8 +34,10 @@ describe("ProjectWorkspaceApp project document integration", () => {
 
   it("keeps graph positions ephemeral while pruning deleted child selections", () => {
     expect(appSource).not.toContain("Object.fromEntries(Object.entries(currentPositions).filter");
-    expect(graphSource).toContain("currentIds.filter((id) => nextNodeIds.has(id))");
-    expect(graphSource).toContain("currentIds.filter((id) => nextEdgeIds.has(id))");
+    expect(graphSource).toContain("const selectedNodeIds = flowNodes.filter((node) => node.selected)");
+    expect(graphSource).toContain("const selectedEdgeIds = flowEdges.filter((edge) => edge.selected");
+    expect(graphSource).toContain("return nextNodes.map((nextNode)");
+    expect(graphSource).toContain("return nextEdges.map((nextEdge)");
   });
 
   it("commits mixed React Flow deletion as one cascade-safe document batch", () => {

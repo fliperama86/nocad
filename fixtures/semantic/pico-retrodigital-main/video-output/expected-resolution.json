@@ -1,0 +1,136 @@
+{
+  "schema": "nocad.semantic-fixture-expectation.v1",
+  "project": "pico-retrodigital-main-video-output-logical-interface",
+  "diagnostics": [],
+  "generatedComponents": [],
+  "signals": [
+    {
+      "signal": "cec",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio10"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "cec"
+      }
+    },
+    {
+      "signal": "clock_n",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio12"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "clock_n"
+      }
+    },
+    {
+      "signal": "clock_p",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio13"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "clock_p"
+      }
+    },
+    {
+      "signal": "ddc_scl",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio9"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "ddc_scl"
+      }
+    },
+    {
+      "signal": "ddc_sda",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio8"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "ddc_sda"
+      }
+    },
+    {
+      "signal": "tmds0_n",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio14"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds0_n"
+      }
+    },
+    {
+      "signal": "tmds0_p",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio15"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds0_p"
+      }
+    },
+    {
+      "signal": "tmds1_n",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio16"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds1_n"
+      }
+    },
+    {
+      "signal": "tmds1_p",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio17"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds1_p"
+      }
+    },
+    {
+      "signal": "tmds2_n",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio18"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds2_n"
+      }
+    },
+    {
+      "signal": "tmds2_p",
+      "from": {
+        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+        "pin": "gpio19"
+      },
+      "to": {
+        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+        "pin": "tmds2_p"
+      }
+    }
+  ],
+  "resolvedChoices": [
+    {
+      "sourceEdge": "video-provider",
+      "strategy": "manual",
+      "providerMode": "custom_gpio"
+    }
+  ]
+}
