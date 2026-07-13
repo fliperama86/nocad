@@ -1,6 +1,10 @@
+import { orientedRectsOverlap, projectBoardScene } from "@nocad/editor-core";
+import type { BoardSceneProjection, SceneSourceReference } from "@nocad/editor-core";
+
 import type {
   ComponentDefinition,
   DefinitionCatalog,
+  EndpointRef,
   GeneratedObject,
   ProjectNode,
   ProjectSource,
@@ -19,6 +23,7 @@ export type BoardProjection = {
   drcViolations: BoardDrcViolation[];
   obligations: BoardObligation[];
   ratsnest: BoardRatsnestEdge[];
+  scene: BoardSceneProjection;
   stats: {
     drcViolations: number;
     placedComponents: number;
@@ -39,6 +44,7 @@ export type BoardComponentProjection = {
   refdesHint?: string;
   role?: string;
   rotationDeg: number;
+  source: SceneSourceReference;
   violations: string[];
   widthMm: number;
   xMm: number;
@@ -48,13 +54,17 @@ export type BoardComponentProjection = {
 export type BoardRatsnestEdge = {
   contract?: string;
   from: BoardPoint;
+  fromEndpoint: EndpointRef;
   fromNode: string;
   id: string;
   kind: "highSpeed" | "power" | "signal";
   name: string;
+  netId: string;
   signal: string;
+  source: SceneSourceReference;
   sourceEdge: string;
   to: BoardPoint;
+  toEndpoint: EndpointRef;
   toNode: string;
 };
 
@@ -185,14 +195,7 @@ export function applyBoardComponentPlacement(
         }
       : component
   );
-  const movedComponent = components.find((component) => component.id === componentId);
-  const ratsnest = projection.ratsnest.map((edge) => ({
-    ...edge,
-    from: edge.fromNode === componentId && movedComponent
-      ? { xMm: movedComponent.xMm, yMm: movedComponent.yMm }
-      : edge.from,
-    to: edge.toNode === componentId && movedComponent ? { xMm: movedComponent.xMm, yMm: movedComponent.yMm } : edge.to
-  }));
+  const ratsnest = rebuildRatsnest(projection.ratsnest, components);
 
   return completeBoardProjection(projection.board, components, ratsnest);
 }
@@ -259,8 +262,8 @@ function completeBoardProjection(
     sourceId: violation.componentIds.join("+"),
     target: violation.target
   }));
-  const routingObligations = ratsnest.map((edge) => ({
-    id: `route_${edge.id}`,
+  const routingObligations = uniqueRatsnestNets(ratsnest).map((edge) => ({
+    id: `route_${encodeURIComponent(edge.netId)}`,
     kind: "routing" as const,
     message: `Route ${edge.name}`,
     severity: "warning" as const,
@@ -270,6 +273,26 @@ function completeBoardProjection(
       kind: "ratsnest" as const
     }
   }));
+  const scene = projectBoardScene({
+    board: {
+      bounds: { x: 0, y: 0, width: board.widthMm, height: board.heightMm },
+      id: board.id,
+      source: { id: board.id, kind: "board" }
+    },
+    components: componentsWithViolations.map((component) => ({
+      center: { x: component.xMm, y: component.yMm },
+      id: component.id,
+      rotationDeg: component.rotationDeg,
+      size: { width: component.widthMm, height: component.heightMm },
+      source: component.source
+    })),
+    connections: ratsnest.map((edge) => ({
+      from: { x: edge.from.xMm, y: edge.from.yMm },
+      id: edge.id,
+      source: edge.source,
+      to: { x: edge.to.xMm, y: edge.to.yMm }
+    }))
+  });
 
   return {
     board,
@@ -277,13 +300,26 @@ function completeBoardProjection(
     drcViolations,
     obligations: [...drcObligations, ...geometryObligations, ...placementObligations, ...routingObligations],
     ratsnest,
+    scene,
     stats: {
       drcViolations: drcViolations.length,
       placedComponents: componentsWithViolations.filter((component) => component.placed).length,
       totalComponents: componentsWithViolations.length,
-      unroutedNets: ratsnest.length
+      unroutedNets: routingObligations.length
     }
   };
+}
+
+function uniqueRatsnestNets(ratsnest: BoardRatsnestEdge[]): BoardRatsnestEdge[] {
+  const firstSegmentByNet = new Map<string, BoardRatsnestEdge>();
+
+  for (const edge of ratsnest) {
+    if (!firstSegmentByNet.has(edge.netId)) {
+      firstSegmentByNet.set(edge.netId, edge);
+    }
+  }
+
+  return [...firstSegmentByNet.values()];
 }
 
 function projectComponent(
@@ -312,6 +348,7 @@ function projectComponent(
     refdesHint: node.refdesHint,
     role: node.role,
     rotationDeg: authored?.rotationDeg ?? hinted?.rotationDeg ?? 0,
+    source: { id: node.id, kind: "node" },
     violations: [],
     widthMm: footprint.widthMm,
     xMm,
@@ -361,6 +398,11 @@ function projectGeneratedComponent(
     placementHint: generated.placementHint,
     role: node.role,
     rotationDeg: authored?.rotationDeg ?? 0,
+    source: {
+      id: generated.sourceEdge,
+      kind: "edge",
+      path: ["generated", generated.id]
+    },
     violations: [],
     widthMm: footprint.widthMm,
     xMm,
@@ -377,7 +419,7 @@ function generatedPlacementAnchor(generated: GeneratedObject, source: ProjectSou
 
   const edge = source.edges.find((candidate) => candidate.id === hint.edge);
 
-  if (!edge || edge.kind === "net.binding") {
+  if (!edge || edge.kind === "net.binding" || edge.kind === "net.authored") {
     return undefined;
   }
 
@@ -439,27 +481,193 @@ function projectRatsnest(
   source: ProjectSource,
   componentsById: Map<string, BoardComponentProjection>
 ): BoardRatsnestEdge[] {
-  const from = componentsById.get(net.endpoints.from.node);
-  const to = componentsById.get(net.endpoints.to.node);
-
-  if (!from || !to) {
-    return [];
-  }
-
-  return [
+  return createRatsnestSegments(
     {
-      contract: contractForEdge(source, net.sourceEdge),
-      from: { xMm: from.xMm, yMm: from.yMm },
-      fromNode: from.id,
+      contract: contractForEdge(source, net.realizes?.edge ?? net.sourceEdge),
+      endpoints: net.endpoints,
       id: net.id,
       kind: ratsnestKind(net),
       name: net.name,
-      signal: net.sourceMap.signal,
-      sourceEdge: net.sourceEdge,
-      to: { xMm: to.xMm, yMm: to.yMm },
-      toNode: to.id
+      signal: net.realizes?.signal ?? net.sourceMap.signal,
+      sourceEdge: net.sourceEdge
+    },
+    componentsById
+  );
+}
+
+type RatsnestNet = {
+  contract?: string;
+  endpoints: readonly EndpointRef[];
+  id: string;
+  kind: BoardRatsnestEdge["kind"];
+  name: string;
+  signal: string;
+  sourceEdge: string;
+};
+
+function createRatsnestSegments(
+  net: RatsnestNet,
+  componentsById: ReadonlyMap<string, BoardComponentProjection>
+): BoardRatsnestEdge[] {
+  const endpoints = canonicalEndpoints(net.endpoints).flatMap((endpoint) => {
+    const component = componentsById.get(endpoint.node);
+
+    return component ? [{ component, endpoint, key: endpointKey(endpoint) }] : [];
+  });
+
+  if (endpoints.length < 2) {
+    return [];
+  }
+
+  return minimumSpanningTree(endpoints)
+    .sort((left, right) => left.pairKey.localeCompare(right.pairKey))
+    .map(({ left, pairKey, right }) => {
+      const segmentId = endpoints.length === 2 ? net.id : `${net.id}:segment:${pairKey}`;
+
+      return {
+        contract: net.contract,
+        from: { xMm: left.component.xMm, yMm: left.component.yMm },
+        fromEndpoint: left.endpoint,
+        fromNode: left.component.id,
+        id: segmentId,
+        kind: net.kind,
+        name: net.name,
+        netId: net.id,
+        signal: net.signal,
+        source: {
+          id: net.sourceEdge,
+          kind: "edge",
+          path: ["nets", net.id, "segments", pairKey]
+        },
+        sourceEdge: net.sourceEdge,
+        to: { xMm: right.component.xMm, yMm: right.component.yMm },
+        toEndpoint: right.endpoint,
+        toNode: right.component.id
+      };
+    });
+}
+
+function rebuildRatsnest(
+  edges: readonly BoardRatsnestEdge[],
+  components: readonly BoardComponentProjection[]
+): BoardRatsnestEdge[] {
+  const componentsById = new Map(components.map((component) => [component.id, component]));
+  const edgesByNet = new Map<string, BoardRatsnestEdge[]>();
+
+  for (const edge of edges) {
+    const current = edgesByNet.get(edge.netId) ?? [];
+    current.push(edge);
+    edgesByNet.set(edge.netId, current);
+  }
+
+  return [...edgesByNet.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([netId, netEdges]) => {
+      const first = [...netEdges].sort((left, right) => left.id.localeCompare(right.id))[0];
+
+      if (!first) return [];
+      const endpointsByKey = new Map<string, EndpointRef>();
+      for (const edge of netEdges) {
+        endpointsByKey.set(endpointKey(edge.fromEndpoint), edge.fromEndpoint);
+        endpointsByKey.set(endpointKey(edge.toEndpoint), edge.toEndpoint);
+      }
+
+      return createRatsnestSegments(
+        {
+          contract: first.contract,
+          endpoints: [...endpointsByKey.values()],
+          id: netId,
+          kind: first.kind,
+          name: first.name,
+          signal: first.signal,
+          sourceEdge: first.sourceEdge
+        },
+        componentsById
+      );
+    });
+}
+
+type ProjectedEndpoint = {
+  component: BoardComponentProjection;
+  endpoint: EndpointRef;
+  key: string;
+};
+
+type EndpointPair = {
+  distanceSquared: number;
+  left: ProjectedEndpoint;
+  pairKey: string;
+  right: ProjectedEndpoint;
+};
+
+function minimumSpanningTree(endpoints: readonly ProjectedEndpoint[]): EndpointPair[] {
+  const candidates: EndpointPair[] = [];
+
+  for (let leftIndex = 0; leftIndex < endpoints.length; leftIndex += 1) {
+    const left = endpoints[leftIndex];
+
+    if (!left) continue;
+
+    for (let rightIndex = leftIndex + 1; rightIndex < endpoints.length; rightIndex += 1) {
+      const right = endpoints[rightIndex];
+
+      if (!right) continue;
+      candidates.push({
+        distanceSquared:
+          (right.component.xMm - left.component.xMm) ** 2 +
+          (right.component.yMm - left.component.yMm) ** 2,
+        left,
+        pairKey: endpointPairKey(left, right),
+        right
+      });
     }
-  ];
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.distanceSquared - right.distanceSquared || left.pairKey.localeCompare(right.pairKey)
+  );
+  const parent = new Map(endpoints.map(({ key }) => [key, key]));
+  const selected: EndpointPair[] = [];
+
+  for (const candidate of candidates) {
+    const leftRoot = findEndpointRoot(parent, candidate.left.key);
+    const rightRoot = findEndpointRoot(parent, candidate.right.key);
+
+    if (leftRoot === rightRoot) continue;
+    parent.set(rightRoot, leftRoot.localeCompare(rightRoot) <= 0 ? leftRoot : rightRoot);
+    parent.set(leftRoot, leftRoot.localeCompare(rightRoot) <= 0 ? leftRoot : rightRoot);
+    selected.push(candidate);
+    if (selected.length === endpoints.length - 1) break;
+  }
+
+  return selected;
+}
+
+function findEndpointRoot(parent: Map<string, string>, key: string): string {
+  const next = parent.get(key);
+
+  if (!next || next === key) return key;
+  const root = findEndpointRoot(parent, next);
+  parent.set(key, root);
+  return root;
+}
+
+function endpointPairKey(left: ProjectedEndpoint, right: ProjectedEndpoint): string {
+  return [left.key, right.key].sort().map(encodeURIComponent).join("--");
+}
+
+function endpointKey(endpoint: EndpointRef): string {
+  return `${endpoint.node}\u0000${endpoint.pin ?? ""}\u0000${endpoint.port ?? ""}`;
+}
+
+function canonicalEndpoints(endpoints: readonly EndpointRef[]): EndpointRef[] {
+  return [...endpoints].sort(
+    (left, right) =>
+      left.node.localeCompare(right.node) ||
+      (left.pin ?? "").localeCompare(right.pin ?? "") ||
+      (left.port ?? "").localeCompare(right.port ?? "")
+  );
 }
 
 function contractForEdge(source: ProjectSource, edgeId: string) {
@@ -524,24 +732,18 @@ function findCourtyardOverlaps(components: BoardComponentProjection[]): BoardDrc
 }
 
 function componentBoundsOverlap(left: BoardComponentProjection, right: BoardComponentProjection) {
-  const leftBounds = componentBounds(left);
-  const rightBounds = componentBounds(right);
-
-  return (
-    leftBounds.minX < rightBounds.maxX &&
-    leftBounds.maxX > rightBounds.minX &&
-    leftBounds.minY < rightBounds.maxY &&
-    leftBounds.maxY > rightBounds.minY
+  return orientedRectsOverlap(
+    {
+      center: { x: left.xMm, y: left.yMm },
+      rotationDeg: left.rotationDeg,
+      size: { width: left.widthMm, height: left.heightMm }
+    },
+    {
+      center: { x: right.xMm, y: right.yMm },
+      rotationDeg: right.rotationDeg,
+      size: { width: right.widthMm, height: right.heightMm }
+    }
   );
-}
-
-function componentBounds(component: BoardComponentProjection) {
-  return {
-    maxX: component.xMm + component.widthMm / 2,
-    maxY: component.yMm + component.heightMm / 2,
-    minX: component.xMm - component.widthMm / 2,
-    minY: component.yMm - component.heightMm / 2
-  };
 }
 
 function parseLengthMm(value: number | string | undefined) {

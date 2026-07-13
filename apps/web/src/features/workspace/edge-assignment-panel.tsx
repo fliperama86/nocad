@@ -12,6 +12,7 @@ import type {
   FunctionSignalDefinition
 } from "@nocad/intent-core";
 import type {
+  AuthoredNetEdge,
   FunctionNode,
   IntentConnectionEdge,
   IntentExposesEdge,
@@ -32,7 +33,8 @@ import {
 } from "./provider-assignment";
 import type { ProviderModeOption } from "./provider-assignment";
 
-type SelectableIntentEdge = IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge;
+type SelectableGraphEdge = AuthoredNetEdge | IntentConnectionEdge | IntentExposesEdge | IntentProvidesEdge;
+type SelectableIntentEdge = Exclude<SelectableGraphEdge, AuthoredNetEdge>;
 type ProviderSignal = FunctionSignalDefinition;
 type MappingSource = "auto" | "mode" | "unassigned" | "user";
 
@@ -84,6 +86,8 @@ export function EdgeAssignmentPanel({
           ) : (
             <EmptyState text="The selected graph item has no editable source intent." />
           )
+        ) : edge.kind === "net.authored" ? (
+          <AuthoredNetProperties edge={edge} labels={labels} />
         ) : edge.kind === "intent.connection" ? (
             <GenericConnectionEdgeProperties
               catalog={catalog}
@@ -1035,6 +1039,41 @@ function ExposesEdgeProperties({ edge, labels }: { edge: IntentExposesEdge; labe
   );
 }
 
+function AuthoredNetProperties({ edge, labels }: { edge: AuthoredNetEdge; labels: Map<string, string> }) {
+  return (
+    <>
+      <div className="grid gap-1">
+        <div className="text-sm font-semibold">{edge.label ?? edge.name}</div>
+        <div className="text-xs text-muted-foreground">Authored physical net</div>
+      </div>
+      <div className="grid gap-2 rounded-md border border-border bg-background px-3 py-3">
+        <Field label="Net name" value={edge.name} />
+        <Field label="Board kind" value={edge.boardKind ?? "signal"} />
+        <Field label="Endpoints" value={edge.endpoints.length.toString()} />
+        {edge.realizes ? (
+          <Field
+            label="Realizes"
+            value={[
+              `${edge.realizes.edge}.${edge.realizes.signal}`,
+              edge.realizes.feature,
+              edge.realizes.segment
+            ].filter(Boolean).join(" / ")}
+          />
+        ) : null}
+      </div>
+      <div className="grid gap-1 rounded-md border border-border bg-background px-3 py-3">
+        {edge.endpoints.map((endpoint, index) => (
+          <Field
+            key={`${endpoint.node}:${endpoint.pin ?? endpoint.port ?? index}`}
+            label={`Endpoint ${index + 1}`}
+            value={endpointLabel(endpoint, labels)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
 function EdgeHeading({ edge, labels }: { edge: SelectableIntentEdge; labels: Map<string, string> }) {
   return (
     <div className="grid gap-1">
@@ -1075,11 +1114,11 @@ function modeButtonClass(active: boolean) {
   );
 }
 
-function findIntentEdge(source: ProjectSource, edgeId: string): SelectableIntentEdge | undefined {
+function findIntentEdge(source: ProjectSource, edgeId: string): SelectableGraphEdge | undefined {
   return source.edges.find(
-    (edge): edge is SelectableIntentEdge =>
+    (edge): edge is SelectableGraphEdge =>
       edge.id === edgeId &&
-      (edge.kind === "intent.connection" || edge.kind === "intent.exposes" || edge.kind === "intent.provides")
+      (edge.kind === "net.authored" || edge.kind === "intent.connection" || edge.kind === "intent.exposes" || edge.kind === "intent.provides")
   );
 }
 

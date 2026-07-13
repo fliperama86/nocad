@@ -823,6 +823,10 @@ export function ProjectWorkspaceApp({
                 <PcbDesignerPanel
                   catalog={catalog}
                   onSetComponentPlacement={setBoardComponentPlacement}
+                  onSourceSelectionChange={({ edgeId, nodeId }) => {
+                    setSelectedGraphEdge(edgeId);
+                    setSelectedGraphNode(nodeId);
+                  }}
                   resolved={resolved}
                   source={source}
                 />
@@ -1261,7 +1265,18 @@ function nextPosition(index: number): XYPosition {
 }
 
 function edgeReferencesAnyNode(edge: ProjectEdge, nodeIds: Set<string>) {
+  if ("endpoints" in edge && edge.endpoints.some((endpoint) => nodeIds.has(endpoint.node))) {
+    return true;
+  }
+
   if ("from" in edge && "to" in edge && (nodeIds.has(edge.from.node) || nodeIds.has(edge.to.node))) {
+    return true;
+  }
+
+  if (
+    "generatedRealizations" in edge &&
+    edge.generatedRealizations?.some(({ node }) => nodeIds.has(node))
+  ) {
     return true;
   }
 

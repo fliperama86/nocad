@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createHdmiSliceProject, createHdmiTxSliceProject, hdmiSliceIds, hdmiTxSliceIds } from "./samples";
+import {
+  createHdmiSliceProject,
+  createHdmiTxSliceProject,
+  createI2cSliceProject,
+  hdmiSliceIds,
+  hdmiTxSliceIds,
+  i2cSliceIds
+} from "./samples";
 import {
   ProjectDocument,
   ProjectDocumentError,
@@ -157,6 +164,176 @@ describe("ProjectDocument", () => {
     document.undo();
 
     expect(document.source.edges).toEqual(source.edges);
+  });
+
+  it("round-trips authored nets and cascades them through stable node patches", () => {
+    const base = createI2cSliceProject();
+    const authoredNet = {
+      id: "authored-power",
+      kind: "net.authored" as const,
+      name: "+3V3 authored",
+      boardKind: "power" as const,
+      endpoints: [
+        { node: i2cSliceIds.rail3v3 },
+        { node: i2cSliceIds.mcu, pin: "gpio0" },
+        { node: i2cSliceIds.sensor, pin: "sda" }
+      ]
+    };
+    const source = applyProjectPatch(base, { op: "addEdge", edge: authoredNet }).source;
+    const document = new ProjectDocument(source);
+    const serialized = document.save();
+
+    expect(parseProjectSourceJson(serialized)).toEqual(source);
+    document.apply({ op: "removeNode", node: i2cSliceIds.sensor });
+    expect(document.source.edges.some(({ id }) => id === authoredNet.id)).toBe(false);
+
+    document.undo();
+    expect(document.source).toEqual(source);
+    expect(document.save()).toBe(serialized);
+
+    document.redo();
+    expect(document.source.edges.some(({ id }) => id === authoredNet.id)).toBe(false);
+  });
+
+  it("rejects malformed authored net structure at document ingress", () => {
+    const source = createI2cSliceProject();
+    const edge = {
+      id: "authored-invalid",
+      kind: "net.authored" as const,
+      name: "Invalid",
+      endpoints: [
+        { node: i2cSliceIds.mcu, pin: "gpio0" },
+        { node: i2cSliceIds.mcu, pin: "gpio0" }
+      ]
+    };
+
+    expectDocumentError(
+      () => validateProjectSource({ ...source, edges: [...source.edges, edge] }),
+      "PROJECT_EDGE_INVALID"
+    );
+    expectDocumentError(
+      () =>
+        validateProjectSource({
+          ...source,
+          edges: [...source.edges, { ...edge, endpoints: [{ node: i2cSliceIds.mcu, pin: "gpio0" }] }]
+        }),
+      "PROJECT_EDGE_INVALID"
+    );
+    expectDocumentError(
+      () =>
+        validateProjectSource({
+          ...source,
+          edges: [...source.edges, { ...edge, endpoints: [edge.endpoints[0], { node: "missing" }] }]
+        }),
+      "EDGE_NODE_NOT_FOUND"
+    );
+  });
+
+  it("round-trips realization links and cascades them with their semantic owner", () => {
+    const base = createI2cSliceProject();
+    const authoredNet = {
+      id: "authored-sda",
+      kind: "net.authored" as const,
+      name: "SDA physical",
+      realizes: { edge: i2cSliceIds.sensorBus, signal: "sda" },
+      endpoints: [
+        { node: i2cSliceIds.mcu, pin: "gpio4" },
+        { node: i2cSliceIds.rail3v3 }
+      ]
+    };
+    const source = applyProjectPatch(base, { op: "addEdge", edge: authoredNet }).source;
+    const document = new ProjectDocument(source);
+    const serialized = document.save();
+
+    expect(parseProjectSourceJson(serialized)).toEqual(source);
+    document.apply({ op: "removeEdge", edge: i2cSliceIds.sensorBus });
+    expect(document.source.edges.some(({ id }) => id === i2cSliceIds.sensorBus)).toBe(false);
+    expect(document.source.edges.some(({ id }) => id === authoredNet.id)).toBe(false);
+
+    document.undo();
+    expect(document.source).toEqual(source);
+    expect(document.save()).toBe(serialized);
+
+    document.apply({ op: "removeNode", node: i2cSliceIds.sensor });
+    expect(document.source.edges.some(({ id }) => id === i2cSliceIds.sensorBus)).toBe(false);
+    expect(document.source.edges.some(({ id }) => id === authoredNet.id)).toBe(false);
+
+    document.undo();
+    expect(document.source).toEqual(source);
+    expect(document.save()).toBe(serialized);
+  });
+
+  it("rejects dangling and unsupported authored-net realization links", () => {
+    const source = createI2cSliceProject();
+    const authoredNet = {
+      id: "authored-sda",
+      kind: "net.authored" as const,
+      name: "SDA physical",
+      endpoints: [
+        { node: i2cSliceIds.mcu, pin: "gpio4" },
+        { node: i2cSliceIds.sensor, pin: "sda" }
+      ]
+    };
+
+    expectDocumentError(
+      () => validateProjectSource({
+        ...source,
+        edges: [...source.edges, { ...authoredNet, realizes: { edge: "missing", signal: "sda" } }]
+      }),
+      "AUTHORED_NET_REALIZATION_INVALID"
+    );
+    expectDocumentError(
+      () => validateProjectSource({
+        ...source,
+        edges: [
+          ...source.edges,
+          { ...authoredNet, realizes: { edge: "binding", signal: "sda" } },
+          { id: "binding", kind: "net.binding" as const, bindings: {} }
+        ]
+      }),
+      "AUTHORED_NET_REALIZATION_INVALID"
+    );
+  });
+
+  it("round-trips edge-owned generated component realizations and cascades node references", () => {
+    const base = createI2cSliceProject();
+    const sensor = base.nodes.find(({ id }) => id === i2cSliceIds.sensor);
+    if (!sensor || sensor.kind !== "component") throw new Error("Missing sensor fixture.");
+    const source: ProjectSource = {
+      ...base,
+      nodes: [...base.nodes, { ...sensor, id: "captured-generated" }],
+      edges: base.edges.map((edge) =>
+        edge.id === i2cSliceIds.sensorBus && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              generatedRealizations: [
+                {
+                  feature: "pullups",
+                  node: "captured-generated",
+                  signal: "sda",
+                  terminals: { "1": "sda" }
+                }
+              ]
+            }
+          : edge
+      )
+    };
+    const document = new ProjectDocument(source);
+    const serialized = document.save();
+
+    expect(parseProjectSourceJson(serialized)).toEqual(source);
+    document.apply({ op: "removeEdge", edge: i2cSliceIds.sensorBus });
+    expect(document.source.nodes.some(({ id }) => id === "captured-generated")).toBe(true);
+
+    document.undo();
+    expect(document.source).toEqual(source);
+
+    document.apply({ op: "removeNode", node: "captured-generated" });
+    expect(document.source.edges.some(({ id }) => id === i2cSliceIds.sensorBus)).toBe(false);
+
+    document.undo();
+    expect(document.source).toEqual(source);
+    expect(document.save()).toBe(serialized);
   });
 
   it("keeps failed batches atomic and leaves revision, history, and snapshot unchanged", () => {
@@ -505,7 +682,9 @@ describe("project source persistence and validation", () => {
         validateProjectSource({
           ...source,
           edges: source.edges.map((edge, index) =>
-            index === 0 && edge.kind !== "net.binding"
+            index === 0 &&
+            edge.kind !== "net.binding" &&
+            edge.kind !== "net.authored"
               ? { ...edge, from: { ...edge.from, node: "missing" } }
               : edge
           )

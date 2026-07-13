@@ -113,10 +113,10 @@ function resolved(): ResolvedProject {
       {
         id: "net-b",
         name: "B",
-        endpoints: {
-          from: { node: "generated-part", pin: "2" },
-          to: { node: "sink", pin: "input" }
-        },
+        endpoints: [
+          { node: "generated-part", pin: "2" },
+          { node: "sink", pin: "input" }
+        ],
         direction: "from_to_to",
         sourceEdge: "edge-a",
         sourceMap: { edge: "edge-a", signal: "b" }
@@ -124,10 +124,10 @@ function resolved(): ResolvedProject {
       {
         id: "net-a",
         name: "A",
-        endpoints: {
-          from: { node: "source", pin: "output" },
-          to: { node: "generated-part", pin: "1" }
-        },
+        endpoints: [
+          { node: "source", pin: "output" },
+          { node: "generated-part", pin: "1" }
+        ],
         direction: "from_to_to",
         sourceEdge: "edge-a",
         sourceMap: { edge: "edge-a", signal: "a" }

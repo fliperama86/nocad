@@ -1,5 +1,6 @@
 import type {
   ContractParams,
+  EndpointRef,
   IntentConnectionEdge,
   IntentProvidesEdge,
   IntentStrategy,
@@ -264,6 +265,7 @@ export function validateProjectSource(value: unknown): asserts value is ProjectS
   }
 
   const nodeIds = new Set<string>();
+  const nodeById = new Map<string, ProjectNode>();
 
   for (const node of value.nodes) {
     validateProjectNode(node);
@@ -273,6 +275,7 @@ export function validateProjectSource(value: unknown): asserts value is ProjectS
     }
 
     nodeIds.add(node.id);
+    nodeById.set(node.id, node);
   }
 
   const edgeIds = new Set<string>();
@@ -293,6 +296,33 @@ export function validateProjectSource(value: unknown): asserts value is ProjectS
           `Edge "${edge.id}" references missing node "${referencedNode}".`
         );
       }
+    }
+    if (edge.kind !== "net.authored" && edge.kind !== "net.binding") {
+      for (const realization of edge.generatedRealizations ?? []) {
+        if (nodeById.get(realization.node)?.kind !== "component") {
+          throw new ProjectDocumentError(
+            "GENERATED_REALIZATION_NODE_INVALID",
+            `Edge "${edge.id}" generated realization node "${realization.node}" must be a component.`
+          );
+        }
+      }
+    }
+  }
+
+  const edgeById = new Map(value.edges.map((edge) => [edge.id, edge]));
+  for (const edge of value.edges) {
+    if (edge.kind !== "net.authored" || !edge.realizes) continue;
+    const realizedEdge = edgeById.get(edge.realizes.edge);
+    if (
+      !realizedEdge ||
+      (realizedEdge.kind !== "intent.connection" &&
+        realizedEdge.kind !== "intent.provides" &&
+        realizedEdge.kind !== "intent.exposes")
+    ) {
+      throw new ProjectDocumentError(
+        "AUTHORED_NET_REALIZATION_INVALID",
+        `Authored net "${edge.id}" realizes missing or unsupported intent edge "${edge.realizes.edge}".`
+      );
     }
   }
 
@@ -369,11 +399,15 @@ function applyPatchUnchecked(
       throw new ProjectDocumentError("NODE_NOT_FOUND", `Node "${patch.node}" does not exist.`);
     }
 
+    const directlyIncidentIds = new Set(
+      source.edges.flatMap((edge) => edgeNodeReferences(edge).includes(patch.node) ? [edge.id] : [])
+    );
+    const removedEdgeIds = dependentEdgeIds(source.edges, directlyIncidentIds);
     const incidentEdges = source.edges.flatMap((edge, edgeIndex) =>
-      edgeNodeReferences(edge).includes(patch.node) ? [{ edge, index: edgeIndex }] : []
+      removedEdgeIds.has(edge.id) ? [{ edge, index: edgeIndex }] : []
     );
     const nodes = source.nodes.filter((candidate) => candidate.id !== patch.node);
-    const edges = source.edges.filter((edge) => !edgeNodeReferences(edge).includes(patch.node));
+    const edges = source.edges.filter((edge) => !removedEdgeIds.has(edge.id));
     const nextSource = removePlacement({ ...source, nodes, edges }, patch.node);
     const inversePatches: ProjectInversePatch[] = [
       { op: "restoreNode", node: cloneValue(node), index },
@@ -426,9 +460,21 @@ function applyPatchUnchecked(
       throw new ProjectDocumentError("EDGE_NOT_FOUND", `Edge "${patch.edge}" does not exist.`);
     }
 
+    const removedIds = dependentEdgeIds(source.edges, new Set([patch.edge]));
+    const removedEdges = source.edges.flatMap((candidate, candidateIndex) =>
+      removedIds.has(candidate.id) ? [{ edge: candidate, index: candidateIndex }] : []
+    );
+
     return {
-      source: { ...source, edges: source.edges.filter((candidate) => candidate.id !== patch.edge) },
-      inverse: { op: "restoreEdge", edge: cloneValue(edge), index }
+      source: { ...source, edges: source.edges.filter((candidate) => !removedIds.has(candidate.id)) },
+      inverse: {
+        op: "restoreBatch",
+        patches: removedEdges.map(({ edge: removedEdge, index: removedIndex }) => ({
+          op: "restoreEdge" as const,
+          edge: cloneValue(removedEdge),
+          index: removedIndex
+        }))
+      }
     };
   }
 
@@ -764,6 +810,75 @@ function validateProjectEdge(value: unknown): asserts value is ProjectEdge {
   assertNonEmptyString(value.id, "PROJECT_EDGE_INVALID", "Project edge ids must be non-empty strings.");
   validateGraphMetadata(value, `Edge "${value.id}"`);
 
+  if (value.kind === "net.authored") {
+    assertNonEmptyString(value.name, "PROJECT_EDGE_INVALID", `Authored net "${value.id}" needs a name.`);
+    if (!Array.isArray(value.endpoints) || value.endpoints.length < 2) {
+      throw new ProjectDocumentError(
+        "PROJECT_EDGE_INVALID",
+        `Authored net "${value.id}" needs at least two endpoints.`
+      );
+    }
+    if (
+      value.boardKind !== undefined &&
+      value.boardKind !== "highSpeed" &&
+      value.boardKind !== "power" &&
+      value.boardKind !== "signal"
+    ) {
+      throw new ProjectDocumentError(
+        "PROJECT_EDGE_INVALID",
+        `Authored net "${value.id}" boardKind must be highSpeed, power, or signal.`
+      );
+    }
+
+    const endpointKeys = new Set<string>();
+    for (const [index, endpoint] of value.endpoints.entries()) {
+      validateEndpoint(endpoint, value.id, `endpoints[${index}]`);
+      const key = endpointKey(endpoint);
+      if (endpointKeys.has(key)) {
+        throw new ProjectDocumentError(
+          "PROJECT_EDGE_INVALID",
+          `Authored net "${value.id}" contains duplicate endpoint "${key}".`
+        );
+      }
+      endpointKeys.add(key);
+    }
+    if (value.realizes !== undefined) {
+      assertRecord(
+        value.realizes,
+        "PROJECT_EDGE_INVALID",
+        `Authored net "${value.id}" realization must be an object.`
+      );
+      assertNonEmptyString(
+        value.realizes.edge,
+        "PROJECT_EDGE_INVALID",
+        `Authored net "${value.id}" realization needs an edge.`
+      );
+      assertNonEmptyString(
+        value.realizes.signal,
+        "PROJECT_EDGE_INVALID",
+        `Authored net "${value.id}" realization needs a signal.`
+      );
+      if (value.realizes.feature !== undefined) {
+        assertNonEmptyString(
+          value.realizes.feature,
+          "PROJECT_EDGE_INVALID",
+          `Authored net "${value.id}" realization feature must be a non-empty string.`
+        );
+      }
+      if (
+        value.realizes.segment !== undefined &&
+        value.realizes.segment !== "connector" &&
+        value.realizes.segment !== "provider"
+      ) {
+        throw new ProjectDocumentError(
+          "PROJECT_EDGE_INVALID",
+          `Authored net "${value.id}" realization segment must be connector or provider.`
+        );
+      }
+    }
+    return;
+  }
+
   if (value.kind === "net.binding") {
     assertRecord(value.bindings, "PROJECT_EDGE_INVALID", `Net binding "${value.id}" needs bindings.`);
     validateSignalBindings(value.bindings, value.id);
@@ -800,6 +915,78 @@ function validateProjectEdge(value: unknown): asserts value is ProjectEdge {
       }
     }
   }
+  if (value.generatedRealizations !== undefined) {
+    validateGeneratedRealizations(value.generatedRealizations, value.id);
+  }
+}
+
+function validateGeneratedRealizations(value: unknown, edgeId: string) {
+  if (!Array.isArray(value)) {
+    throw new ProjectDocumentError(
+      "PROJECT_EDGE_INVALID",
+      `Edge "${edgeId}" generatedRealizations must be an array.`
+    );
+  }
+  const selectors = new Set<string>();
+  for (const [index, realization] of value.entries()) {
+    assertRecord(
+      realization,
+      "PROJECT_EDGE_INVALID",
+      `Edge "${edgeId}" generated realization ${index} must be an object.`
+    );
+    assertNonEmptyString(
+      realization.feature,
+      "PROJECT_EDGE_INVALID",
+      `Edge "${edgeId}" generated realization ${index} needs a feature.`
+    );
+    assertNonEmptyString(
+      realization.node,
+      "PROJECT_EDGE_INVALID",
+      `Edge "${edgeId}" generated realization ${index} needs a node.`
+    );
+    if (realization.signal !== undefined) {
+      assertNonEmptyString(
+        realization.signal,
+        "PROJECT_EDGE_INVALID",
+        `Edge "${edgeId}" generated realization ${index} signal must be non-empty.`
+      );
+    }
+    if (realization.terminals !== undefined) {
+      assertRecord(
+        realization.terminals,
+        "PROJECT_EDGE_INVALID",
+        `Edge "${edgeId}" generated realization ${index} terminals must be an object.`
+      );
+      const authoredPins = new Set<string>();
+      for (const [generatedPin, authoredPin] of Object.entries(realization.terminals)) {
+        assertNonEmptyString(
+          generatedPin,
+          "PROJECT_EDGE_INVALID",
+          `Edge "${edgeId}" generated terminal keys must be non-empty.`
+        );
+        assertNonEmptyString(
+          authoredPin,
+          "PROJECT_EDGE_INVALID",
+          `Edge "${edgeId}" generated terminal mappings must be non-empty.`
+        );
+        if (authoredPins.has(authoredPin)) {
+          throw new ProjectDocumentError(
+            "PROJECT_EDGE_INVALID",
+            `Edge "${edgeId}" generated realization ${index} maps multiple terminals to "${authoredPin}".`
+          );
+        }
+        authoredPins.add(authoredPin);
+      }
+    }
+    const selector = `${realization.feature}\u0000${realization.signal ?? ""}`;
+    if (selectors.has(selector)) {
+      throw new ProjectDocumentError(
+        "PROJECT_EDGE_INVALID",
+        `Edge "${edgeId}" repeats generated realization selector "${realization.feature}".`
+      );
+    }
+    selectors.add(selector);
+  }
 }
 
 function validateGraphMetadata(value: Record<string, unknown>, object: string) {
@@ -828,7 +1015,7 @@ function validateIntentStrategy(value: unknown, object: string): asserts value i
   validateOptionalString(value.providerMode, "PROJECT_EDGE_INVALID", `${object} providerMode must be a string.`);
 }
 
-function validateEndpoint(value: unknown, edgeId: string, role: "from" | "to") {
+function validateEndpoint(value: unknown, edgeId: string, role: string) {
   assertRecord(value, "PROJECT_EDGE_INVALID", `Edge "${edgeId}" ${role} endpoint must be an object.`);
   assertNonEmptyString(value.node, "PROJECT_EDGE_INVALID", `Edge "${edgeId}" ${role} endpoint needs a node.`);
 
@@ -854,6 +1041,10 @@ function validateSignalBindings(bindings: Record<string, unknown>, edgeId: strin
 }
 
 function edgeNodeReferences(edge: ProjectEdge): string[] {
+  if (edge.kind === "net.authored") {
+    return edge.endpoints.map(({ node }) => node);
+  }
+
   const bindingNodes = Object.values(
     edge.kind === "net.binding" || edge.kind === "intent.connection" || edge.kind === "intent.provides"
       ? edge.bindings ?? {}
@@ -862,7 +1053,35 @@ function edgeNodeReferences(edge: ProjectEdge): string[] {
     Object.values(binding).flatMap((endpoint) => (endpoint ? [endpoint.node] : []))
   );
 
-  return edge.kind === "net.binding" ? bindingNodes : [edge.from.node, edge.to.node, ...bindingNodes];
+  const generatedNodes = edge.kind === "net.binding"
+    ? []
+    : (edge.generatedRealizations ?? []).map(({ node }) => node);
+
+  return edge.kind === "net.binding"
+    ? bindingNodes
+    : [edge.from.node, edge.to.node, ...bindingNodes, ...generatedNodes];
+}
+
+function dependentEdgeIds(edges: ProjectEdge[], initial: Set<string>): Set<string> {
+  const removed = new Set(initial);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const edge of edges) {
+      if (edge.kind !== "net.authored" || !edge.realizes || !removed.has(edge.realizes.edge) || removed.has(edge.id)) {
+        continue;
+      }
+      removed.add(edge.id);
+      changed = true;
+    }
+  }
+
+  return removed;
+}
+
+function endpointKey(endpoint: EndpointRef): string {
+  return `${endpoint.node}\u0000${endpoint.pin ?? ""}\u0000${endpoint.port ?? ""}`;
 }
 
 function assertJsonValue(value: unknown, path: string, ancestors = new Set<object>()) {

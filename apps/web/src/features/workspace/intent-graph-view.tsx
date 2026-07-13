@@ -45,6 +45,7 @@ type ComponentTemplate = {
 type IntentNodeData = Record<string, unknown> & {
   connectable: boolean;
   details: string[];
+  physicalConnectable: boolean;
   providerRequirements: ProviderRequirementHandle[];
   subtitle: string;
   title: string;
@@ -61,6 +62,8 @@ const defaultViewport: Viewport = {
 
 const maxNodeDetailRows = 4;
 const pointerIntentThreshold = 8;
+const authoredNetSourceHandle = "authored-net-source";
+const authoredNetTargetHandle = "authored-net-target";
 
 export function IntentGraphView({
   catalog,
@@ -119,7 +122,11 @@ export function IntentGraphView({
     nodeIds: selectedNodeId ? [selectedNodeId] : []
   });
   const selectedNodeIds = flowNodes.filter((node) => node.selected).map((node) => node.id);
-  const selectedEdgeIds = flowEdges.filter((edge) => edge.selected && edge.deletable !== false).map((edge) => edge.id);
+  const selectedEdgeIds = uniqueStrings(
+    flowEdges
+      .filter((edge) => edge.selected && edge.deletable !== false)
+      .map(flowEdgeSourceId)
+  );
   const hasSelection = selectedNodeIds.length > 0 || selectedEdgeIds.length > 0;
 
   useEffect(() => {
@@ -174,7 +181,9 @@ export function IntentGraphView({
 
   const updateSelection = useCallback<OnSelectionChangeFunc<IntentFlowNode, Edge>>(({ edges, nodes }) => {
     const nextNodeIds = nodes.map((node) => node.id);
-    const nextEdgeIds = edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id);
+    const nextEdgeIds = uniqueStrings(
+      edges.filter((edge) => edge.deletable !== false).map(flowEdgeSourceId)
+    );
     localSelectionRef.current = { edgeIds: nextEdgeIds, nodeIds: nextNodeIds };
 
     if (nextEdgeIds.length > 0) {
@@ -226,7 +235,7 @@ export function IntentGraphView({
 
   const removeDeletedSelection = useCallback(({ edges, nodes }: { edges: Edge[]; nodes: IntentFlowNode[] }) => {
     onRemoveSelection({
-      edgeIds: edges.filter((edge) => edge.deletable !== false).map((edge) => edge.id),
+      edgeIds: uniqueStrings(edges.filter((edge) => edge.deletable !== false).map(flowEdgeSourceId)),
       nodeIds: nodes.map((node) => node.id)
     });
     localSelectionRef.current = { edgeIds: [], nodeIds: [] };
@@ -353,7 +362,7 @@ function reconcileEdges(
   selectedIds: ReadonlySet<string>
 ) {
   if (resetGraphState) {
-    return nextEdges.map((edge) => ({ ...edge, selected: selectedIds.has(edge.id) }));
+    return nextEdges.map((edge) => ({ ...edge, selected: selectedIds.has(flowEdgeSourceId(edge)) }));
   }
 
   const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
@@ -364,7 +373,7 @@ function reconcileEdges(
     return currentEdge
       ? {
           ...nextEdge,
-          selected: selectedIds.has(nextEdge.id)
+          selected: selectedIds.has(flowEdgeSourceId(nextEdge))
         }
       : nextEdge;
   });
@@ -412,6 +421,24 @@ const IntentGraphNode = memo(function IntentGraphNode({ data, id, isConnectable,
             className="!size-3 !border-2 !border-background !bg-foreground"
             isConnectable={isConnectable}
             position={Position.Right}
+            type="source"
+          />
+        </>
+      ) : null}
+      {data.physicalConnectable ? (
+        <>
+          <Handle
+            className="!size-2.5 !border-2 !border-background !bg-chart-2"
+            id={authoredNetTargetHandle}
+            isConnectable={false}
+            position={Position.Top}
+            type="target"
+          />
+          <Handle
+            className="!size-2.5 !border-2 !border-background !bg-chart-2"
+            id={authoredNetSourceHandle}
+            isConnectable={false}
+            position={Position.Bottom}
             type="source"
           />
         </>
@@ -512,6 +539,7 @@ function buildFlowModel(
       data: {
         connectable: node.kind === "component" || node.kind === "intent.function",
         details: nodeDetails(node, source.edges, reservations.get(node.id) ?? []),
+        physicalConnectable: node.kind === "component" || node.kind === "powerDomain",
         providerRequirements: providerRequirementsByNode.get(node.id) ?? [],
         subtitle: nodeSubtitle(node),
         title: node.label ?? humanKind(node),
@@ -544,6 +572,7 @@ function buildFlowModel(
 
     return [
       {
+        data: { sourceEdgeId: edge.id },
         id: edge.id,
         deletable: true,
         focusable: true,
@@ -566,11 +595,54 @@ function buildFlowModel(
       }
     ];
   });
+  const authoredNetEdges: Edge[] = source.edges.flatMap((edge) => {
+    if (edge.kind !== "net.authored") return [];
+    const endpoints = [...edge.endpoints].sort(compareEndpoint);
+    const root = endpoints[0];
+    if (!root) return [];
+
+    return endpoints.slice(1).map((endpoint, index) => ({
+      data: { sourceEdgeId: edge.id },
+      deletable: true,
+      focusable: true,
+      id: `authored-net/${encodeURIComponent(edge.id)}/${encodeURIComponent(endpointIdentity(endpoint))}`,
+      label: index === 0 ? edge.name : undefined,
+      selected: edge.id === selectedEdgeId,
+      source: root.node,
+      sourceHandle: authoredNetSourceHandle,
+      style: {
+        stroke: edge.boardKind === "power" ? "var(--chart-2)" : "var(--foreground)",
+        strokeDasharray: "5 4",
+        strokeWidth: edge.boardKind === "highSpeed" ? 2 : 1.5
+      },
+      target: endpoint.node,
+      targetHandle: authoredNetTargetHandle,
+      type: "straight"
+    }));
+  });
 
   return {
-    edges: intentEdges,
+    edges: [...intentEdges, ...authoredNetEdges],
     nodes
   };
+}
+
+function compareEndpoint(
+  left: { node: string; pin?: string; port?: string },
+  right: { node: string; pin?: string; port?: string }
+) {
+  return left.node.localeCompare(right.node) ||
+    (left.pin ?? "").localeCompare(right.pin ?? "") ||
+    (left.port ?? "").localeCompare(right.port ?? "");
+}
+
+function endpointIdentity(endpoint: { node: string; pin?: string; port?: string }) {
+  return `${endpoint.node}\u0000${endpoint.pin ?? ""}\u0000${endpoint.port ?? ""}`;
+}
+
+function flowEdgeSourceId(edge: Edge) {
+  const sourceEdgeId = (edge.data as { sourceEdgeId?: unknown } | undefined)?.sourceEdgeId;
+  return typeof sourceEdgeId === "string" ? sourceEdgeId : edge.id;
 }
 
 function nodeSubtitle(node: ProjectNode) {
@@ -591,7 +663,8 @@ function nodeDetails(
   reservations: string[]
 ) {
   if (node.kind === "powerDomain") {
-    return [`voltage ${node.voltage}`];
+    const authoredNets = authoredNetDetails(node, sourceEdges);
+    return [`voltage ${node.voltage}`, ...authoredNets].slice(0, maxNodeDetailRows);
   }
 
   if (node.kind === "intent.function") {
@@ -602,10 +675,18 @@ function nodeDetails(
     return enabledFeatures.length > 0 ? enabledFeatures.slice(0, 4) : ["waiting for provider"];
   }
 
-  const sourceIntentLines = sourceIntentDetails(node, sourceEdges);
+  const sourceIntentLines = [...sourceIntentDetails(node, sourceEdges), ...authoredNetDetails(node, sourceEdges)];
   const detailLines = uniqueStrings([...reservationDetails(reservations), ...sourceIntentLines]);
 
   return detailLines.length > 0 ? capDetailLines(detailLines) : ["no connections"];
+}
+
+function authoredNetDetails(node: ProjectNode, sourceEdges: ProjectSource["edges"]) {
+  return sourceEdges.flatMap((edge) =>
+    edge.kind === "net.authored" && edge.endpoints.some((endpoint) => endpoint.node === node.id)
+      ? [`net ${edge.name}`]
+      : []
+  );
 }
 
 function capDetailLines(lines: string[]) {

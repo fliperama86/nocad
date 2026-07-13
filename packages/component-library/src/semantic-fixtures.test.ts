@@ -23,7 +23,10 @@ type SemanticExpectation = {
     sourceEdge: string;
     strategy: "auto" | "manual";
   }>;
-  signals: Array<{ from: EndpointRef; signal: string; to: EndpointRef }>;
+  signals: Array<
+    | { endpoints: EndpointRef[]; signal: string }
+    | { from: EndpointRef; signal: string; to: EndpointRef }
+  >;
 };
 
 type SemanticManifest = {
@@ -93,13 +96,19 @@ describe("source-free semantic fixtures", () => {
       expect(
         first.nets
           .map(({ endpoints, sourceMap }) => ({
-            from: endpoints.from,
-            signal: sourceMap.signal,
-            to: endpoints.to
+            endpoints: canonicalEndpoints(endpoints),
+            signal: sourceMap.signal
           }))
           .sort(compareSignal),
         `${manifest.id} resolved signals`
-      ).toEqual([...expectation.signals].sort(compareSignal));
+      ).toEqual(
+        expectation.signals
+          .map((signal) => ({
+            endpoints: canonicalEndpoints("endpoints" in signal ? signal.endpoints : [signal.from, signal.to]),
+            signal: signal.signal
+          }))
+          .sort(compareSignal)
+      );
     }
   });
 });
@@ -123,4 +132,12 @@ async function readJson<T>(file: string): Promise<T> {
 
 function compareSignal(left: { signal: string }, right: { signal: string }) {
   return left.signal.localeCompare(right.signal);
+}
+
+function canonicalEndpoints(endpoints: EndpointRef[]): EndpointRef[] {
+  return [...endpoints].sort((left, right) =>
+    left.node.localeCompare(right.node) ||
+    (left.pin ?? "").localeCompare(right.pin ?? "") ||
+    (left.port ?? "").localeCompare(right.port ?? "")
+  );
 }

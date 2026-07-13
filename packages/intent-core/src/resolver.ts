@@ -1,4 +1,5 @@
 import type {
+  AuthoredNetEdge,
   ComponentDefinition,
   ComponentNode,
   ConnectionContract,
@@ -6,6 +7,7 @@ import type {
   ContractParams,
   ContractSignal,
   Diagnostic,
+  DiagnosticTarget,
   EndpointRole,
   EndpointRef,
   FunctionDefinition,
@@ -15,6 +17,7 @@ import type {
   IntentProvidesEdge,
   FunctionIncludeDefinition,
   FunctionNode,
+  NetRealizationRef,
   PreferredPinGroupDefinition,
   PortContractMap,
   ProviderModeDefinition,
@@ -41,7 +44,8 @@ type ReservedPin = {
   node: string;
   pin: string;
   edge: string;
-  kind: "net.binding" | "provider.claim" | "resolved";
+  kind: "net.authored" | "net.binding" | "provider.claim" | "resolved";
+  realizes?: NetRealizationRef;
 };
 
 type BoundPort = {
@@ -93,7 +97,14 @@ export function resolveProject(source: ProjectSource, environment: ResolutionEnv
     environment.catalog.functions,
     diagnostics
   );
-  const reservedPins = collectInitialReservations(validEdges, functionRequests, componentByNodeId, diagnostics);
+  const authoredNets = resolveAuthoredNets(validEdges, nodeById, componentByNodeId, diagnostics);
+  const reservedPins = collectInitialReservations(
+    validEdges,
+    functionRequests,
+    componentByNodeId,
+    diagnostics,
+    authoredNets.reservations
+  );
   const context: ResolutionContext = {
     authoredPorts: collectAuthoredPortBindings(validEdges),
     diagnostics,
@@ -137,6 +148,18 @@ export function resolveProject(source: ProjectSource, environment: ResolutionEnv
   );
   resolvedChoices.push(...resolvedFunctions.choices);
   nets.push(...resolvedFunctions.nets);
+  const substitutedGenerated = substituteGeneratedComponents(
+    validEdges,
+    componentByNodeId,
+    nets,
+    generated,
+    diagnostics
+  );
+  const reconciledNets = reconcileAuthoredNetRealizations(
+    authoredNets.nets,
+    substitutedGenerated.nets,
+    diagnostics
+  );
 
   return {
     schema: "nocad.lock.v0",
@@ -147,8 +170,11 @@ export function resolveProject(source: ProjectSource, environment: ResolutionEnv
     },
     dependencies,
     resolvedChoices,
-    nets,
-    generated,
+    nets: reconciledNets.nets,
+    generated: substitutedGenerated.generated.map((object) => ({
+      ...object,
+      connects: object.connects.map((connection) => reconciledNets.replacements.get(connection) ?? connection)
+    })),
     diagnostics
   };
 }
@@ -286,8 +312,14 @@ function connectionPinFlexibilityScore(edge: IntentConnectionEdge, context: Reso
 
     return (
       score +
-      signalMapFlexibility(edge.from.node, from.definition, fromMap.signalMap[signal], fromOverride, context) +
-      signalMapFlexibility(edge.to.node, to.definition, toMap.signalMap[signal], toOverride, context)
+      signalMapFlexibility(edge.from.node, from.definition, fromMap.signalMap[signal], fromOverride, context, {
+        edge: edge.id,
+        signal
+      }) +
+      signalMapFlexibility(edge.to.node, to.definition, toMap.signalMap[signal], toOverride, context, {
+        edge: edge.id,
+        signal
+      })
     );
   }, 0);
 }
@@ -297,7 +329,8 @@ function signalMapFlexibility(
   definition: ComponentDefinition,
   signalMap: SignalPinMap | undefined,
   override: EndpointRef | undefined,
-  context: ResolutionContext
+  context: ResolutionContext,
+  owner: NetRealizationRef
 ) {
   if (!signalMap) {
     return Number.MAX_SAFE_INTEGER / 4;
@@ -308,18 +341,24 @@ function signalMapFlexibility(
   }
 
   if ("pin" in signalMap) {
-    return pinAvailableForAllocation(nodeId, signalMap.pin, context) ? 1 : 0;
+    return pinAvailableForAllocation(nodeId, signalMap.pin, context, owner) ? 1 : 0;
   }
 
   return Object.entries(definition.pins).filter(
     ([pinId, pin]) =>
       signalMap.pinSelector.capabilities.every((capability) => pin.capabilities.includes(capability)) &&
-      pinAvailableForAllocation(nodeId, pinId, context)
+      pinAvailableForAllocation(nodeId, pinId, context, owner)
   ).length;
 }
 
-function pinAvailableForAllocation(nodeId: string, pin: string, context: ResolutionContext) {
-  return !context.reservedPins.has(`${nodeId}.${pin}`);
+function pinAvailableForAllocation(
+  nodeId: string,
+  pin: string,
+  context: ResolutionContext,
+  owner: NetRealizationRef
+) {
+  const reservation = context.reservedPins.get(`${nodeId}.${pin}`);
+  return !reservation || reservationMatchesRealization(reservation, owner.edge, owner.signal);
 }
 
 function resolveFunctions(
@@ -478,10 +517,7 @@ function applyFunctionInlineRules(
       ...net,
       id: providerNetId,
       name: `${net.name}_PROVIDER`,
-      endpoints: {
-        from: net.endpoints.from,
-        to: { node: componentId, pin: rule.pins.provider }
-      },
+      endpoints: [requiredEndpoint(net, 0), { node: componentId, pin: rule.pins.provider }],
       sourceMap: {
         ...net.sourceMap,
         feature: rule.id,
@@ -492,10 +528,7 @@ function applyFunctionInlineRules(
       ...net,
       id: connectorNetId,
       name: `${net.name}_CONNECTOR`,
-      endpoints: {
-        from: { node: componentId, pin: rule.pins.connector },
-        to: net.endpoints.to
-      },
+      endpoints: [{ node: componentId, pin: rule.pins.connector }, requiredEndpoint(net, 1)],
       sourceMap: {
         ...net.sourceMap,
         feature: rule.id,
@@ -657,14 +690,16 @@ function functionProviderPinFlexibilityScore(
         provider.definition,
         mode.mode.signalMap[signal],
         providerEdge.bindings?.[signal]?.from,
-        context
+        context,
+        { edge: providerEdge.id, signal }
       ) +
       signalMapFlexibility(
         connectorEdge.to.node,
         connector.definition,
         connectorMap.signalMap[signal],
         providerEdge.bindings?.[signal]?.to,
-        context
+        context,
+        { edge: providerEdge.id, signal }
       )
     );
   }, 0);
@@ -1048,10 +1083,7 @@ function resolveFunctionGeneratedNets(
       boardKind: generatedNet.boardKind,
       id: `net_${functionNode.id}_${generatedNet.id}`,
       name: generatedNet.name,
-      endpoints: {
-        from: { node: from.id },
-        to: { node: connectorEdge.to.node, pin: generatedNet.to.pin }
-      },
+      endpoints: [{ node: from.id }, { node: connectorEdge.to.node, pin: generatedNet.to.pin }],
       direction: generatedNet.direction,
       sourceEdge: connectorEdge.id,
       sourceMap: {
@@ -1115,13 +1147,14 @@ function chooseAvailablePin(
   definition: ComponentDefinition,
   capabilities: string[],
   context: ResolutionContext,
-  localReservedPins: Set<string>
+  localReservedPins: Set<string>,
+  owner: NetRealizationRef
 ) {
   const pin = Object.entries(definition.pins)
     .filter(
       ([pinId, candidate]) =>
         capabilities.every((capability) => candidate.capabilities.includes(capability)) &&
-        !context.reservedPins.has(`${nodeId}.${pinId}`) &&
+        pinAvailableForAllocation(nodeId, pinId, context, owner) &&
         !localReservedPins.has(`${nodeId}.${pinId}`)
     )
     .map(([pinId, candidate]) => ({
@@ -1231,7 +1264,14 @@ function resolveMappedEndpoint(
     "pin" in signalMap
       ? signalMap.pin
       : (override?.pin ??
-        chooseAvailablePin(nodeId, definition, signalMap.pinSelector.capabilities, context, localReservedPins));
+        chooseAvailablePin(
+          nodeId,
+          definition,
+          signalMap.pinSelector.capabilities,
+          context,
+          localReservedPins,
+          { edge: edgeId, signal }
+        ));
 
   if (!selectedPin) {
     context.diagnostics.push({
@@ -1276,7 +1316,7 @@ function resolveMappedEndpoint(
   const endpointKey = pinKey(endpoint);
   const reserved = context.reservedPins.get(endpointKey);
 
-  if (reserved && reserved.edge !== edgeId) {
+  if (reserved && reserved.edge !== edgeId && !reservationMatchesRealization(reserved, edgeId, signal)) {
     context.diagnostics.push({
       severity: "error",
       code: "PIN_CONFLICT",
@@ -1333,10 +1373,7 @@ function createContractNet(
     boardKind: contractSignal.boardKind,
     id: createNetId(edgeId, signal),
     name: formatNetName(contract, signal),
-    endpoints: {
-      from,
-      to
-    },
+    endpoints: [from, to],
     direction: contractSignal.direction,
     sourceEdge: edgeId,
     sourceMap: {
@@ -1591,14 +1628,16 @@ function resolveContractBindings(
           from.definition,
           fromMap.signalMap[signal],
           edge.bindings?.[signal]?.from,
-          context
+          context,
+          { edge: edge.id, signal }
         ) +
         signalMapFlexibility(
           edge.to.node,
           to.definition,
           toMap.signalMap[signal],
           edge.bindings?.[signal]?.to,
-          context
+          context,
+          { edge: edge.id, signal }
         )
     }))
     .sort(
@@ -1678,7 +1717,7 @@ function resolvePreferredPinGroupBindings(
       continue;
     }
 
-    if (bindingPinsAvailable(bindings, reservedPins)) {
+    if (bindingPinsAvailable(bindings, reservedPins, edge.id)) {
       return bindings;
     }
   }
@@ -1719,7 +1758,7 @@ function createPreferredPinGroupSuggestions(
       };
     }
 
-    if (!bindingPinsAvailable(bindings, reservedPins)) {
+    if (!bindingPinsAvailable(bindings, reservedPins, edge.id)) {
       return [];
     }
 
@@ -1792,10 +1831,14 @@ function createPreferredPinGroupBindings(
   return bindings;
 }
 
-function bindingPinsAvailable(bindings: SignalBindings, reservedPins: Map<string, ReservedPin>): boolean {
+function bindingPinsAvailable(
+  bindings: SignalBindings,
+  reservedPins: Map<string, ReservedPin>,
+  edgeId: string
+): boolean {
   const localReservedPins = new Set<string>();
 
-  for (const binding of Object.values(bindings)) {
+  for (const [signal, binding] of Object.entries(bindings)) {
     for (const endpoint of Object.values(binding)) {
       if (!endpoint?.pin) {
         continue;
@@ -1803,7 +1846,8 @@ function bindingPinsAvailable(bindings: SignalBindings, reservedPins: Map<string
 
       const key = pinKey(endpoint);
 
-      if (reservedPins.has(key) || localReservedPins.has(key)) {
+      const reservation = reservedPins.get(key);
+      if ((reservation && !reservationMatchesRealization(reservation, edgeId, signal)) || localReservedPins.has(key)) {
         return false;
       }
 
@@ -1877,6 +1921,490 @@ function resolveComponentEndpoint(
 
 function createNetId(edgeId: string, signal: string) {
   return `net_${edgeId}_${signal}`;
+}
+
+function requiredEndpoint(net: ResolvedNet, index: number): EndpointRef {
+  const endpoint = net.endpoints[index];
+  if (!endpoint) throw new Error(`Resolved net "${net.id}" is missing endpoint ${index}.`);
+  return endpoint;
+}
+
+function resolveAuthoredNets(
+  edges: ProjectEdge[],
+  nodeById: Map<string, ProjectNode>,
+  componentByNodeId: Map<string, ComponentContext>,
+  diagnostics: Diagnostic[]
+): { nets: ResolvedNet[]; reservations: Map<string, ReservedPin> } {
+  const candidates: Array<{ edge: AuthoredNetEdge; endpoints: EndpointRef[] }> = [];
+
+  for (const edge of edges) {
+    if (edge.kind !== "net.authored") continue;
+
+    if (typeof edge.name !== "string" || edge.name.trim().length === 0) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_NAME_INVALID",
+        message: `Authored net "${edge.id}" requires a non-empty name.`,
+        targets: [{ kind: "edge", id: edge.id }]
+      });
+      continue;
+    }
+
+    if (!Array.isArray(edge.endpoints) || edge.endpoints.length < 2) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_ENDPOINT_COUNT_INVALID",
+        message: `Authored net "${edge.id}" requires at least two endpoints.`,
+        targets: [{ kind: "edge", id: edge.id }]
+      });
+      continue;
+    }
+
+    if (
+      edge.realizes !== undefined &&
+      (typeof edge.realizes !== "object" ||
+        typeof edge.realizes.edge !== "string" ||
+        edge.realizes.edge.length === 0 ||
+        typeof edge.realizes.signal !== "string" ||
+        edge.realizes.signal.length === 0 ||
+        (edge.realizes.feature !== undefined &&
+          (typeof edge.realizes.feature !== "string" || edge.realizes.feature.length === 0)) ||
+        (edge.realizes.segment !== undefined &&
+          edge.realizes.segment !== "connector" &&
+          edge.realizes.segment !== "provider"))
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_REALIZATION_INVALID",
+        message: `Authored net "${edge.id}" has an invalid realization link.`,
+        targets: [{ kind: "edge", id: edge.id }]
+      });
+      continue;
+    }
+
+    if (edge.realizes) {
+      const realizedEdge = edges.find(({ id }) => id === edge.realizes?.edge);
+      if (
+        !realizedEdge ||
+        (realizedEdge.kind !== "intent.connection" &&
+          realizedEdge.kind !== "intent.provides" &&
+          realizedEdge.kind !== "intent.exposes")
+      ) {
+        diagnostics.push({
+          severity: "error",
+          code: "AUTHORED_NET_REALIZATION_INVALID",
+          message: `Authored net "${edge.id}" realizes missing or unsupported intent edge "${edge.realizes.edge}".`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "edge", id: edge.realizes.edge }]
+        });
+        continue;
+      }
+    }
+
+    const endpoints = [...edge.endpoints].sort(compareEndpoint);
+    const duplicate = endpoints.find((endpoint, index) => index > 0 && endpointKey(endpoint) === endpointKey(endpoints[index - 1]!));
+    if (duplicate) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_ENDPOINT_DUPLICATE",
+        message: `Authored net "${edge.id}" repeats endpoint "${formatEndpoint(duplicate)}".`,
+        targets: [
+          { kind: "edge", id: edge.id },
+          ...(duplicate.pin ? [{ kind: "pin" as const, node: duplicate.node, pin: duplicate.pin }] : [])
+        ]
+      });
+      continue;
+    }
+
+    let valid = true;
+    for (const endpoint of endpoints) {
+      const node = nodeById.get(endpoint.node);
+      if (!node) {
+        diagnostics.push({
+          severity: "error",
+          code: "AUTHORED_NET_NODE_NOT_FOUND",
+          message: `Authored net "${edge.id}" references missing node "${endpoint.node}".`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: endpoint.node }]
+        });
+        valid = false;
+        continue;
+      }
+
+      if (node.kind === "powerDomain") {
+        if (endpoint.pin !== undefined || endpoint.port !== undefined) {
+          diagnostics.push({
+            severity: "error",
+            code: "AUTHORED_NET_ENDPOINT_INVALID",
+            message: `Power-domain endpoint "${endpoint.node}" on authored net "${edge.id}" must not select a pin or port.`,
+            targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: endpoint.node }]
+          });
+          valid = false;
+        }
+        continue;
+      }
+
+      if (node.kind !== "component" || endpoint.port !== undefined || !endpoint.pin) {
+        diagnostics.push({
+          severity: "error",
+          code: "AUTHORED_NET_ENDPOINT_INVALID",
+          message: `Authored net "${edge.id}" must connect component nodes by pin or a bare power-domain node.`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: endpoint.node }]
+        });
+        valid = false;
+        continue;
+      }
+
+      const component = componentByNodeId.get(endpoint.node);
+      if (!component?.definition.pins[endpoint.pin]) {
+        diagnostics.push({
+          severity: "error",
+          code: "AUTHORED_NET_PIN_NOT_FOUND",
+          message: `Authored net "${edge.id}" references missing pin "${endpoint.node}.${endpoint.pin}".`,
+          targets: [
+            { kind: "edge", id: edge.id },
+            { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+          ]
+        });
+        valid = false;
+      }
+    }
+
+    if (valid) candidates.push({ edge, endpoints });
+  }
+
+  const ownersByPin = new Map<string, Array<{ edge: AuthoredNetEdge; endpoint: EndpointRef }>>();
+  for (const candidate of candidates) {
+    for (const endpoint of candidate.endpoints) {
+      if (!endpoint.pin) continue;
+      const key = pinKey(endpoint);
+      const owners = ownersByPin.get(key) ?? [];
+      owners.push({ edge: candidate.edge, endpoint });
+      ownersByPin.set(key, owners);
+    }
+  }
+
+  const conflictedEdges = new Set<string>();
+  for (const [, owners] of [...ownersByPin.entries()].sort(([left], [right]) => compareStableText(left, right))) {
+    const edgeIds = [...new Set(owners.map(({ edge }) => edge.id))].sort(compareStableText);
+    if (edgeIds.length < 2) continue;
+    const endpoint = owners[0]?.endpoint;
+    if (!endpoint?.pin) continue;
+    edgeIds.forEach((edgeId) => conflictedEdges.add(edgeId));
+    diagnostics.push({
+      severity: "error",
+      code: "AUTHORED_NET_PIN_CONFLICT",
+      message: `${endpoint.node}.${endpoint.pin} belongs to multiple authored nets: ${edgeIds.join(", ")}; all conflicting nets were ignored.`,
+      targets: [
+        ...edgeIds.map((id) => ({ kind: "edge" as const, id })),
+        { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+      ]
+    });
+  }
+
+  const accepted = candidates.filter(({ edge }) => !conflictedEdges.has(edge.id));
+  const reservations = new Map<string, ReservedPin>();
+  for (const { edge, endpoints } of accepted) {
+    for (const endpoint of endpoints) {
+      if (!endpoint.pin) continue;
+      reservations.set(pinKey(endpoint), {
+        edge: edge.id,
+        kind: "net.authored",
+        node: endpoint.node,
+        pin: endpoint.pin,
+        realizes: edge.realizes
+      });
+    }
+  }
+
+  return {
+    nets: accepted.map(({ edge, endpoints }) => ({
+      boardKind: edge.boardKind,
+      direction: "bidirectional",
+      endpoints,
+      id: `net_${edge.id}`,
+      name: edge.name,
+      realizes: edge.realizes,
+      sourceEdge: edge.id,
+      sourceMap: { edge: edge.id, signal: edge.id }
+    })),
+    reservations
+  };
+}
+
+function substituteGeneratedComponents(
+  edges: ProjectEdge[],
+  componentByNodeId: Map<string, ComponentContext>,
+  nets: ResolvedNet[],
+  generated: ResolvedProject["generated"],
+  diagnostics: Diagnostic[]
+): { generated: ResolvedProject["generated"]; nets: ResolvedNet[] } {
+  type Substitution = {
+    authoredNode: string;
+    generated: ResolvedProject["generated"][number];
+    ownerEdge: string;
+    terminals: Record<string, string>;
+  };
+  const substitutionsByGeneratedId = new Map<string, Substitution[]>();
+
+  for (const edge of edges) {
+    if (edge.kind === "net.authored" || edge.kind === "net.binding") continue;
+    const realizations = Array.isArray(edge.generatedRealizations)
+      ? [...edge.generatedRealizations].sort((left, right) =>
+          compareStableText(left.feature, right.feature) ||
+          compareStableText(left.signal ?? "", right.signal ?? "") ||
+          compareStableText(left.node, right.node)
+        )
+      : [];
+    for (const realization of realizations) {
+      const component = componentByNodeId.get(realization.node);
+      if (!component) {
+        diagnostics.push({
+          severity: "error",
+          code: "GENERATED_REALIZATION_NODE_INVALID",
+          message: `Generated realization on edge "${edge.id}" requires component node "${realization.node}".`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: realization.node }]
+        });
+        continue;
+      }
+      const matches = generated.filter((object) =>
+        object.sourceMap.edge === edge.id &&
+        object.sourceMap.feature === realization.feature &&
+        (realization.signal === undefined || object.sourceMap.signal === realization.signal)
+      );
+      if (matches.length === 0) {
+        diagnostics.push({
+          severity: "error",
+          code: "GENERATED_REALIZATION_NOT_FOUND",
+          message: `Edge "${edge.id}" did not generate feature "${realization.feature}"${realization.signal ? ` signal "${realization.signal}"` : ""}.`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: realization.node }]
+        });
+        continue;
+      }
+      if (matches.length > 1) {
+        diagnostics.push({
+          severity: "error",
+          code: "GENERATED_REALIZATION_AMBIGUOUS",
+          message: `Generated realization on edge "${edge.id}" matches multiple "${realization.feature}" objects; add a signal selector.`,
+          targets: [{ kind: "edge", id: edge.id }, { kind: "node", id: realization.node }]
+        });
+        continue;
+      }
+      const generatedObject = matches[0]!;
+      const claims = substitutionsByGeneratedId.get(generatedObject.id) ?? [];
+      claims.push({
+        authoredNode: realization.node,
+        generated: generatedObject,
+        ownerEdge: edge.id,
+        terminals: realization.terminals ?? {}
+      });
+      substitutionsByGeneratedId.set(generatedObject.id, claims);
+    }
+  }
+
+  const substitutions = new Map<string, Substitution>();
+  for (const [generatedId, claims] of [...substitutionsByGeneratedId.entries()]
+    .sort(([left], [right]) => compareStableText(left, right))) {
+    if (claims.length > 1) {
+      const targets = claims
+        .map(({ authoredNode }) => authoredNode)
+        .sort(compareStableText)
+        .map((id) => ({ kind: "node" as const, id }));
+      diagnostics.push({
+        severity: "error",
+        code: "GENERATED_REALIZATION_CONFLICT",
+        message: `Generated component "${generatedId}" is realized by multiple authored components.`,
+        targets
+      });
+      continue;
+    }
+    const substitution = claims[0];
+    if (!substitution) continue;
+    const component = componentByNodeId.get(substitution.authoredNode);
+    const usedEndpoints = nets.flatMap((net) =>
+      net.endpoints.filter(({ node }) => node === generatedId)
+    );
+    if (usedEndpoints.length === 0) {
+      diagnostics.push({
+        severity: "error",
+        code: "GENERATED_REALIZATION_TERMINALS_NOT_FOUND",
+        message: `Generated component "${generatedId}" has no resolved terminal endpoints that can be substituted.`,
+        targets: [
+          { kind: "edge", id: substitution.ownerEdge },
+          { kind: "node", id: substitution.authoredNode }
+        ]
+      });
+      continue;
+    }
+    const invalidEndpoint = usedEndpoints.find((endpoint) => {
+      if (!endpoint.pin) return true;
+      const authoredPin = substitution.terminals[endpoint.pin] ?? endpoint.pin;
+      return !component?.definition.pins[authoredPin];
+    });
+    if (invalidEndpoint) {
+      const generatedPin = invalidEndpoint.pin ?? "";
+      const authoredPin = substitution.terminals[generatedPin] ?? generatedPin;
+      diagnostics.push({
+        severity: "error",
+        code: "GENERATED_REALIZATION_TERMINAL_INVALID",
+        message: `Generated terminal "${generatedId}.${generatedPin}" cannot map to "${substitution.authoredNode}.${authoredPin}".`,
+        targets: [
+          { kind: "edge", id: substitution.ownerEdge },
+          { kind: "node", id: substitution.authoredNode }
+        ]
+      });
+      continue;
+    }
+    substitutions.set(generatedId, substitution);
+  }
+
+  return {
+    generated: generated.filter(({ id }) => !substitutions.has(id)),
+    nets: nets.map((net) => ({
+      ...net,
+      endpoints: net.endpoints.map((endpoint) => {
+        const substitution = substitutions.get(endpoint.node);
+        if (!substitution) return endpoint;
+        const pin = endpoint.pin ? substitution.terminals[endpoint.pin] ?? endpoint.pin : endpoint.pin;
+        return { ...endpoint, node: substitution.authoredNode, pin };
+      })
+    }))
+  };
+}
+
+function reconcileAuthoredNetRealizations(
+  authoredNets: ResolvedNet[],
+  semanticNets: ResolvedNet[],
+  diagnostics: Diagnostic[]
+): { nets: ResolvedNet[]; replacements: Map<string, string> } {
+  const semanticByRealization = new Map<string, ResolvedNet[]>();
+  for (const net of semanticNets) {
+    const key = realizationKey(net.sourceMap);
+    const matches = semanticByRealization.get(key) ?? [];
+    matches.push(net);
+    semanticByRealization.set(key, matches);
+  }
+
+  const consumedSemanticNets = new Set<string>();
+  const replacements = new Map<string, string>();
+  const resolvedAuthoredNets = authoredNets.map((authoredNet): ResolvedNet | undefined => {
+    if (!authoredNet.realizes) return authoredNet;
+    const matches = [...(semanticByRealization.get(realizationKey(authoredNet.realizes)) ?? [])]
+      .filter((semanticNet) => realizationMatchesNet(authoredNet.realizes!, semanticNet))
+      .sort((left, right) => compareStableText(left.id, right.id));
+
+    if (matches.length === 0) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_REALIZATION_NOT_FOUND",
+        message: `Authored net "${authoredNet.sourceEdge}" could not realize ${authoredNet.realizes.edge}.${authoredNet.realizes.signal} because that semantic net did not resolve.`,
+        targets: [
+          { kind: "edge", id: authoredNet.sourceEdge },
+          { kind: "edge", id: authoredNet.realizes.edge }
+        ]
+      });
+      return authoredNet;
+    }
+
+    if (matches.length > 1) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_REALIZATION_AMBIGUOUS",
+        message: `Authored net "${authoredNet.sourceEdge}" matches multiple physical segments for ${authoredNet.realizes.edge}.${authoredNet.realizes.signal}.`,
+        targets: [
+          { kind: "edge", id: authoredNet.sourceEdge },
+          { kind: "edge", id: authoredNet.realizes.edge }
+        ]
+      });
+      return undefined;
+    }
+
+    const semanticNet = matches[0]!;
+    const authoredEndpointKeys = new Set(authoredNet.endpoints.map(endpointKey));
+    const missingEndpoints = semanticNet.endpoints.filter((endpoint) => !authoredEndpointKeys.has(endpointKey(endpoint)));
+
+    if (missingEndpoints.length > 0) {
+      diagnostics.push({
+        severity: "error",
+        code: "AUTHORED_NET_REALIZATION_MISMATCH",
+        message: `Authored net "${authoredNet.sourceEdge}" does not contain every resolved endpoint of ${authoredNet.realizes.edge}.${authoredNet.realizes.signal}.`,
+        targets: [
+          { kind: "edge", id: authoredNet.sourceEdge },
+          { kind: "edge", id: authoredNet.realizes.edge },
+          ...missingEndpoints.map((endpoint): DiagnosticTarget => endpoint.pin
+            ? { kind: "pin", node: endpoint.node, pin: endpoint.pin }
+            : { kind: "node", id: endpoint.node })
+        ]
+      });
+      return undefined;
+    }
+
+    consumedSemanticNets.add(semanticNet.id);
+    replacements.set(semanticNet.id, authoredNet.id);
+    return {
+      ...authoredNet,
+      boardKind: authoredNet.boardKind ?? semanticNet.boardKind,
+      direction: semanticNet.direction
+    };
+  }).filter((net): net is ResolvedNet => net !== undefined);
+
+  const remainingSemanticNets = semanticNets.filter((semanticNet) => {
+    if (consumedSemanticNets.has(semanticNet.id)) return false;
+    const conflictingAuthoredNet = resolvedAuthoredNets.find(
+      (authoredNet) => sharedPhysicalPins(authoredNet, semanticNet).length > 0
+    );
+    if (!conflictingAuthoredNet) return true;
+    const overlap = sharedPhysicalPins(conflictingAuthoredNet, semanticNet)[0]!;
+    diagnostics.push({
+      severity: "error",
+      code: "AUTHORED_NET_OWNERSHIP_CONFLICT",
+      message: `${overlap.node}.${overlap.pin} is owned by authored net "${conflictingAuthoredNet.sourceEdge}" and cannot also belong to semantic net "${semanticNet.id}".`,
+      targets: [
+        { kind: "edge", id: conflictingAuthoredNet.sourceEdge },
+        { kind: "edge", id: semanticNet.sourceEdge },
+        { kind: "pin", node: overlap.node, pin: overlap.pin! }
+      ]
+    });
+    return false;
+  });
+
+  return { nets: [...resolvedAuthoredNets, ...remainingSemanticNets], replacements };
+}
+
+function reservationMatchesRealization(reservation: ReservedPin, edge: string, signal: string): boolean {
+  return reservation.kind === "net.authored" &&
+    reservation.realizes?.edge === edge &&
+    reservation.realizes.signal === signal;
+}
+
+function realizationKey(realization: NetRealizationRef): string {
+  return `${realization.edge}\u0000${realization.signal}`;
+}
+
+function realizationMatchesNet(realization: NetRealizationRef, net: ResolvedNet): boolean {
+  return realization.edge === net.sourceMap.edge &&
+    realization.signal === net.sourceMap.signal &&
+    (realization.feature === undefined || realization.feature === net.sourceMap.feature) &&
+    (realization.segment === undefined || realization.segment === net.sourceMap.segment);
+}
+
+function sharedPhysicalPins(left: ResolvedNet, right: ResolvedNet): EndpointRef[] {
+  const rightPins = new Set(right.endpoints.filter(({ pin }) => pin).map(pinKey));
+  return left.endpoints.filter((endpoint) => endpoint.pin && rightPins.has(pinKey(endpoint)));
+}
+
+function compareEndpoint(left: EndpointRef, right: EndpointRef): number {
+  return (
+    compareStableText(left.node, right.node) ||
+    compareStableText(left.pin ?? "", right.pin ?? "") ||
+    compareStableText(left.port ?? "", right.port ?? "")
+  );
+}
+
+function endpointKey(endpoint: EndpointRef): string {
+  return `${endpoint.node}\u0000${endpoint.pin ?? ""}\u0000${endpoint.port ?? ""}`;
+}
+
+function formatEndpoint(endpoint: EndpointRef): string {
+  return [endpoint.node, endpoint.pin, endpoint.port].filter(Boolean).join(".");
 }
 
 function collectUniqueEdges(edges: ProjectEdge[], diagnostics: Diagnostic[]): ProjectEdge[] {
@@ -1968,9 +2496,10 @@ function collectInitialReservations(
   edges: ProjectEdge[],
   functionRequests: FunctionResolutionRequest[],
   componentByNodeId: Map<string, ComponentContext>,
-  diagnostics: Diagnostic[]
+  diagnostics: Diagnostic[],
+  initialReservations: ReadonlyMap<string, ReservedPin>
 ): Map<string, ReservedPin> {
-  const reservedPins = new Map<string, ReservedPin>();
+  const reservedPins = new Map<string, ReservedPin>(initialReservations);
 
   for (const edge of edges) {
     if (edge.kind === "net.binding") {

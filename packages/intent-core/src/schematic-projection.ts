@@ -9,7 +9,6 @@ import type {
 } from "@nocad/editor-core";
 
 import type {
-  EndpointRole,
   GeneratedObject,
   ProjectNode,
   ProjectSource,
@@ -35,9 +34,7 @@ export function buildSchematicProjection(
       { id: sourceEdge, kind: "edge", path: ["generated", id] }
     ] as const)
   ]);
-  const connections = resolved.nets
-    .filter((net) => nodeIds.has(net.endpoints.from.node) && nodeIds.has(net.endpoints.to.node))
-    .map(projectConnection);
+  const connections = resolved.nets.flatMap((net) => projectConnections(net, nodeIds));
   const positions = layoutNodes([...nodeIds].sort(), connections);
   const portsByNode = collectPorts(resolved.nets, sourceByNode);
   const nodes = [
@@ -78,14 +75,29 @@ function projectGeneratedNode(
   };
 }
 
-function projectConnection(net: ResolvedNet): SchematicConnectionInput {
-  return {
-    from: { node: net.endpoints.from.node, port: portId(net, "from") },
-    id: net.id,
-    label: net.name,
+function projectConnections(
+  net: ResolvedNet,
+  nodeIds: ReadonlySet<string>
+): SchematicConnectionInput[] {
+  const endpoints = net.endpoints
+    .map((endpoint, index) => ({ endpoint, index }))
+    .filter(({ endpoint }) => nodeIds.has(endpoint.node));
+  const root = endpoints[0];
+  if (!root) return [];
+
+  return endpoints.slice(1).map(({ endpoint, index }, segmentIndex) => ({
+    from: { node: root.endpoint.node, port: portId(net, root.index) },
+    id: endpoints.length === 2
+      ? net.id
+      : `view/net/${encodeURIComponent(net.id)}/branch/${encodeURIComponent(endpointIdentity(endpoint))}`,
+    ...(segmentIndex === 0 ? { label: net.name } : {}),
     source: { id: net.sourceEdge, kind: "edge", path: ["nets", net.id] },
-    to: { node: net.endpoints.to.node, port: portId(net, "to") }
-  };
+    to: { node: endpoint.node, port: portId(net, index) }
+  }));
+}
+
+function endpointIdentity(endpoint: ResolvedNet["endpoints"][number]) {
+  return `${endpoint.node}\u0000${endpoint.pin ?? ""}\u0000${endpoint.port ?? ""}`;
 }
 
 function collectPorts(
@@ -95,8 +107,7 @@ function collectPorts(
   const ports = new Map<string, SchematicPortInput[]>();
 
   for (const net of [...nets].sort((left, right) => left.id.localeCompare(right.id))) {
-    for (const role of ["from", "to"] as const) {
-      const endpoint = net.endpoints[role];
+    for (const [index, endpoint] of net.endpoints.entries()) {
       const nodeSource = sourceByNode.get(endpoint.node);
       if (!nodeSource) continue;
       const current = ports.get(endpoint.node) ?? [];
@@ -105,13 +116,13 @@ function collectPorts(
         path: [
           ...(nodeSource.path ?? []),
           endpoint.pin ? "pins" : "ports",
-          endpoint.pin ?? endpoint.port ?? role
+          endpoint.pin ?? endpoint.port ?? String(index)
         ]
       };
       current.push({
-        id: portId(net, role),
+        id: portId(net, index),
         label: endpoint.pin ?? endpoint.port ?? net.sourceMap.signal,
-        side: role === "from" ? "right" : "left",
+        side: index === 0 ? "right" : "left",
         source
       });
       ports.set(endpoint.node, current);
@@ -175,6 +186,6 @@ function nodeSize(portCount: number) {
   return { height: Math.max(100, 44 + portCount * 12), width: 200 };
 }
 
-function portId(net: ResolvedNet, role: EndpointRole) {
-  return `${net.id}:${role}`;
+function portId(net: ResolvedNet, index: number) {
+  return `${net.id}:${index}`;
 }

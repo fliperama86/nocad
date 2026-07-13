@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { applyBoardComponentPlacement, buildBoardProjection } from "./board-projection";
 import { fixtureCatalog, resolveFixtureProject as resolveProject } from "./fixture-environment";
-import { createHdmiSliceProject, createHdmiTxSliceProject, hdmiSliceIds, hdmiTxSliceIds } from "./samples";
+import {
+  createHdmiSliceProject,
+  createHdmiTxSliceProject,
+  createI2cSliceProject,
+  hdmiSliceIds,
+  hdmiTxSliceIds,
+  i2cSliceIds
+} from "./samples";
+import type { DefinitionCatalog, ProjectSource, ResolvedProject } from "./types";
 
 
 describe("buildBoardProjection", () => {
@@ -31,6 +39,18 @@ describe("buildBoardProjection", () => {
         expect.objectContaining({ kind: "highSpeed", signal: "tmds2_p" }),
         expect.objectContaining({ kind: "signal", signal: "sda" })
       ])
+    );
+    expect(projection.components.find(({ id }) => id === hdmiTxSliceIds.videoSource)?.source).toEqual({
+      id: hdmiTxSliceIds.videoSource,
+      kind: "node"
+    });
+    expect(projection.ratsnest[0]?.source).toMatchObject({
+      id: projection.ratsnest[0]?.sourceEdge,
+      kind: "edge",
+      path: ["nets", projection.ratsnest[0]?.netId, "segments", expect.any(String)]
+    });
+    expect(projection.scene.scene.primitives).toHaveLength(
+      1 + projection.components.length + projection.ratsnest.length
     );
     expect(projection.obligations.filter((obligation) => obligation.kind === "placement")).toHaveLength(11);
     expect(projection.stats.drcViolations).toBe(0);
@@ -88,18 +108,24 @@ describe("buildBoardProjection", () => {
       placed: false
     });
     expect(generated?.xMm).toBeGreaterThan(provider?.xMm ?? Number.POSITIVE_INFINITY);
-    expect(splitSegments).toEqual([
-      expect.objectContaining({
+    expect(splitSegments.map(({ fromNode, id, toNode }) => ({
+      id,
+      nodes: [fromNode, toNode].sort()
+    }))).toEqual([
+      {
         id: `net_${hdmiSliceIds.videoProvider}_tmds2_p_provider`,
-        fromNode: hdmiSliceIds.mcu,
-        toNode: componentId
-      }),
-      expect.objectContaining({
+        nodes: [hdmiSliceIds.mcu, componentId].sort()
+      },
+      {
         id: `net_${hdmiSliceIds.videoProvider}_tmds2_p_connector`,
-        fromNode: componentId,
-        toNode: hdmiSliceIds.hdmiPort
-      })
+        nodes: [componentId, hdmiSliceIds.hdmiPort].sort()
+      }
     ]);
+    expect(generated?.source).toEqual({
+      id: hdmiSliceIds.videoProvider,
+      kind: "edge",
+      path: ["generated", componentId]
+    });
     expect(
       projection.obligations.filter(
         (obligation) =>
@@ -162,4 +188,151 @@ describe("buildBoardProjection", () => {
     );
     expect(withOverlap.components.find((component) => component.id === hdmiTxSliceIds.tx)?.violations).toHaveLength(1);
   });
+
+  it("uses rotation-aware portable geometry for overlap DRC", () => {
+    const source = createHdmiTxSliceProject();
+    const projection = buildBoardProjection(source, resolveProject(source), fixtureCatalog);
+    const withRotatedConnector = applyBoardComponentPlacement(projection, hdmiTxSliceIds.hdmiPort, {
+      rotationDeg: 90,
+      xMm: 20,
+      yMm: 20
+    });
+    const separated = applyBoardComponentPlacement(withRotatedConnector, hdmiTxSliceIds.tx, {
+      rotationDeg: 0,
+      xMm: 31,
+      yMm: 20
+    });
+    const overlapping = applyBoardComponentPlacement(separated, hdmiTxSliceIds.hdmiPort, {
+      rotationDeg: 0,
+      xMm: 20,
+      yMm: 20
+    });
+
+    expect(separated.drcViolations).toEqual([]);
+    expect(overlapping.drcViolations).toHaveLength(1);
+    expect(separated.scene.components.find(({ id }) => id === hdmiTxSliceIds.hdmiPort)?.rotationDeg).toBe(90);
+  });
+
+  it("builds a deterministic minimum spanning ratsnest for multi-endpoint nets", () => {
+    const source = multiEndpointSource();
+    const resolved = multiEndpointResolved();
+    const projection = buildBoardProjection(source, resolved, emptyCatalog);
+    const reversed = buildBoardProjection(
+      { ...source, nodes: [...source.nodes].reverse() },
+      { ...resolved, nets: [{ ...resolved.nets[0]!, endpoints: [...resolved.nets[0]!.endpoints].reverse() }] },
+      emptyCatalog
+    );
+
+    expect(projection.ratsnest).toHaveLength(3);
+    expect(projection.stats.unroutedNets).toBe(1);
+    expect(projection.obligations.filter(({ kind }) => kind === "routing")).toHaveLength(1);
+    expect(projection.ratsnest.every(({ netId }) => netId === "net_multi")).toBe(true);
+    expect(projection.ratsnest.map(({ fromNode, toNode }) => [fromNode, toNode])).toEqual([
+      ["a", "b"],
+      ["a", "d"],
+      ["b", "c"]
+    ]);
+    expect(projection.ratsnest.map(({ id }) => id)).toEqual(
+      [...projection.ratsnest.map(({ id }) => id)].sort()
+    );
+    expect(reversed.ratsnest).toEqual(projection.ratsnest);
+
+    const moved = applyBoardComponentPlacement(projection, "b", {
+      rotationDeg: 0,
+      xMm: 90,
+      yMm: 50
+    });
+    expect(moved.ratsnest.map(({ fromNode, toNode }) => [fromNode, toNode])).toEqual([
+      ["a", "d"],
+      ["b", "c"],
+      ["c", "d"]
+    ]);
+    expect(moved.ratsnest.every(({ netId }) => netId === "net_multi")).toBe(true);
+    expect(moved.scene.connections.map(({ id }) => id)).toEqual(
+      moved.ratsnest.map(({ id }) => id).sort()
+    );
+  });
+
+  it("projects a semantic realization as one authored ratsnest identity", () => {
+    const base = createI2cSliceProject();
+    const source: ProjectSource = {
+      ...base,
+      edges: [
+        {
+          id: "authored-sda",
+          kind: "net.authored",
+          name: "SDA physical",
+          realizes: { edge: i2cSliceIds.sensorBus, signal: "sda" },
+          endpoints: [
+            { node: i2cSliceIds.mcu, pin: "gpio4" },
+            { node: i2cSliceIds.sensor, pin: "sda" }
+          ]
+        },
+        ...base.edges
+      ]
+    };
+    const projection = buildBoardProjection(source, resolveProject(source), fixtureCatalog);
+    const sda = projection.ratsnest.filter(({ signal, sourceEdge }) =>
+      signal === "authored-sda" || sourceEdge === "authored-sda"
+    );
+
+    expect(sda).toHaveLength(1);
+    expect(sda[0]).toMatchObject({
+      contract: "builtin:i2c.v1",
+      id: "net_authored-sda",
+      netId: "net_authored-sda",
+      signal: "sda",
+      source: { id: "authored-sda", kind: "edge" },
+      sourceEdge: "authored-sda"
+    });
+    expect(projection.ratsnest.some(({ id }) => id === `net_${i2cSliceIds.sensorBus}_sda`)).toBe(false);
+  });
 });
+
+const emptyCatalog: DefinitionCatalog = { components: {}, contracts: {}, functions: {} };
+
+function multiEndpointSource(): ProjectSource {
+  return {
+    schema: "nocad.project.v0",
+    id: "multi-endpoint-board",
+    name: "Multi-endpoint board",
+    dependencies: {},
+    board: { id: "board", layers: 2, size: { width: "100mm", height: "60mm" } },
+    layout: {
+      board: "board",
+      placements: {
+        a: { x: "10mm", y: "10mm" },
+        b: { x: "20mm", y: "10mm" },
+        c: { x: "20mm", y: "20mm" },
+        d: { x: "10mm", y: "20mm" }
+      },
+      routingIntent: []
+    },
+    nodes: ["a", "b", "c", "d"].map((id) => ({
+      id,
+      kind: "component" as const,
+      component: `vendor:${id}`
+    })),
+    edges: []
+  };
+}
+
+function multiEndpointResolved(): ResolvedProject {
+  return {
+    schema: "nocad.lock.v0",
+    sourceSet: { files: [], hash: "test" },
+    resolver: { name: "nocad-resolver", version: "test" },
+    dependencies: {},
+    resolvedChoices: [],
+    diagnostics: [],
+    generated: [],
+    nets: [{
+      id: "net_multi",
+      name: "MULTI",
+      endpoints: ["a", "b", "c", "d"].map((node) => ({ node, pin: "1" })),
+      direction: "bidirectional",
+      sourceEdge: "authored-multi",
+      sourceMap: { edge: "authored-multi", signal: "authored-multi" }
+    }]
+  };
+}

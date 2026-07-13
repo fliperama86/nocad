@@ -61,7 +61,12 @@ export type PowerDomainNode = GraphObjectMetadata & {
   voltage: string;
 };
 
-export type ProjectEdge = IntentConnectionEdge | IntentProvidesEdge | IntentExposesEdge | NetBindingEdge;
+export type ProjectEdge =
+  | IntentConnectionEdge
+  | IntentProvidesEdge
+  | IntentExposesEdge
+  | NetBindingEdge
+  | AuthoredNetEdge;
 
 export type IntentStrategy = {
   pinAssignment?: "auto" | "manual";
@@ -78,6 +83,7 @@ export type IntentConnectionEdge = GraphObjectMetadata & {
   strategy?: IntentStrategy;
   include?: Record<string, boolean>;
   bindings?: SignalBindings;
+  generatedRealizations?: GeneratedComponentRealization[];
 };
 
 export type IntentProvidesEdge = GraphObjectMetadata & {
@@ -88,6 +94,7 @@ export type IntentProvidesEdge = GraphObjectMetadata & {
   contract: string;
   strategy?: IntentStrategy;
   bindings?: SignalBindings;
+  generatedRealizations?: GeneratedComponentRealization[];
 };
 
 export type IntentExposesEdge = GraphObjectMetadata & {
@@ -96,12 +103,36 @@ export type IntentExposesEdge = GraphObjectMetadata & {
   from: EndpointRef;
   to: EndpointRef;
   contract: string;
+  generatedRealizations?: GeneratedComponentRealization[];
+};
+
+export type GeneratedComponentRealization = {
+  feature: string;
+  node: string;
+  signal?: string;
+  terminals?: Record<string, string>;
 };
 
 export type NetBindingEdge = GraphObjectMetadata & {
   id: string;
   kind: "net.binding";
   bindings: SignalBindings;
+};
+
+export type AuthoredNetEdge = GraphObjectMetadata & {
+  boardKind?: BoardConnectionKind;
+  endpoints: EndpointRef[];
+  id: string;
+  kind: "net.authored";
+  name: string;
+  realizes?: NetRealizationRef;
+};
+
+export type NetRealizationRef = {
+  edge: string;
+  feature?: string;
+  segment?: "connector" | "provider";
+  signal: string;
 };
 
 export type ComponentDefinition = {
@@ -496,7 +527,8 @@ export type ResolvedNet = {
   boardKind?: BoardConnectionKind;
   id: string;
   name: string;
-  endpoints: Record<EndpointRole, EndpointRef>;
+  endpoints: EndpointRef[];
+  realizes?: NetRealizationRef;
   direction: "bidirectional" | "from_to_to" | "to_to_from";
   sourceEdge: string;
   sourceMap: {

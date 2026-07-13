@@ -1,4 +1,5 @@
 import { applyBoardComponentPlacement, buildBoardProjection } from "@nocad/intent-core";
+import { hitTestBoardScene } from "@nocad/editor-core";
 import type {
   BoardComponentPlacement,
   BoardProjection,
@@ -37,11 +38,13 @@ type SelectedBoardObject =
 export function PcbDesignerPanel({
   catalog,
   onSetComponentPlacement,
+  onSourceSelectionChange,
   resolved,
   source
 }: {
   catalog: DefinitionCatalog;
   onSetComponentPlacement: (nodeId: string, placement: BoardComponentPlacement) => void;
+  onSourceSelectionChange: (selection: { edgeId?: string; nodeId?: string }) => void;
   resolved: ResolvedProject;
   source: ProjectSource;
 }) {
@@ -57,7 +60,15 @@ export function PcbDesignerPanel({
     setSelection((current) =>
       current?.kind === nextSelection?.kind && current?.id === nextSelection?.id ? current : nextSelection
     );
-  }, []);
+    const sourceReference = boardSelectionSource(projection, nextSelection);
+    onSourceSelectionChange(
+      sourceReference?.kind === "node"
+        ? { nodeId: sourceReference.id }
+        : sourceReference?.kind === "edge"
+          ? { edgeId: sourceReference.id }
+          : {}
+    );
+  }, [onSourceSelectionChange, projection]);
   const commitComponentPlacement = useCallback((componentId: string, placement: BoardComponentPlacement) => {
     onSetComponentPlacement(componentId, placement);
     setPlacementPreview(undefined);
@@ -81,7 +92,7 @@ export function PcbDesignerPanel({
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <Badge>{formatMm(visibleProjection.board.widthMm)} x {formatMm(visibleProjection.board.heightMm)}</Badge>
             <Badge>{visibleProjection.board.layers} layers</Badge>
-            <Badge>{visibleProjection.stats.unroutedNets} ratsnest</Badge>
+            <Badge>{visibleProjection.stats.unroutedNets} unrouted nets</Badge>
           </div>
         </div>
         <BoardCanvas
@@ -271,7 +282,15 @@ function BoardCanvas({
     const rect = parent.getBoundingClientRect();
     const transform = boardTransform(projection, rect.width, rect.height);
     const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    const hit = hitTestBoard(projection, transform, pointer.x, pointer.y);
+    const boardPoint = toBoard(transform, pointer.x, pointer.y);
+    const sceneHit = hitTestBoardScene(
+      projection.scene,
+      { x: boardPoint.xMm, y: boardPoint.yMm },
+      7 / transform.scale
+    )[0];
+    const hit: BoardSelection | undefined = sceneHit
+      ? { id: sceneHit.id, kind: sceneHit.kind === "component" ? "component" : "ratsnest" }
+      : undefined;
 
     onSelect(hit);
     onPreviewComponentPlacement(undefined);
@@ -286,8 +305,6 @@ function BoardCanvas({
     if (!component) {
       return;
     }
-
-    const boardPoint = toBoard(transform, pointer.x, pointer.y);
 
     dragRef.current = {
       componentId: component.id,
@@ -611,69 +628,6 @@ function clampComponentPlacement(
   };
 }
 
-function hitTestBoard(
-  projection: BoardProjection,
-  transform: BoardTransform,
-  x: number,
-  y: number
-): BoardSelection | undefined {
-  for (let index = projection.components.length - 1; index >= 0; index -= 1) {
-    const component = projection.components[index];
-
-    if (!component) {
-      continue;
-    }
-
-    const center = toCanvas(transform, component.xMm, component.yMm);
-    const width = component.widthMm * transform.scale;
-    const height = component.heightMm * transform.scale;
-
-    if (Math.abs(x - center.x) <= width / 2 + 4 && Math.abs(y - center.y) <= height / 2 + 4) {
-      return { id: component.id, kind: "component" };
-    }
-  }
-
-  for (let index = projection.ratsnest.length - 1; index >= 0; index -= 1) {
-    const edge = projection.ratsnest[index];
-
-    if (!edge) {
-      continue;
-    }
-
-    const from = toCanvas(transform, edge.from.xMm, edge.from.yMm);
-    const to = toCanvas(transform, edge.to.xMm, edge.to.yMm);
-
-    if (distanceToSegment({ x, y }, from, to) <= 7) {
-      return { id: edge.id, kind: "ratsnest" };
-    }
-  }
-
-  return undefined;
-}
-
-function distanceToSegment(point: BoardCanvasPoint, start: BoardCanvasPoint, end: BoardCanvasPoint) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-
-  if (lengthSquared === 0) {
-    return Math.hypot(point.x - start.x, point.y - start.y);
-  }
-
-  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
-  const projected = {
-    x: start.x + t * dx,
-    y: start.y + t * dy
-  };
-
-  return Math.hypot(point.x - projected.x, point.y - projected.y);
-}
-
-type BoardCanvasPoint = {
-  x: number;
-  y: number;
-};
-
 function applyPlacementPreview(
   projection: BoardProjection,
   preview: BoardPlacementPreview | undefined
@@ -782,6 +736,13 @@ function selectedBoardObject(projection: BoardProjection, selection: BoardSelect
   const edge = projection.ratsnest.find((candidate) => candidate.id === selection.id);
 
   return edge ? { item: edge, kind: "ratsnest" } : undefined;
+}
+
+function boardSelectionSource(projection: BoardProjection, selection: BoardSelection | undefined) {
+  if (!selection) return undefined;
+  return selection.kind === "component"
+    ? projection.components.find((component) => component.id === selection.id)?.source
+    : projection.ratsnest.find((edge) => edge.id === selection.id)?.source;
 }
 
 function Badge({ children }: { children: ReactNode }) {

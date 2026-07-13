@@ -42,6 +42,315 @@ describe("resolveProject", () => {
     expect(resolved.diagnostics).toEqual([]);
   });
 
+  it("resolves authored multi-endpoint nets with one identity and canonical endpoints", () => {
+    const source = createAuthoredNetProject();
+    const expected = resolveProject(source);
+
+    expect(expected.diagnostics).toEqual([]);
+    expect(expected.nets).toEqual([
+      {
+        boardKind: "power",
+        direction: "bidirectional",
+        endpoints: [
+          { node: hdmiSliceIds.mcu, pin: "gpio4" },
+          { node: hdmiSliceIds.rail5v },
+          { node: hdmiSliceIds.hdmiPort, pin: "source_5v" }
+        ],
+        id: "net_authored-power",
+        name: "+5V fixture",
+        sourceEdge: "authored-power",
+        sourceMap: { edge: "authored-power", signal: "authored-power" }
+      },
+      {
+        boardKind: "signal",
+        direction: "bidirectional",
+        endpoints: [
+          { node: hdmiSliceIds.mcu, pin: "gpio5" },
+          { node: hdmiSliceIds.hdmiPort, pin: "shield" }
+        ],
+        id: "net_authored-signal",
+        name: "Fixture signal",
+        sourceEdge: "authored-signal",
+        sourceMap: { edge: "authored-signal", signal: "authored-signal" }
+      }
+    ]);
+
+    const [power, signal] = source.edges;
+    if (power?.kind !== "net.authored" || signal?.kind !== "net.authored") {
+      throw new Error("Missing authored net fixtures.");
+    }
+    for (const powerEndpoints of permutations(power.endpoints)) {
+      for (const signalEndpoints of permutations(signal.endpoints)) {
+        for (const edges of permutations([
+          { ...power, endpoints: powerEndpoints },
+          { ...signal, endpoints: signalEndpoints }
+        ])) {
+          expect(resolveProject({ ...source, edges })).toEqual(expected);
+        }
+      }
+    }
+  });
+
+  it("treats authored net pins as hard reservations before semantic allocation", () => {
+    const source = createI2cSliceProject();
+    const authored: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-reservation",
+          kind: "net.authored",
+          name: "Authored reservation",
+          endpoints: [
+            { node: i2cSliceIds.mcu, pin: "gpio4" },
+            { node: i2cSliceIds.rail3v3 }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(authored);
+    const choice = resolved.resolvedChoices.find(({ sourceEdge }) => sourceEdge === i2cSliceIds.sensorBus);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.nets.some(({ id }) => id === "net_authored-reservation")).toBe(true);
+    expect(choice?.selected.bindings).toMatchObject({
+      sda: { from: { node: i2cSliceIds.mcu, pin: "gpio8" } },
+      scl: { from: { node: i2cSliceIds.mcu, pin: "gpio9" } }
+    });
+  });
+
+  it("invalidates every authored net that claims the same physical pin", () => {
+    const source = createAuthoredNetProject();
+    const first = source.edges[0];
+    const second = source.edges[1];
+    if (first?.kind !== "net.authored" || second?.kind !== "net.authored") {
+      throw new Error("Missing authored net fixtures.");
+    }
+    const conflict: ProjectSource = {
+      ...source,
+      edges: [
+        first,
+        {
+          ...second,
+          endpoints: [
+            { node: hdmiSliceIds.mcu, pin: "gpio4" },
+            { node: hdmiSliceIds.hdmiPort, pin: "shield" }
+          ]
+        }
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(conflict);
+
+    expect(resolved.nets).toEqual([]);
+    expect(resolved.diagnostics).toEqual([
+      {
+        severity: "error",
+        code: "AUTHORED_NET_PIN_CONFLICT",
+        message: `${hdmiSliceIds.mcu}.gpio4 belongs to multiple authored nets: authored-power, authored-signal; all conflicting nets were ignored.`,
+        targets: [
+          { kind: "edge", id: "authored-power" },
+          { kind: "edge", id: "authored-signal" },
+          { kind: "pin", node: hdmiSliceIds.mcu, pin: "gpio4" }
+        ]
+      }
+    ]);
+  });
+
+  it("rejects malformed authored endpoints without producing partial nets", () => {
+    const source = createAuthoredNetProject();
+    const invalid: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-invalid",
+          kind: "net.authored",
+          name: "Invalid authored net",
+          endpoints: [
+            { node: hdmiSliceIds.mcu, pin: "missing" },
+            { node: hdmiSliceIds.hdmiFunction }
+          ]
+        }
+      ]
+    };
+    const resolved = resolveProject(invalid);
+
+    expect(resolved.nets).toEqual([]);
+    expect(resolved.diagnostics.map(({ code }) => code)).toEqual([
+      "AUTHORED_NET_PIN_NOT_FOUND",
+      "AUTHORED_NET_ENDPOINT_INVALID"
+    ]);
+  });
+
+  it("coexists with matching semantic intent as one authored physical net", () => {
+    const source = createI2cSliceProject();
+    const sensor = source.nodes.find(({ id }) => id === i2cSliceIds.sensor);
+    if (!sensor || sensor.kind !== "component") throw new Error("Missing sensor fixture.");
+    const realized: ProjectSource = {
+      ...source,
+      nodes: [...source.nodes, { ...sensor, id: "sensor-tap" }],
+      edges: [
+        {
+          id: "authored-sda",
+          kind: "net.authored",
+          name: "SDA physical",
+          realizes: { edge: i2cSliceIds.sensorBus, signal: "sda" },
+          endpoints: [
+            { node: i2cSliceIds.sensor, pin: "sda" },
+            { node: "sensor-tap", pin: "sda" },
+            { node: i2cSliceIds.mcu, pin: "gpio4" }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(realized);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.nets.map(({ id }) => id)).toEqual([
+      "net_authored-sda",
+      `net_${i2cSliceIds.sensorBus}_scl`
+    ]);
+    expect(resolved.nets[0]).toMatchObject({
+      endpoints: [
+        { node: i2cSliceIds.mcu, pin: "gpio4" },
+        { node: i2cSliceIds.sensor, pin: "sda" },
+        { node: "sensor-tap", pin: "sda" }
+      ],
+      realizes: { edge: i2cSliceIds.sensorBus, signal: "sda" },
+      sourceEdge: "authored-sda"
+    });
+    expect(
+      resolved.generated.find(({ id }) => id === `pullup_${i2cSliceIds.sensorBus}_sda`)?.connects
+    ).toEqual(["net_authored-sda", i2cSliceIds.rail3v3]);
+  });
+
+  it("diagnoses an incompatible realization without emitting duplicate physical nets", () => {
+    const source = createI2cSliceProject();
+    const incompatible: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-sda",
+          kind: "net.authored",
+          name: "Incomplete SDA physical",
+          realizes: { edge: i2cSliceIds.sensorBus, signal: "sda" },
+          endpoints: [
+            { node: i2cSliceIds.mcu, pin: "gpio4" },
+            { node: i2cSliceIds.rail3v3 }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(incompatible);
+
+    expect(resolved.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "AUTHORED_NET_REALIZATION_MISMATCH",
+        targets: expect.arrayContaining([
+          { kind: "edge", id: "authored-sda" },
+          { kind: "edge", id: i2cSliceIds.sensorBus },
+          { kind: "pin", node: i2cSliceIds.sensor, pin: "sda" }
+        ])
+      })
+    ]);
+    expect(resolved.nets.map(({ id }) => id)).toEqual([
+      `net_${i2cSliceIds.sensorBus}_sda`,
+      `net_${i2cSliceIds.sensorBus}_scl`
+    ]);
+  });
+
+  it("keeps unrelated authored ownership as a hard reservation", () => {
+    const source = createI2cSliceProject();
+    const unrelated: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-unrelated",
+          kind: "net.authored",
+          name: "Unrelated physical net",
+          endpoints: [
+            { node: i2cSliceIds.mcu, pin: "gpio4" },
+            { node: i2cSliceIds.rail3v3 }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(unrelated);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.resolvedChoices[0]?.selected.bindings).toMatchObject({
+      sda: { from: { node: i2cSliceIds.mcu, pin: "gpio8" } },
+      scl: { from: { node: i2cSliceIds.mcu, pin: "gpio9" } }
+    });
+    expect(resolved.nets.map(({ id }) => id)).toContain("net_authored-unrelated");
+  });
+
+  it("diagnoses an ambiguous realization when topology expands one signal into segments", () => {
+    const source = createHdmiSliceProject();
+    const ambiguous: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-tmds2-p",
+          kind: "net.authored",
+          name: "TMDS2+ physical",
+          realizes: { edge: hdmiSliceIds.videoProvider, signal: "tmds2_p" },
+          endpoints: [
+            { node: hdmiSliceIds.mcu, pin: "gpio12" },
+            { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(ambiguous);
+
+    expect(resolved.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "AUTHORED_NET_REALIZATION_AMBIGUOUS" })
+    );
+    expect(resolved.nets.some(({ id }) => id === "net_authored-tmds2-p")).toBe(false);
+    expect(
+      resolved.nets.filter(
+        ({ sourceMap }) =>
+          sourceMap.edge === hdmiSliceIds.videoProvider && sourceMap.signal === "tmds2_p"
+      ).map(({ sourceMap }) => sourceMap.segment)
+    ).toEqual(["provider", "connector"]);
+  });
+
+  it("uses topology selectors without accepting generated-node endpoint dependencies", () => {
+    const source = createHdmiSliceProject();
+    const selected: ProjectSource = {
+      ...source,
+      edges: [
+        {
+          id: "authored-tmds2-provider",
+          kind: "net.authored",
+          name: "TMDS2+ provider physical",
+          realizes: {
+            edge: hdmiSliceIds.videoProvider,
+            feature: "seriesTermination",
+            segment: "provider",
+            signal: "tmds2_p"
+          },
+          endpoints: [
+            { node: hdmiSliceIds.mcu, pin: "gpio12" },
+            { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+          ]
+        },
+        ...source.edges
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(selected);
+
+    expect(resolved.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "AUTHORED_NET_REALIZATION_MISMATCH" })
+    );
+    expect(resolved.diagnostics.some(({ code }) => code === "AUTHORED_NET_REALIZATION_AMBIGUOUS")).toBe(false);
+    expect(resolved.nets.some(({ id }) => id === "net_authored-tmds2-provider")).toBe(false);
+  });
+
   it("resolves the I2C slice with deterministic default pins and pullups", () => {
     const resolved = resolveProject(createI2cSliceProject());
 
@@ -77,6 +386,31 @@ describe("resolveProject", () => {
         feature: "pullups"
       }
     });
+  });
+
+  it("does not suppress generated components that have no substitutable net terminals", () => {
+    const source = createI2cSliceProject();
+    const withUnsupportedSubstitution: ProjectSource = {
+      ...source,
+      edges: source.edges.map((edge) =>
+        edge.id === i2cSliceIds.sensorBus && edge.kind === "intent.connection"
+          ? {
+              ...edge,
+              generatedRealizations: [
+                { feature: "pullups", node: i2cSliceIds.sensor, signal: "sda" }
+              ]
+            }
+          : edge
+      )
+    };
+    const resolved = resolveProject(withUnsupportedSubstitution);
+
+    expect(resolved.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "GENERATED_REALIZATION_TERMINALS_NOT_FOUND" })
+    );
+    expect(resolved.generated).toContainEqual(
+      expect.objectContaining({ id: `pullup_${i2cSliceIds.sensorBus}_sda` })
+    );
   });
 
   it("reports a contract-defined diagnostic when a shunt power domain is missing", () => {
@@ -642,10 +976,10 @@ describe("resolveProject", () => {
     });
     expect(resolved.nets.find((net) => net.id === providerNetId)).toMatchObject({
       name: "HDMI_TMDS2_P_PROVIDER",
-      endpoints: {
-        from: { node: hdmiSliceIds.mcu, pin: "gpio12" },
-        to: { node: componentId, pin: "1" }
-      },
+      endpoints: [
+        { node: hdmiSliceIds.mcu, pin: "gpio12" },
+        { node: componentId, pin: "1" }
+      ],
       sourceMap: {
         edge: hdmiSliceIds.videoProvider,
         feature: "seriesTermination",
@@ -655,10 +989,10 @@ describe("resolveProject", () => {
     });
     expect(resolved.nets.find((net) => net.id === connectorNetId)).toMatchObject({
       name: "HDMI_TMDS2_P_CONNECTOR",
-      endpoints: {
-        from: { node: componentId, pin: "2" },
-        to: { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
-      },
+      endpoints: [
+        { node: componentId, pin: "2" },
+        { node: hdmiSliceIds.hdmiPort, pin: "tmds2_p" }
+      ],
       sourceMap: {
         edge: hdmiSliceIds.videoProvider,
         feature: "seriesTermination",
@@ -842,6 +1176,91 @@ describe("resolveProject", () => {
     expect(resolved.nets.map((net) => net.name)).toEqual([
       "DIGITAL_SIGNAL_PROVIDER",
       "DIGITAL_SIGNAL_CONNECTOR"
+    ]);
+  });
+
+  it("substitutes an authored component and authored nets for a generated series interposer", () => {
+    const contract = "@nocad/io:digital_output.v1";
+    const base = createDigitalSeriesProject(contract);
+    const source: ProjectSource = {
+      ...base,
+      nodes: [
+        ...base.nodes,
+        { id: "captured-series", kind: "component", component: "@nocad/passives:RESISTOR" }
+      ],
+      edges: [
+        ...base.edges.map((edge) =>
+          edge.id === "edge_digital_provider" && edge.kind === "intent.provides"
+            ? {
+                ...edge,
+                generatedRealizations: [
+                  {
+                    feature: "seriesProtection",
+                    node: "captured-series",
+                    signal: "signal",
+                    terminals: { "1": "2", "2": "1" }
+                  }
+                ]
+              }
+            : edge
+        ),
+        {
+          id: "authored-provider-segment",
+          kind: "net.authored",
+          name: "DIGITAL_SIGNAL_PROVIDER_CAPTURED",
+          realizes: {
+            edge: "edge_digital_provider",
+            feature: "seriesProtection",
+            segment: "provider",
+            signal: "signal"
+          },
+          endpoints: [
+            { node: "mcu", pin: "gpio0" },
+            { node: "captured-series", pin: "2" }
+          ]
+        },
+        {
+          id: "authored-connector-segment",
+          kind: "net.authored",
+          name: "DIGITAL_SIGNAL_CONNECTOR_CAPTURED",
+          realizes: {
+            edge: "edge_digital_provider",
+            feature: "seriesProtection",
+            segment: "connector",
+            signal: "signal"
+          },
+          endpoints: [
+            { node: "captured-series", pin: "1" },
+            { node: "indicator", pin: "anode" }
+          ]
+        }
+      ]
+    };
+    const resolved = expectAllEdgePermutationsToResolveExactly(source);
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.generated).toEqual([]);
+    expect(resolved.nets.map(({ id }) => id)).toEqual([
+      "net_authored-connector-segment",
+      "net_authored-provider-segment"
+    ]);
+    expect(resolved.nets).toEqual([
+      expect.objectContaining({
+        endpoints: [
+          { node: "captured-series", pin: "1" },
+          { node: "indicator", pin: "anode" }
+        ],
+        realizes: expect.objectContaining({ segment: "connector" }),
+        sourceEdge: "authored-connector-segment"
+      }),
+      expect.objectContaining({
+        endpoints: [
+          { node: "captured-series", pin: "2" },
+          { node: "mcu", pin: "gpio0" }
+        ],
+        realizes: expect.objectContaining({ segment: "provider" }),
+        sourceEdge: "authored-provider-segment"
+      })
     ]);
   });
 
@@ -2080,6 +2499,37 @@ function sourcePinsForChoice(choice: ReturnType<typeof resolveProject>["resolved
 
     return pin ? [pin] : [];
   });
+}
+
+function createAuthoredNetProject(): ProjectSource {
+  const source = createHdmiSliceProject();
+
+  return {
+    ...source,
+    edges: [
+      {
+        id: "authored-power",
+        kind: "net.authored",
+        name: "+5V fixture",
+        boardKind: "power",
+        endpoints: [
+          { node: hdmiSliceIds.rail5v },
+          { node: hdmiSliceIds.hdmiPort, pin: "source_5v" },
+          { node: hdmiSliceIds.mcu, pin: "gpio4" }
+        ]
+      },
+      {
+        id: "authored-signal",
+        kind: "net.authored",
+        name: "Fixture signal",
+        boardKind: "signal",
+        endpoints: [
+          { node: hdmiSliceIds.hdmiPort, pin: "shield" },
+          { node: hdmiSliceIds.mcu, pin: "gpio5" }
+        ]
+      }
+    ]
+  };
 }
 
 function expectAllEdgePermutationsToResolveExactly(source: ProjectSource) {

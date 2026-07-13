@@ -1,3 +1,4 @@
+export * from "./board";
 export * from "./geometry";
 export * from "./hit-test";
 export * from "./scene";

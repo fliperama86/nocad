@@ -7,6 +7,7 @@ const featureDirectory = resolve(process.cwd(), "src/features/workspace");
 const appSource = readFileSync(resolve(featureDirectory, "project-workspace-app.tsx"), "utf8");
 const dialogSource = readFileSync(resolve(featureDirectory, "connection-intent-dialog.tsx"), "utf8");
 const graphSource = readFileSync(resolve(featureDirectory, "intent-graph-view.tsx"), "utf8");
+const pcbSource = readFileSync(resolve(featureDirectory, "pcb-designer-panel.tsx"), "utf8");
 
 describe("ProjectWorkspaceApp project document integration", () => {
   it("uses one external-store ProjectDocument instead of mirrored source state", () => {
@@ -35,7 +36,8 @@ describe("ProjectWorkspaceApp project document integration", () => {
   it("keeps graph positions ephemeral while pruning deleted child selections", () => {
     expect(appSource).not.toContain("Object.fromEntries(Object.entries(currentPositions).filter");
     expect(graphSource).toContain("const selectedNodeIds = flowNodes.filter((node) => node.selected)");
-    expect(graphSource).toContain("const selectedEdgeIds = flowEdges.filter((edge) => edge.selected");
+    expect(graphSource).toContain("const selectedEdgeIds = uniqueStrings(");
+    expect(graphSource).toContain(".map(flowEdgeSourceId)");
     expect(graphSource).toContain("return nextNodes.map((nextNode)");
     expect(graphSource).toContain("return nextEdges.map((nextEdge)");
   });
@@ -45,7 +47,21 @@ describe("ProjectWorkspaceApp project document integration", () => {
     expect(graphSource).not.toContain("onNodesDelete=");
     expect(graphSource).not.toContain("onEdgesDelete=");
     expect(appSource).toContain("!edgeReferencesAnyNode(edge, existingNodeIdSet)");
+    expect(appSource).toContain('"generatedRealizations" in edge');
     expect(appSource).toContain("...explicitEdgeIds.map((edge) => ({ op: \"removeEdge\", edge })");
     expect(appSource).toContain("...existingNodeIds.map((node) => ({ op: \"removeNode\", node })");
+  });
+
+  it("uses portable board hit testing instead of web-local geometry", () => {
+    expect(pcbSource).toContain("hitTestBoardScene(");
+    expect(pcbSource).not.toContain("function hitTestBoard(");
+    expect(pcbSource).not.toContain("function distanceToSegment(");
+    expect(appSource).toContain("onSourceSelectionChange={({ edgeId, nodeId })");
+  });
+
+  it("renders authored physical nets as source-mapped graph branches", () => {
+    expect(graphSource).toContain('edge.kind !== "net.authored"');
+    expect(graphSource).toContain("data: { sourceEdgeId: edge.id }");
+    expect(graphSource).toContain("edges: [...intentEdges, ...authoredNetEdges]");
   });
 });

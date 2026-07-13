@@ -51,6 +51,8 @@ The north star should be built in integration slices rather than transcribed as 
 
 The order may change when the pinned reference reveals a dependency, but each slice must remain inspectable and preserve stable identities across later expansion.
 
+Reference parts that cannot yet be qualified by manufacturer and part number must not weaken the production catalog rules. Passives and support parts captured from this design belong in a reference-local, content-hash-pinned package. They are available to resolution only when the project explicitly depends on that package, and they do not appear in the normal component palette. A later qualification step may replace a captured instance with a production catalog definition without changing the authored component identity.
+
 ### Integration Gates
 
 | Gate | Evidence |
