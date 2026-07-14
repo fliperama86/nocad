@@ -32,7 +32,9 @@ export function BindingsPanel({
           ))
         ) : (
           <div className="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-            unresolved
+            {selectedChoice
+              ? "The selected edge has no resolved bindings."
+              : "Select a resolved intent edge to inspect bindings."}
           </div>
         )}
 

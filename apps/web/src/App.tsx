@@ -1,16 +1,8 @@
 import { loadBuiltInDefinitionCatalog } from "@nocad/component-library";
 import type { LoadedDefinitionCatalog } from "@nocad/component-library";
-import {
-  createProjectSourceSet,
-  type ResolutionEnvironment
-} from "@nocad/intent-core";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { componentTemplate, functionTemplate } from "./catalog-templates";
-import {
-  ProjectWorkspaceApp,
-  type WorkspaceNodeTemplate
-} from "@/features/workspace/project-workspace-app";
+import { CatalogWorkspaceApp } from "@/features/workspace/catalog-workspace-app";
 
 type LibraryState =
   | { status: "loading" }
@@ -57,45 +49,7 @@ export function App() {
     return <WorkspaceStatus message={library.message} tone="error" />;
   }
 
-  return <LoadedWorkspace catalog={library.catalog} />;
-}
-
-function LoadedWorkspace({ catalog }: { catalog: LoadedDefinitionCatalog }) {
-  const environment = useMemo<ResolutionEnvironment>(
-    () => {
-      const packages = new Map(
-        Object.entries(catalog.library.packages).map(([name, descriptor]) => [
-          name,
-          {
-            hash: descriptor.contentHash,
-            version: descriptor.version
-          }
-        ])
-      );
-
-      return {
-        catalog,
-        resolveDependency(name, requestedVersion) {
-          const dependency = packages.get(name);
-
-          return dependency && (!requestedVersion || requestedVersion === dependency.version)
-            ? dependency
-            : undefined;
-        },
-        sourceSet: createProjectSourceSet
-      };
-    },
-    [catalog]
-  );
-  const nodeTemplates = useMemo<WorkspaceNodeTemplate[]>(
-    () => [
-      ...catalog.library.componentDescriptors.map(componentTemplate),
-      ...catalog.library.functionDescriptors.map(functionTemplate)
-    ],
-    [catalog]
-  );
-
-  return <ProjectWorkspaceApp environment={environment} nodeTemplates={nodeTemplates} />;
+  return <CatalogWorkspaceApp catalog={library.catalog} />;
 }
 
 function WorkspaceStatus({ message, tone = "default" }: { message: string; tone?: "default" | "error" }) {

@@ -48,6 +48,43 @@ export function PcbDesignerPanel({
   resolved: ResolvedProject;
   source: ProjectSource;
 }) {
+  if (!source.board) {
+    return (
+      <Panel className="grid h-full min-h-0 place-items-center overflow-hidden p-6">
+        <div className="max-w-md text-center">
+          <h2 className="text-sm font-semibold">No authored board</h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Add board dimensions before projecting footprints, placements, and ratsnest geometry.
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <AuthoredPcbDesignerPanel
+      catalog={catalog}
+      onSetComponentPlacement={onSetComponentPlacement}
+      onSourceSelectionChange={onSourceSelectionChange}
+      resolved={resolved}
+      source={source}
+    />
+  );
+}
+
+function AuthoredPcbDesignerPanel({
+  catalog,
+  onSetComponentPlacement,
+  onSourceSelectionChange,
+  resolved,
+  source
+}: {
+  catalog: DefinitionCatalog;
+  onSetComponentPlacement: (nodeId: string, placement: BoardComponentPlacement) => void;
+  onSourceSelectionChange: (selection: { edgeId?: string; nodeId?: string }) => void;
+  resolved: ResolvedProject;
+  source: ProjectSource;
+}) {
   const projection = useMemo(() => buildBoardProjection(source, resolved, catalog), [catalog, resolved, source]);
   const [placementPreview, setPlacementPreview] = useState<BoardPlacementPreview>();
   const visibleProjection = useMemo(

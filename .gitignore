@@ -1,5 +1,6 @@
 node_modules
 dist
+research-dist
 .turbo
 .vite
 .DS_Store

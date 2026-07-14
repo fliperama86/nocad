@@ -70,6 +70,7 @@ export function IntentGraphView({
   connectionFeedback,
   componentTemplates,
   className,
+  fitViewOnInit,
   graphRevision,
   isValidConnection,
   onAddComponent,
@@ -91,6 +92,7 @@ export function IntentGraphView({
   className?: string;
   connectionFeedback?: string;
   componentTemplates: ComponentTemplate[];
+  fitViewOnInit?: boolean;
   graphRevision: number;
   isValidConnection: (connection: Connection | Edge) => boolean;
   onAddComponent: (template: string) => void;
@@ -302,6 +304,8 @@ export function IntentGraphView({
             edges={flowEdges}
             edgesFocusable
             elementsSelectable
+            fitView={fitViewOnInit}
+            fitViewOptions={{ padding: 0.08 }}
             key={graphRevision}
             isValidConnection={isValidConnection}
             nodes={flowNodes}

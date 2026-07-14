@@ -66,9 +66,12 @@ export type WorkspaceProjectExample = {
 };
 
 export type ProjectWorkspaceAppProps = {
+  allowProjectReplacement?: boolean;
   environment: ResolutionEnvironment;
   examples?: WorkspaceProjectExample[];
+  initialGraphFitView?: boolean;
   initialPositions?: NodePositions;
+  initialPropertiesCollapsed?: boolean;
   initialSource?: ProjectSource;
   nodeTemplates?: WorkspaceNodeTemplate[];
 };
@@ -103,9 +106,12 @@ const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "json", label: "JSON" }
 ];
 export function ProjectWorkspaceApp({
+  allowProjectReplacement = true,
   environment,
   examples = [],
+  initialGraphFitView = false,
   initialPositions = {},
+  initialPropertiesCollapsed = false,
   initialSource,
   nodeTemplates = []
 }: ProjectWorkspaceAppProps) {
@@ -121,7 +127,7 @@ export function ProjectWorkspaceApp({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("graph");
-  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(initialPropertiesCollapsed);
   const [pendingConnection, setPendingConnection] = useState<PendingConnectionIntent>();
   const [connectionFeedback, setConnectionFeedback] = useState<string>();
   const [projectFeedback, setProjectFeedback] = useState<{ kind: "error" | "success"; message: string }>();
@@ -620,7 +626,7 @@ export function ProjectWorkspaceApp({
   }
 
   return (
-    <main className="h-svh overflow-hidden bg-background text-foreground">
+    <main className="h-full min-h-0 overflow-hidden bg-background text-foreground">
       <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 overflow-hidden px-3 py-3 sm:px-4">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
@@ -657,20 +663,24 @@ export function ProjectWorkspaceApp({
               >
                 Redo
               </button>
-              <button
-                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-              >
-                Load project
-              </button>
-              <input
-                accept=".json,application/json"
-                className="sr-only"
-                onChange={loadProjectFile}
-                ref={fileInputRef}
-                type="file"
-              />
+              {allowProjectReplacement ? (
+                <>
+                  <button
+                    className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                    onClick={() => fileInputRef.current?.click()}
+                    type="button"
+                  >
+                    Load project
+                  </button>
+                  <input
+                    accept=".json,application/json"
+                    className="sr-only"
+                    onChange={loadProjectFile}
+                    ref={fileInputRef}
+                    type="file"
+                  />
+                </>
+              ) : null}
               <button
                 className="h-8 rounded-md border border-border px-3 text-xs font-medium"
                 onClick={saveProjectFile}
@@ -678,23 +688,27 @@ export function ProjectWorkspaceApp({
               >
                 Save project
               </button>
-              <button
-                className="h-8 rounded-md border border-border px-3 text-xs font-medium"
-                onClick={clearCanvas}
-                type="button"
-              >
-                Clear
-              </button>
-              {examples.map((example) => (
-                <button
-                  className="h-8 rounded-md border border-border px-3 text-xs font-medium"
-                  key={example.id}
-                  onClick={() => loadExample(example)}
-                  type="button"
-                >
-                  Load {example.label}
-                </button>
-              ))}
+              {allowProjectReplacement ? (
+                <>
+                  <button
+                    className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                    onClick={clearCanvas}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                  {examples.map((example) => (
+                    <button
+                      className="h-8 rounded-md border border-border px-3 text-xs font-medium"
+                      key={example.id}
+                      onClick={() => loadExample(example)}
+                      type="button"
+                    >
+                      Load {example.label}
+                    </button>
+                  ))}
+                </>
+              ) : null}
             </div>
           </div>
           {projectFeedback ? (
@@ -729,6 +743,7 @@ export function ProjectWorkspaceApp({
                   catalog={catalog}
                   className="min-h-0"
                   componentTemplates={nodeTemplates}
+                  fitViewOnInit={initialGraphFitView}
                   graphRevision={graphRevision}
                   connectionFeedback={connectionFeedback}
                   isValidConnection={(connection) => isValidGraphConnection(source, catalog, connection)}
