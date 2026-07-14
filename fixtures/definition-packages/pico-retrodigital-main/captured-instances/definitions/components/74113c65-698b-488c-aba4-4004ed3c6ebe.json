@@ -1,0 +1,24 @@
+{
+  "id": "reference:pico-retrodigital-main:74113c65-698b-488c-aba4-4004ed3c6ebe",
+  "pins": {
+    "1": {
+      "name": "Terminal 1",
+      "capabilities": [
+        "passive.terminal"
+      ]
+    },
+    "2": {
+      "name": "Terminal 2",
+      "capabilities": [
+        "passive.terminal"
+      ]
+    }
+  },
+  "ports": {},
+  "properties": {
+    "resistance": {
+      "value": 220,
+      "unit": "ohm"
+    }
+  }
+}

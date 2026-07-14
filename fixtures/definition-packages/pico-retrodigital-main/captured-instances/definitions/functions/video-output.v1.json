@@ -1,0 +1,420 @@
+{
+  "id": "reference:pico-retrodigital-main:video_output.v1",
+  "include": {
+    "tmds": {
+      "kind": "boolean",
+      "label": "TMDS",
+      "default": true,
+      "readonly": true
+    },
+    "ddc": {
+      "kind": "boolean",
+      "label": "DDC",
+      "default": true
+    },
+    "hpd": {
+      "kind": "boolean",
+      "label": "HPD",
+      "default": false
+    },
+    "cec": {
+      "kind": "boolean",
+      "label": "CEC",
+      "default": true
+    },
+    "seriesTermination": {
+      "kind": "object",
+      "label": "Series termination",
+      "fields": {
+        "mode": {
+          "kind": "enum",
+          "label": "Mode",
+          "default": "required",
+          "options": [
+            {
+              "label": "Off",
+              "value": "off"
+            },
+            {
+              "label": "Required",
+              "value": "required"
+            }
+          ]
+        },
+        "value": {
+          "kind": "resistance",
+          "label": "Value",
+          "default": "220ohm"
+        }
+      }
+    }
+  },
+  "signalGroups": [
+    {
+      "id": "seriesTerminationR3Signal",
+      "include": "tmds",
+      "label": "D0-",
+      "signals": [
+        {
+          "id": "tmds0_n",
+          "label": "D0-",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR4Signal",
+      "include": "tmds",
+      "label": "CLK-",
+      "signals": [
+        {
+          "id": "clock_n",
+          "label": "CLK-",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR5Signal",
+      "include": "tmds",
+      "label": "CLK+",
+      "signals": [
+        {
+          "id": "clock_p",
+          "label": "CLK+",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR6Signal",
+      "include": "tmds",
+      "label": "D0+",
+      "signals": [
+        {
+          "id": "tmds0_p",
+          "label": "D0+",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR7Signal",
+      "include": "tmds",
+      "label": "D1-",
+      "signals": [
+        {
+          "id": "tmds1_n",
+          "label": "D1-",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR8Signal",
+      "include": "tmds",
+      "label": "D1+",
+      "signals": [
+        {
+          "id": "tmds1_p",
+          "label": "D1+",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR9Signal",
+      "include": "tmds",
+      "label": "D2-",
+      "signals": [
+        {
+          "id": "tmds2_n",
+          "label": "D2-",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "seriesTerminationR10Signal",
+      "include": "tmds",
+      "label": "D2+",
+      "signals": [
+        {
+          "id": "tmds2_p",
+          "label": "D2+",
+          "pinControl": "custom_only"
+        }
+      ]
+    },
+    {
+      "id": "ddc",
+      "include": "ddc",
+      "label": "DDC",
+      "signals": [
+        {
+          "id": "ddc_sda",
+          "label": "SDA",
+          "pinControl": "always"
+        },
+        {
+          "id": "ddc_scl",
+          "label": "SCL",
+          "pinControl": "always"
+        }
+      ]
+    },
+    {
+      "id": "hpd",
+      "include": "hpd",
+      "label": "HPD",
+      "signals": [
+        {
+          "id": "hpd",
+          "label": "HPD",
+          "pinControl": "always"
+        }
+      ]
+    },
+    {
+      "id": "cec",
+      "include": "cec",
+      "label": "CEC",
+      "signals": [
+        {
+          "id": "cec",
+          "label": "CEC",
+          "pinControl": "always"
+        }
+      ]
+    }
+  ],
+  "topology": {
+    "contract": "@nocad/video:hdmi_output.v1",
+    "inlineRules": [
+      {
+        "component": "reference:pico-retrodigital-main:3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r3",
+        "id": "seriesTerminationR3",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR3Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r4",
+        "id": "seriesTerminationR4",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR4Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:4c986f04-6d7f-4290-9132-6391a558e27c",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r5",
+        "id": "seriesTerminationR5",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR5Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:37ef8d23-5668-433f-bef2-7a60a9657bdd",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r6",
+        "id": "seriesTerminationR6",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR6Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:74113c65-698b-488c-aba4-4004ed3c6ebe",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r7",
+        "id": "seriesTerminationR7",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR7Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r8",
+        "id": "seriesTerminationR8",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR8Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:6297b249-f2ab-418b-a444-a4a6cf205c91",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r9",
+        "id": "seriesTerminationR9",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR9Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      },
+      {
+        "component": "reference:pico-retrodigital-main:7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+        "dependency": "reference:pico-retrodigital-main/captured-instances",
+        "enabledWhen": {
+          "field": "mode",
+          "values": [
+            "required"
+          ]
+        },
+        "generatedIdPrefix": "series-r10",
+        "id": "seriesTerminationR10",
+        "include": "seriesTermination",
+        "kind": "seriesInterposer",
+        "pins": {
+          "provider": "1",
+          "connector": "2"
+        },
+        "placement": {
+          "near": "provider"
+        },
+        "signals": {
+          "group": "seriesTerminationR10Signal"
+        },
+        "value": {
+          "default": "220ohm",
+          "includeField": "value"
+        }
+      }
+    ]
+  }
+}

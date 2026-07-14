@@ -36,4 +36,8 @@ const catalog = await loadBuiltInDefinitionCatalog();
 
 Additional package, network, or user-defined sources can implement `ComponentDefinitionSource` and be composed without changing loader behavior.
 
+Reference-local captured instances use a separate descriptor and loading path. `createCapturedPackageSource` accepts a `nocad.captured-definition-package.v1` manifest plus lazy payload loaders keyed by validated package-relative `definitionPath`. Captured component descriptors must declare `origin: captured-instance`, `visibility: dependency-only`, a UUID-keyed source identity, non-empty provenance, definition hashes, and exact capture facts. They cannot pass production descriptor validation.
+
+`loadDefinitionCatalogForDependencies` composes these sources with the built-in catalog only when the caller's project dependency map contains the package's exact name and version. Selected captured components and functions are exposed through separate `capturedComponentDescriptors` and `capturedFunctionDescriptors` arrays. Production descriptor arrays remain the normal authoring palette. Core `builtin` definitions remain available without an explicit project dependency for compatibility with existing projects.
+
 Board envelopes declare `accuracy`. Current interface-level geometry is marked `estimate`. `verified` is accepted only with structured source metadata for qualified geometry.

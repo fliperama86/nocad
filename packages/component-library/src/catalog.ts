@@ -6,7 +6,9 @@ import {
   validateFunctionDefinition
 } from "./catalog-validation";
 import { canonicalSha256, cloneJsonValue, deepFreeze, verifyCanonicalSha256 } from "./integrity";
+import { validateComponentDefinition } from "./validation";
 import type {
+  CapturedDefinitionPackageSource,
   ComponentDescriptor,
   ComponentPackageDescriptor,
   ContractDescriptor,
@@ -33,6 +35,80 @@ export function loadBuiltInDefinitionCatalog(): Promise<LoadedDefinitionCatalog>
   return builtInCatalogPromise;
 }
 
+export async function loadDefinitionCatalogForDependencies(
+  dependencies: Readonly<Record<string, string>>,
+  packageSources: readonly CapturedDefinitionPackageSource[]
+): Promise<LoadedDefinitionCatalog> {
+  const builtIn = await loadBuiltInDefinitionCatalog();
+  const selectedSources = selectDependencyPackageSources(dependencies, packageSources);
+  if (selectedSources.length === 0) return builtIn;
+
+  const components = { ...builtIn.components };
+  const functions = { ...builtIn.functions };
+  const capturedComponentDescriptors = [] as CapturedDefinitionPackageSource["componentDescriptors"][number][];
+  const capturedFunctionDescriptors = [] as CapturedDefinitionPackageSource["functionDescriptors"][number][];
+  const packages = { ...builtIn.library.packages };
+
+  for (const source of selectedSources) {
+    if (packages[source.package.name]) {
+      throw new InvalidLibraryDefinitionDescriptorError(
+        `duplicate selected package ${source.package.name}`
+      );
+    }
+    packages[source.package.name] = source.package;
+
+    for (const descriptor of source.componentDescriptors) {
+      if (components[descriptor.id]) {
+        throw new InvalidLibraryDefinitionDescriptorError(`duplicate component:${descriptor.id}`);
+      }
+      const value = await source.load("component", descriptor.id);
+      if (value === undefined) {
+        throw new InvalidLibraryDefinitionDescriptorError(`missing component:${descriptor.id} payload`);
+      }
+      const definition = validateComponentDefinition(cloneJsonValue(value), descriptor.id);
+      verifyCanonicalSha256(definition, descriptor.definitionHash, `component:${descriptor.id}`);
+      components[descriptor.id] = deepFreeze(definition);
+      capturedComponentDescriptors.push(descriptor);
+    }
+
+    for (const descriptor of source.functionDescriptors) {
+      if (functions[descriptor.id]) {
+        throw new InvalidLibraryDefinitionDescriptorError(`duplicate function:${descriptor.id}`);
+      }
+      const value = await source.load("function", descriptor.id);
+      if (value === undefined) {
+        throw new InvalidLibraryDefinitionDescriptorError(`missing function:${descriptor.id} payload`);
+      }
+      const definition = validateFunctionDefinition(cloneJsonValue(value), descriptor.id);
+      verifyCanonicalSha256(definition, descriptor.definitionHash, `function:${descriptor.id}`);
+      functions[descriptor.id] = deepFreeze({
+        ...definition,
+        dependency: {
+          name: descriptor.package.name,
+          version: descriptor.package.version
+        }
+      });
+      capturedFunctionDescriptors.push(descriptor);
+    }
+  }
+
+  const catalog: LoadedDefinitionCatalog = {
+    components,
+    contracts: builtIn.contracts,
+    functions,
+    library: {
+      capturedComponentDescriptors,
+      capturedFunctionDescriptors,
+      componentDescriptors: builtIn.library.componentDescriptors,
+      contractDescriptors: builtIn.library.contractDescriptors,
+      functionDescriptors: builtIn.library.functionDescriptors,
+      packages
+    }
+  };
+  validateDefinitionCatalogClosure(catalog);
+  return deepFreeze(catalog);
+}
+
 async function loadCatalog(): Promise<LoadedDefinitionCatalog> {
   const [componentDescriptors, components, contractResult, functionResult] = await Promise.all([
     builtInComponentLibrary.list(),
@@ -53,6 +129,8 @@ async function loadCatalog(): Promise<LoadedDefinitionCatalog> {
     contracts: contractResult.definitions,
     functions: functionResult.definitions,
     library: {
+      capturedComponentDescriptors: [],
+      capturedFunctionDescriptors: [],
       componentDescriptors,
       contractDescriptors,
       functionDescriptors,
@@ -61,6 +139,28 @@ async function loadCatalog(): Promise<LoadedDefinitionCatalog> {
   };
   validateDefinitionCatalogClosure(catalog);
   return deepFreeze(catalog);
+}
+
+function selectDependencyPackageSources(
+  dependencies: Readonly<Record<string, string>>,
+  packageSources: readonly CapturedDefinitionPackageSource[]
+): CapturedDefinitionPackageSource[] {
+  const selected = packageSources.filter(
+    ({ package: packageDescriptor }) =>
+      dependencies[packageDescriptor.name] === packageDescriptor.version
+  );
+  const identities = new Set<string>();
+  for (const source of selected) {
+    const identity = `${source.package.name}@${source.package.version}`;
+    if (identities.has(identity)) {
+      throw new InvalidLibraryDefinitionDescriptorError(`duplicate package source ${identity}`);
+    }
+    identities.add(identity);
+  }
+  return selected.sort((left, right) =>
+    left.package.name.localeCompare(right.package.name) ||
+    left.package.version.localeCompare(right.package.version)
+  );
 }
 
 async function loadEntries<TDefinition extends object, TDescriptor extends CatalogDataDescriptor>(

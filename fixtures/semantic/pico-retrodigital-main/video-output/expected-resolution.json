@@ -1,128 +1,556 @@
 {
-  "schema": "nocad.semantic-fixture-expectation.v1",
-  "project": "pico-retrodigital-main-video-output-logical-interface",
+  "schema": "nocad.semantic-fixture-expectation.v2",
+  "project": "pico-retrodigital-main-video-output-tmds-series-bank",
+  "counts": {
+    "authoredComponents": 10,
+    "authoredNets": 16,
+    "resolvedNets": 19
+  },
+  "components": [
+    {
+      "component": "@nocad/connectors:TE_1-1734839-4",
+      "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+      "refdesHint": "J3"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:37ef8d23-5668-433f-bef2-7a60a9657bdd",
+      "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+      "refdesHint": "R6"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+      "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+      "refdesHint": "R3"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:4c986f04-6d7f-4290-9132-6391a558e27c",
+      "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+      "refdesHint": "R5"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:6297b249-f2ab-418b-a444-a4a6cf205c91",
+      "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+      "refdesHint": "R9"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+      "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+      "refdesHint": "R4"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:74113c65-698b-488c-aba4-4004ed3c6ebe",
+      "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+      "refdesHint": "R7"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+      "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+      "refdesHint": "R10"
+    },
+    {
+      "component": "reference:pico-retrodigital-main:c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+      "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+      "refdesHint": "R8"
+    },
+    {
+      "component": "@nocad/rp2350:RP2354B",
+      "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+      "refdesHint": "U3"
+    }
+  ],
   "diagnostics": [],
   "generatedComponents": [],
-  "signals": [
+  "nets": [
     {
-      "signal": "cec",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio10"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "clock_n"
+        },
+        {
+          "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-clock-n-connector",
+      "name": "CLK-",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_n",
+        "feature": "seriesTerminationR4",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "cec"
+      "sourceEdge": "tmds-clock-n-connector",
+      "sourceMap": {
+        "edge": "tmds-clock-n-connector",
+        "signal": "tmds-clock-n-connector"
       }
     },
     {
-      "signal": "clock_n",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio12"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio12"
+        }
+      ],
+      "id": "net_tmds-clock-n-provider",
+      "name": "Net-(U3-GPIO12)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_n",
+        "feature": "seriesTerminationR4",
+        "segment": "provider"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "clock_n"
+      "sourceEdge": "tmds-clock-n-provider",
+      "sourceMap": {
+        "edge": "tmds-clock-n-provider",
+        "signal": "tmds-clock-n-provider"
       }
     },
     {
-      "signal": "clock_p",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio13"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "clock_p"
+        },
+        {
+          "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-clock-p-connector",
+      "name": "CLK+",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_p",
+        "feature": "seriesTerminationR5",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "clock_p"
+      "sourceEdge": "tmds-clock-p-connector",
+      "sourceMap": {
+        "edge": "tmds-clock-p-connector",
+        "signal": "tmds-clock-p-connector"
       }
     },
     {
-      "signal": "ddc_scl",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio9"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio13"
+        }
+      ],
+      "id": "net_tmds-clock-p-provider",
+      "name": "Net-(U3-GPIO13)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_p",
+        "feature": "seriesTerminationR5",
+        "segment": "provider"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "ddc_scl"
+      "sourceEdge": "tmds-clock-p-provider",
+      "sourceMap": {
+        "edge": "tmds-clock-p-provider",
+        "signal": "tmds-clock-p-provider"
       }
     },
     {
-      "signal": "ddc_sda",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio8"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds0_n"
+        },
+        {
+          "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds0-n-connector",
+      "name": "D0-",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_n",
+        "feature": "seriesTerminationR3",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "ddc_sda"
+      "sourceEdge": "tmds-tmds0-n-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds0-n-connector",
+        "signal": "tmds-tmds0-n-connector"
       }
     },
     {
-      "signal": "tmds0_n",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio14"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio14"
+        }
+      ],
+      "id": "net_tmds-tmds0-n-provider",
+      "name": "Net-(U3-GPIO14)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_n",
+        "feature": "seriesTerminationR3",
+        "segment": "provider"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds0_n"
+      "sourceEdge": "tmds-tmds0-n-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds0-n-provider",
+        "signal": "tmds-tmds0-n-provider"
       }
     },
     {
-      "signal": "tmds0_p",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio15"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds0_p"
+        },
+        {
+          "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds0-p-connector",
+      "name": "D0+",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_p",
+        "feature": "seriesTerminationR6",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds0_p"
+      "sourceEdge": "tmds-tmds0-p-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds0-p-connector",
+        "signal": "tmds-tmds0-p-connector"
       }
     },
     {
-      "signal": "tmds1_n",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio16"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio15"
+        }
+      ],
+      "id": "net_tmds-tmds0-p-provider",
+      "name": "Net-(U3-GPIO15)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_p",
+        "feature": "seriesTerminationR6",
+        "segment": "provider"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds1_n"
+      "sourceEdge": "tmds-tmds0-p-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds0-p-provider",
+        "signal": "tmds-tmds0-p-provider"
       }
     },
     {
-      "signal": "tmds1_p",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio17"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds1_n"
+        },
+        {
+          "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds1-n-connector",
+      "name": "D1-",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_n",
+        "feature": "seriesTerminationR7",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds1_p"
+      "sourceEdge": "tmds-tmds1-n-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds1-n-connector",
+        "signal": "tmds-tmds1-n-connector"
       }
     },
     {
-      "signal": "tmds2_n",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio18"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio16"
+        }
+      ],
+      "id": "net_tmds-tmds1-n-provider",
+      "name": "Net-(U3-GPIO16)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_n",
+        "feature": "seriesTerminationR7",
+        "segment": "provider"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds2_n"
+      "sourceEdge": "tmds-tmds1-n-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds1-n-provider",
+        "signal": "tmds-tmds1-n-provider"
       }
     },
     {
-      "signal": "tmds2_p",
-      "from": {
-        "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
-        "pin": "gpio19"
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds1_p"
+        },
+        {
+          "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds1-p-connector",
+      "name": "D1+",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_p",
+        "feature": "seriesTerminationR8",
+        "segment": "connector"
       },
-      "to": {
-        "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
-        "pin": "tmds2_p"
+      "sourceEdge": "tmds-tmds1-p-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds1-p-connector",
+        "signal": "tmds-tmds1-p-connector"
+      }
+    },
+    {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio17"
+        }
+      ],
+      "id": "net_tmds-tmds1-p-provider",
+      "name": "Net-(U3-GPIO17)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_p",
+        "feature": "seriesTerminationR8",
+        "segment": "provider"
+      },
+      "sourceEdge": "tmds-tmds1-p-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds1-p-provider",
+        "signal": "tmds-tmds1-p-provider"
+      }
+    },
+    {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds2_n"
+        },
+        {
+          "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds2-n-connector",
+      "name": "D2-",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_n",
+        "feature": "seriesTerminationR9",
+        "segment": "connector"
+      },
+      "sourceEdge": "tmds-tmds2-n-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds2-n-connector",
+        "signal": "tmds-tmds2-n-connector"
+      }
+    },
+    {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio18"
+        }
+      ],
+      "id": "net_tmds-tmds2-n-provider",
+      "name": "Net-(U3-GPIO18)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_n",
+        "feature": "seriesTerminationR9",
+        "segment": "provider"
+      },
+      "sourceEdge": "tmds-tmds2-n-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds2-n-provider",
+        "signal": "tmds-tmds2-n-provider"
+      }
+    },
+    {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds2_p"
+        },
+        {
+          "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+          "pin": "1"
+        }
+      ],
+      "id": "net_tmds-tmds2-p-connector",
+      "name": "D2+",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_p",
+        "feature": "seriesTerminationR10",
+        "segment": "connector"
+      },
+      "sourceEdge": "tmds-tmds2-p-connector",
+      "sourceMap": {
+        "edge": "tmds-tmds2-p-connector",
+        "signal": "tmds-tmds2-p-connector"
+      }
+    },
+    {
+      "boardKind": "highSpeed",
+      "direction": "from_to_to",
+      "endpoints": [
+        {
+          "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+          "pin": "2"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio19"
+        }
+      ],
+      "id": "net_tmds-tmds2-p-provider",
+      "name": "Net-(U3-GPIO19)",
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_p",
+        "feature": "seriesTerminationR10",
+        "segment": "provider"
+      },
+      "sourceEdge": "tmds-tmds2-p-provider",
+      "sourceMap": {
+        "edge": "tmds-tmds2-p-provider",
+        "signal": "tmds-tmds2-p-provider"
+      }
+    },
+    {
+      "direction": "bidirectional",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "cec"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio10"
+        }
+      ],
+      "id": "net_video-provider_cec",
+      "name": "HDMI_CEC",
+      "sourceEdge": "video-provider",
+      "sourceMap": {
+        "edge": "video-provider",
+        "signal": "cec"
+      }
+    },
+    {
+      "direction": "bidirectional",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "ddc_scl"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio9"
+        }
+      ],
+      "id": "net_video-provider_ddc_scl",
+      "name": "HDMI_DDC_SCL",
+      "sourceEdge": "video-provider",
+      "sourceMap": {
+        "edge": "video-provider",
+        "signal": "ddc_scl"
+      }
+    },
+    {
+      "direction": "bidirectional",
+      "endpoints": [
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "ddc_sda"
+        },
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio8"
+        }
+      ],
+      "id": "net_video-provider_ddc_sda",
+      "name": "HDMI_DDC_SDA",
+      "sourceEdge": "video-provider",
+      "sourceMap": {
+        "edge": "video-provider",
+        "signal": "ddc_sda"
       }
     }
   ],

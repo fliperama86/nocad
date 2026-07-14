@@ -18,6 +18,10 @@ The web development server exposes the snapshot only through the isolated `/fixt
 
 The snapshot is immutable and suitable for parser and structure regression work, but it is not yet qualified as a golden or redistributable fixture. Its manifest deliberately records `NOASSERTION` for the license and `unknown` for fabricated and hardware-tested status. The original HDMI breakout directory was untracked at capture time, so the fixture is pinned by content digest rather than an original source commit.
 
+The source-free semantic fixture at `fixtures/semantic/pico-retrodigital-main/video-output/` now exercises the first physical north-star topology slice. It authors ten physical components, U3, J3, and captured R3 through R10, and resolves the captured series bank as sixteen authored TMDS segments plus three direct DDC/CEC sideband nets. Resistor pin 2 is on each GPIO-side segment and pin 1 is on the corresponding CLK-, CLK+, D0-, D0+, D1-, D1+, D2-, or D2+ connector-side segment. Explicit realization links and terminal remapping reconcile those segments with the dependency-only series-interposer definitions while preserving captured component identities and leaving zero duplicate generated components. The fixture asserts nineteen complete resolved net records across representative source-edge orders.
+
+The captured definitions live in the content-pinned, reference-derived fixture package at `fixtures/definition-packages/pico-retrodigital-main/captured-instances/`. Keeping the derived package outside `references/north-star/` preserves the strict source-free reference closure. Loading requires an explicit project dependency, and its component and function descriptors remain outside normal production palettes. This preserves schematic UUIDs, 220 ohm values, 0402 footprint identities, board footprint and pad UUID evidence, and source provenance without inventing a manufacturer, tolerance, or procurement part number. The slice remains non-golden and does not yet represent source 5 V, connector ground, the CEC bias/protection circuit, the unverified HPD branch, placement, routing, fabrication, or hardware qualification. The production connector definition still supplies a logical exposure map rather than independently qualified intrinsic physical-pin metadata for this captured use.
+
 ## Product North Star
 
 The current Pico RetroDigital main board is nocad's product north star:
@@ -51,7 +55,7 @@ The north star should be built in integration slices rather than transcribed as 
 
 The order may change when the pinned reference reveals a dependency, but each slice must remain inspectable and preserve stable identities across later expansion.
 
-Reference parts that cannot yet be qualified by manufacturer and part number must not weaken the production catalog rules. Passives and support parts captured from this design belong in a reference-local, content-hash-pinned package. They are available to resolution only when the project explicitly depends on that package, and they do not appear in the normal component palette. A later qualification step may replace a captured instance with a production catalog definition without changing the authored component identity.
+Reference parts that cannot yet be qualified by manufacturer and part number must not weaken the production catalog rules. Passives and support parts captured from this design belong in a reference-derived, content-hash-pinned fixture definition package outside the strict source-free reference closure. They are available to resolution only when the project explicitly depends on that package, and they do not appear in the normal component palette. A later qualification step may replace a captured instance with a production catalog definition without changing the authored component identity.
 
 ### Integration Gates
 

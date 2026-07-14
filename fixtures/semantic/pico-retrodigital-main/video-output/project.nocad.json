@@ -1,11 +1,12 @@
 {
   "schema": "nocad.project.v0",
-  "id": "pico-retrodigital-main-video-output-logical-interface",
-  "name": "Pico RetroDigital main video output logical interface",
+  "id": "pico-retrodigital-main-video-output-tmds-series-bank",
+  "name": "Pico RetroDigital main video output TMDS series bank",
   "dependencies": {
     "@nocad/connectors": "0.1.0",
     "@nocad/rp2350": "0.1.0",
-    "@nocad/video": "0.1.0"
+    "@nocad/video": "0.1.0",
+    "reference:pico-retrodigital-main/captured-instances": "0.1.0"
   },
   "nodes": [
     {
@@ -19,13 +20,17 @@
     {
       "id": "video-output",
       "kind": "intent.function",
-      "function": "@nocad/video:hdmi_output.v1",
+      "function": "reference:pico-retrodigital-main:video_output.v1",
       "label": "HDMI-side FFC output",
       "include": {
         "tmds": true,
         "ddc": true,
         "hpd": false,
-        "cec": true
+        "cec": true,
+        "seriesTermination": {
+          "mode": "required",
+          "value": "220ohm"
+        }
       }
     },
     {
@@ -34,6 +39,70 @@
       "component": "@nocad/connectors:TE_1-1734839-4",
       "label": "HDMI-side FFC",
       "refdesHint": "J3"
+    },
+    {
+      "id": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R3 220 ohm series resistor",
+      "refdesHint": "R3"
+    },
+    {
+      "id": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R4 220 ohm series resistor",
+      "refdesHint": "R4"
+    },
+    {
+      "id": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:4c986f04-6d7f-4290-9132-6391a558e27c",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R5 220 ohm series resistor",
+      "refdesHint": "R5"
+    },
+    {
+      "id": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:37ef8d23-5668-433f-bef2-7a60a9657bdd",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R6 220 ohm series resistor",
+      "refdesHint": "R6"
+    },
+    {
+      "id": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:74113c65-698b-488c-aba4-4004ed3c6ebe",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R7 220 ohm series resistor",
+      "refdesHint": "R7"
+    },
+    {
+      "id": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R8 220 ohm series resistor",
+      "refdesHint": "R8"
+    },
+    {
+      "id": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:6297b249-f2ab-418b-a444-a4a6cf205c91",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R9 220 ohm series resistor",
+      "refdesHint": "R9"
+    },
+    {
+      "id": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+      "kind": "component",
+      "component": "reference:pico-retrodigital-main:7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+      "package": "Resistor_SMD:R_0402_1005Metric",
+      "label": "R10 220 ohm series resistor",
+      "refdesHint": "R10"
     }
   ],
   "edges": [
@@ -120,7 +189,81 @@
             "pin": "gpio10"
           }
         }
-      }
+      },
+      "generatedRealizations": [
+        {
+          "feature": "seriesTerminationR4",
+          "signal": "clock_n",
+          "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR5",
+          "signal": "clock_p",
+          "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR3",
+          "signal": "tmds0_n",
+          "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR6",
+          "signal": "tmds0_p",
+          "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR7",
+          "signal": "tmds1_n",
+          "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR8",
+          "signal": "tmds1_p",
+          "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR9",
+          "signal": "tmds2_n",
+          "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        },
+        {
+          "feature": "seriesTerminationR10",
+          "signal": "tmds2_p",
+          "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+          "terminals": {
+            "1": "2",
+            "2": "1"
+          }
+        }
+      ]
     },
     {
       "id": "video-exposure",
@@ -134,6 +277,342 @@
         "port": "hdmi"
       },
       "contract": "@nocad/video:hdmi_output.v1"
+    },
+    {
+      "id": "tmds-clock-n-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO12)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio12"
+        },
+        {
+          "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_n",
+        "feature": "seriesTerminationR4",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-clock-n-connector",
+      "kind": "net.authored",
+      "name": "CLK-",
+      "endpoints": [
+        {
+          "node": "node_699fdcbb-5f2e-4cf4-8507-c5f0b625ceaa",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "clock_n"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_n",
+        "feature": "seriesTerminationR4",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-clock-p-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO13)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio13"
+        },
+        {
+          "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_p",
+        "feature": "seriesTerminationR5",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-clock-p-connector",
+      "kind": "net.authored",
+      "name": "CLK+",
+      "endpoints": [
+        {
+          "node": "node_4c986f04-6d7f-4290-9132-6391a558e27c",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "clock_p"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "clock_p",
+        "feature": "seriesTerminationR5",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds0-n-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO14)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio14"
+        },
+        {
+          "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_n",
+        "feature": "seriesTerminationR3",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds0-n-connector",
+      "kind": "net.authored",
+      "name": "D0-",
+      "endpoints": [
+        {
+          "node": "node_3f3cf7d9-1e36-4a27-b666-65449dc42c44",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds0_n"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_n",
+        "feature": "seriesTerminationR3",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds0-p-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO15)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio15"
+        },
+        {
+          "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_p",
+        "feature": "seriesTerminationR6",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds0-p-connector",
+      "kind": "net.authored",
+      "name": "D0+",
+      "endpoints": [
+        {
+          "node": "node_37ef8d23-5668-433f-bef2-7a60a9657bdd",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds0_p"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds0_p",
+        "feature": "seriesTerminationR6",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds1-n-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO16)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio16"
+        },
+        {
+          "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_n",
+        "feature": "seriesTerminationR7",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds1-n-connector",
+      "kind": "net.authored",
+      "name": "D1-",
+      "endpoints": [
+        {
+          "node": "node_74113c65-698b-488c-aba4-4004ed3c6ebe",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds1_n"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_n",
+        "feature": "seriesTerminationR7",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds1-p-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO17)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio17"
+        },
+        {
+          "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_p",
+        "feature": "seriesTerminationR8",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds1-p-connector",
+      "kind": "net.authored",
+      "name": "D1+",
+      "endpoints": [
+        {
+          "node": "node_c488d161-5f6c-4b44-ac39-0e8f47b6486f",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds1_p"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds1_p",
+        "feature": "seriesTerminationR8",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds2-n-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO18)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio18"
+        },
+        {
+          "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_n",
+        "feature": "seriesTerminationR9",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds2-n-connector",
+      "kind": "net.authored",
+      "name": "D2-",
+      "endpoints": [
+        {
+          "node": "node_6297b249-f2ab-418b-a444-a4a6cf205c91",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds2_n"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_n",
+        "feature": "seriesTerminationR9",
+        "segment": "connector"
+      }
+    },
+    {
+      "id": "tmds-tmds2-p-provider",
+      "kind": "net.authored",
+      "name": "Net-(U3-GPIO19)",
+      "endpoints": [
+        {
+          "node": "node_d7a4ced3-fd77-4093-ba59-5c98b9d2e320",
+          "pin": "gpio19"
+        },
+        {
+          "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+          "pin": "2"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_p",
+        "feature": "seriesTerminationR10",
+        "segment": "provider"
+      }
+    },
+    {
+      "id": "tmds-tmds2-p-connector",
+      "kind": "net.authored",
+      "name": "D2+",
+      "endpoints": [
+        {
+          "node": "node_7aecee6e-638b-4fd1-ac9b-fb9df2ea1531",
+          "pin": "1"
+        },
+        {
+          "node": "node_36fdde7d-0e49-40d3-aa45-e5787f57e24c",
+          "pin": "tmds2_p"
+        }
+      ],
+      "realizes": {
+        "edge": "video-provider",
+        "signal": "tmds2_p",
+        "feature": "seriesTerminationR10",
+        "segment": "connector"
+      }
     }
   ]
 }

@@ -26,7 +26,32 @@ export function validateComponentDefinition(value: unknown, expectedId: string):
     validatePreferredPinGroups(definition.preferredPinGroups, expectedId, definition);
   }
 
+  if (definition.properties !== undefined) {
+    validateProperties(definition.properties, expectedId);
+  }
+
   return value as ComponentDefinition;
+}
+
+function validateProperties(value: unknown, id: string): void {
+  const properties = requireRecord(value, id, "properties");
+
+  for (const [propertyId, candidate] of Object.entries(properties)) {
+    requireNonEmptyString(propertyId, id, "property id");
+    if (
+      typeof candidate === "string" ||
+      typeof candidate === "boolean"
+    ) {
+      continue;
+    }
+    if (typeof candidate === "number") {
+      requireFinite(candidate, id, `property ${propertyId}`);
+      continue;
+    }
+    const quantity = requireRecord(candidate, id, `property ${propertyId}`);
+    requireFinite(quantity.value, id, `property ${propertyId}.value`);
+    requireNonEmptyString(quantity.unit, id, `property ${propertyId}.unit`);
+  }
 }
 
 function requireExactId(value: unknown, expectedId: string): void {
@@ -312,6 +337,13 @@ function requireNonEmptyString(value: unknown, id: string, field: string): strin
 function requirePositiveFinite(value: unknown, id: string, field: string): number {
   if (!isFiniteNumber(value) || value <= 0) {
     throw invalid(id, `${field} must be a positive finite number`);
+  }
+  return value;
+}
+
+function requireFinite(value: unknown, id: string, field: string): number {
+  if (!isFiniteNumber(value)) {
+    throw invalid(id, `${field} must be a finite number`);
   }
   return value;
 }

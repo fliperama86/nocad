@@ -141,7 +141,17 @@ export type ComponentDefinition = {
   pins: Record<string, PinDefinition>;
   ports: Record<string, PortDefinition>;
   preferredPinGroups?: PreferredPinGroupDefinition[];
+  properties?: Record<string, ComponentProperty>;
 };
+
+export type ComponentProperty =
+  | boolean
+  | number
+  | string
+  | {
+      unit: string;
+      value: number;
+    };
 
 export type ComponentBoardDefinition = {
   envelope: {

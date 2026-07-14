@@ -2,7 +2,16 @@ import { builtInComponentLibrary } from "./index-internal";
 
 export { builtInComponentEntries } from "./built-in-manifest";
 export { builtInContractEntries, builtInFunctionEntries } from "./catalog-manifest";
-export { loadBuiltInDefinitionCatalog, InvalidLibraryDefinitionDescriptorError } from "./catalog";
+export {
+  loadBuiltInDefinitionCatalog,
+  loadDefinitionCatalogForDependencies,
+  InvalidLibraryDefinitionDescriptorError
+} from "./catalog";
+export {
+  createCapturedPackageSource,
+  InvalidCapturedDefinitionPackageError,
+  validateCapturedDefinitionPackageManifest
+} from "./captured-package";
 export {
   DefinitionCatalogClosureError,
   InvalidCatalogDefinitionError,
@@ -29,6 +38,16 @@ export {
   verifyCanonicalSha256
 } from "./integrity";
 export type {
+  CapturedComponentDescriptor,
+  CapturedComponentFacts,
+  CapturedComponentSourceIdentity,
+  CapturedDefinitionPackageManifest,
+  CapturedDefinitionPackageSource,
+  CapturedFunctionDescriptor,
+  CapturedPackageDefinitionLoader,
+  CapturedPackageComponentEntry,
+  CapturedPackageEvidence,
+  CapturedPackageFunctionEntry,
   ComponentDefinitionModule,
   ComponentDefinitionSource,
   ComponentDescriptor,

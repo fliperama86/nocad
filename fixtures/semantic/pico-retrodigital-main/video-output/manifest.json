@@ -1,10 +1,10 @@
 {
   "schema": "nocad.semantic-fixture-manifest.v1",
-  "id": "pico-retrodigital-main-video-output-logical-interface",
+  "id": "pico-retrodigital-main-video-output-tmds-series-bank",
   "project": "project.nocad.json",
   "expectation": "expected-resolution.json",
   "status": {
-    "scope": "logical-interface-core",
+    "scope": "logical-interface-and-captured-tmds-series-bank",
     "exactPhysicalParity": false,
     "golden": false,
     "hardwareQualified": false,
@@ -14,20 +14,20 @@
     {
       "path": "README.md",
       "role": "documentation",
-      "bytes": 1147,
-      "sha256": "dbab9a7338bdab939afe3a3489def8610ed5beb669c1a60726db05bcae9de95b"
+      "bytes": 2256,
+      "sha256": "9e4f79aa0ef41f97e2b048359346d7b9b96e48aec77e69bc2c6b35fbeb180e44"
     },
     {
       "path": "expected-resolution.json",
       "role": "expectation",
-      "bytes": 3165,
-      "sha256": "e55af36e2342b08b3fdbb68f1b25375045b7dc7d95f2d4968a2bcc9bdd8b8d7c"
+      "bytes": 15167,
+      "sha256": "ffe575242fdfe3cc13d3be54b7e46e44777745400c19cfaf6e932b892806bf55"
     },
     {
       "path": "project.nocad.json",
       "role": "project",
-      "bytes": 3504,
-      "sha256": "f42a9802923f70d572e15393edd5f57ec794b401f3ce7a0b5e0c323344cddabb"
+      "bytes": 16379,
+      "sha256": "78b8cb5013629df8a0ad2b0cf567df242b498f56e02e53723c0179cea4ebaf9e"
     }
   ],
   "provenance": {
@@ -36,6 +36,11 @@
     "derivation": "manual-from-normalized-records",
     "referenceId": "pico-retrodigital-main",
     "artifacts": [
+      {
+        "path": "fixtures/definition-packages/pico-retrodigital-main/captured-instances/manifest.json",
+        "role": "captured-definition-package",
+        "sha256": "884692ae87d50e7fe113b84ba12df6ae36ed2fa7fb2ba97509c1cab4d39d0fe9"
+      },
       {
         "path": "references/north-star/pico-retrodigital-main/inventory.json",
         "role": "normalized-inventory",
@@ -57,7 +62,17 @@
     {
       "id": "auxiliary-power-and-bias",
       "status": "omitted",
-      "detail": "The source 5 V diode and decoupling path, CEC bias/protection path, and connector ground are outside this logical interface fixture."
+      "detail": "The source 5 V diode and decoupling path, CEC bias/protection path, and connector ground are outside this fixture."
+    },
+    {
+      "id": "captured-series-bank-qualification",
+      "status": "represented-unqualified",
+      "detail": "R3 through R10 preserve captured UUIDs, 220 ohm values, 0402 footprint identity, and connectivity, but manufacturer, tolerance, procurement identity, placement, and hardware qualification remain unknown."
+    },
+    {
+      "id": "connector-pin-identity",
+      "status": "logical-map-only",
+      "detail": "The TE connector definition supplies the exposure mapping; intrinsic independently qualified physical-pin metadata for this captured FFC use remains future work."
     },
     {
       "id": "hpd",
@@ -65,14 +80,12 @@
       "detail": "J3 pin 2 is auto-named in the pinned reference and its HPD role is unverified. HPD and the R2 10K pull-up branch to +5V are explicitly omitted."
     },
     {
-      "id": "physical-series-bank",
-      "status": "omitted",
-      "detail": "The eight captured 220 ohm 0402 series resistors have no qualified MPN and are not represented as generated or physical components."
-    },
-    {
       "id": "physical-parity",
       "status": "not-claimed",
-      "detail": "The fixture does not claim exact schematic, footprint, placement, routing, fabrication, or as-built parity."
+      "detail": "The fixture does not claim exact schematic drawing, placement, routing, fabrication, or as-built parity."
     }
+  ],
+  "definitionPackages": [
+    "fixtures/definition-packages/pico-retrodigital-main/captured-instances/manifest.json"
   ]
 }
